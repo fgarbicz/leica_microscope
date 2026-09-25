@@ -23,7 +23,15 @@ public:
     // call for every displayed frame; umPerPixel of that frame (for the scale bar)
     void push(const QImage &frame, double umPerPixel);
     void stop();                    // finishes the file
+    // false also once the recorder stopped by itself (write error or size
+    // limit); the caller must then call stop() and check lastError()/sizeLimitReached()
     bool isRecording() const { return m_running; }
+    // valid after stop(): empty unless writing the file failed
+    QString lastError() const { return m_error; }
+    // true when recording stopped because the file reached kMaxFileBytes
+    bool sizeLimitReached() const { return m_sizeLimit; }
+    // AVI 1.0 uses 32-bit offsets (signed in many players): stay well below 2 GB
+    static constexpr qint64 kMaxFileBytes = 1900LL * 1000 * 1000;
     int frames() const { return m_frames; }
     int dropped() const { return m_dropped; }
     double seconds() const;
@@ -38,6 +46,7 @@ private:
     std::condition_variable m_cv;
     std::deque<std::pair<QImage, double>> m_queue;
     std::atomic<bool> m_running{false};
+    std::atomic<bool> m_sizeLimit{false};
     std::atomic<int> m_frames{0}, m_dropped{0};
     std::atomic<qint64> m_bytes{0};
     double m_fps = 25;

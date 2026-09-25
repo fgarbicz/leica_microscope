@@ -8,6 +8,7 @@
 #include <QCoreApplication>
 #include <QGuiApplication>
 #include <QImage>
+#include <QImageReader>
 #include <QPainter>
 
 #include <cstdio>
@@ -18,6 +19,7 @@ using namespace lm;
 int main(int argc, char **argv)
 {
     QGuiApplication app(argc, argv);
+    QImageReader::setAllocationLimit(4096); // Qt 6 default (256 MB) rejects large scans
     if (argc < 2) {
         std::printf("usage: ihctool image.tif [--diam um] [--contrast od] [--minstain od] [--dab od] [--cyto] "
                     "[--estimate] [--overlay out.png]\n");

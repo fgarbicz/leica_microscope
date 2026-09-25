@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFile>
 #include <QIcon>
+#include <QImageReader>
 #include <QMessageBox>
 #include <QStandardPaths>
 #include <QTextStream>
@@ -50,6 +51,9 @@ int main(int argc, char **argv)
 {
     QApplication::setHighDpiScaleFactorRoundingPolicy(Qt::HighDpiScaleFactorRoundingPolicy::PassThrough);
     QApplication app(argc, argv);
+    // Qt 6 refuses to decode images needing more than 256 MB by default; large
+    // scans and stitched mosaics exceed that (memory failures are handled by the loaders)
+    QImageReader::setAllocationLimit(4096);
     QApplication::setOrganizationName(QStringLiteral("DM Imaging"));
     QApplication::setApplicationName(QStringLiteral("DM Imaging"));
     QApplication::setApplicationVersion(QStringLiteral("1.0.0"));
@@ -58,7 +62,14 @@ int main(int argc, char **argv)
     // log file for support
     const QString logDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(logDir);
-    g_log.setFileName(logDir + QStringLiteral("/dmimaging.log"));
+    const QString logPath = logDir + QStringLiteral("/dmimaging.log");
+    if (QFile::exists(logPath)) {
+        // keep the previous session's log (e.g. after a crash) as dmimaging.1.log
+        const QString prevPath = logDir + QStringLiteral("/dmimaging.1.log");
+        QFile::remove(prevPath);
+        QFile::rename(logPath, prevPath);
+    }
+    g_log.setFileName(logPath);
     if (g_log.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
         qInstallMessageHandler(messageHandler);
     SetUnhandledExceptionFilter(crashHandler);

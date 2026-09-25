@@ -7,6 +7,7 @@
 #include <QImageReader>
 #include <QImageWriter>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QSaveFile>
 
 #include <algorithm>
@@ -67,9 +68,21 @@ QByteArray inflate(const QByteArray &z, int expected)
     return qUncompress(withLen);
 }
 
+QString tooLargeForTiff()
+{
+    return QObject::tr("Image too large for TIFF (over 4 GB); save as smaller tiles or use compression");
+}
+
 } // namespace
 
 // ============================================================ TIFF writer
+qint64 tiffUncompressedSize(qint64 width, qint64 height, int bits)
+{
+    const qint64 bps = bits > 8 ? 2 : 1;
+    // header + pixel data + generous allowance for the IFD, strip tables and metadata
+    return 8 + width * height * 3 * bps + 1024 * 1024;
+}
+
 bool writeTiff(const QString &path, const Image16 &img, int bits, bool useDeflate, double umPerPixel,
                const QString &description, QString *error)
 {
@@ -78,6 +91,11 @@ bool writeTiff(const QString &path, const Image16 &img, int bits, bool useDeflat
         return false;
     }
     bits = bits > 8 ? 16 : 8;
+    // classic TIFF uses 32-bit offsets: refuse up front when the raw data cannot fit
+    if (!useDeflate && tiffUncompressedSize(img.width, img.height, bits) > kTiffMaxBytes) {
+        if (error) *error = tooLargeForTiff();
+        return false;
+    }
     const int w = img.width, h = img.height, bps = bits / 8;
     const int rowBytes = w * 3 * bps;
     const int rowsPerStrip = std::max(1, std::min(h, (256 * 1024) / std::max(1, rowBytes)));
@@ -122,16 +140,23 @@ bool writeTiff(const QString &path, const Image16 &img, int bits, bool useDeflat
     }
 
     // layout: header(8) | strips | IFD | out-of-line tag data
-    uint32_t offset = 8;
+    // offsets are computed in 64 bit and checked: they must fit the 32-bit TIFF fields
+    uint64_t offset = 8;
     std::vector<uint32_t> stripOffsets, stripCounts;
     for (auto &sd : stripData) {
-        stripOffsets.push_back(offset);
+        stripOffsets.push_back(uint32_t(offset));
         stripCounts.push_back(uint32_t(sd.size()));
-        offset += uint32_t(sd.size());
+        offset += uint64_t(sd.size());
         if (offset & 1)
             ++offset; // word alignment
     }
-    const uint32_t ifdOffset = offset;
+    // the IFD and its out-of-line data (description, strip tables) follow the strips
+    const uint64_t tail = 1024 + uint64_t(description.size()) * 4 + uint64_t(strips) * 8;
+    if (offset + tail > uint64_t(kTiffMaxBytes)) {
+        if (error) *error = tooLargeForTiff();
+        return false;
+    }
+    const uint32_t ifdOffset = uint32_t(offset);
 
     QByteArray desc = description.toUtf8();
     desc.append('\0');
@@ -139,7 +164,10 @@ bool writeTiff(const QString &path, const Image16 &img, int bits, bool useDeflat
     software.append('\0');
     QByteArray dt = QDateTime::currentDateTime().toString(QStringLiteral("yyyy:MM:dd HH:mm:ss")).toLatin1();
     dt.append('\0');
-    const double ppcm = umPerPixel > 0 ? 10000.0 / umPerPixel : 72.0 / 2.54;
+    // calibrated: pixels per centimetre. Uncalibrated: unit "none" with a neutral
+    // 1:1 ratio, so no reader mistakes it for a physical pixel size.
+    const bool calibrated = umPerPixel > 0;
+    const double ppcm = calibrated ? 10000.0 / umPerPixel : 1.0;
     const uint32_t resNum = uint32_t(std::min(4.0e9, std::round(ppcm * 1000.0))), resDen = 1000;
 
     std::vector<Entry> e;
@@ -157,7 +185,7 @@ bool writeTiff(const QString &path, const Image16 &img, int bits, bool useDeflat
     e.push_back({kXRes, tRational, 1, le32({resNum, resDen})});
     e.push_back({kYRes, tRational, 1, le32({resNum, resDen})});
     e.push_back({kPlanar, tShort, 1, le16({1})});
-    e.push_back({kResUnit, tShort, 1, le16({3})}); // centimetre
+    e.push_back({kResUnit, tShort, 1, le16({uint16_t(calibrated ? 3 : 1)})}); // centimetre / none
     e.push_back({kSoftware, tAscii, uint32_t(software.size()), software});
     e.push_back({kDateTime, tAscii, uint32_t(dt.size()), dt});
     if (useDeflate)
@@ -300,11 +328,14 @@ bool readTiff(const QString &path, Image16 &img, int &bits, QString &description
     if (rps == 0 || rps > h)
         rps = h;
     bits = int(b);
+    // Only a physical calibration counts: unit "none" is ignored, and so are
+    // resolutions below 20000 px/m (> 50 um/px), the same threshold as the PNG
+    // path. This also rejects the 72 dpi default written by older versions for
+    // uncalibrated images (which would otherwise read back as 352.8 um/px).
     umPerPixel = 0;
-    if (xres > 0 && resUnit == 3)
-        umPerPixel = 10000.0 / xres;
-    else if (xres > 0 && resUnit == 2 && xres > 1000) // plausible microscopy dpi
-        umPerPixel = 25400.0 / xres;
+    const double pxPerMetre = resUnit == 3 ? xres * 100.0 : resUnit == 2 ? xres / 0.0254 : 0.0;
+    if (pxPerMetre > kMinCalibratedPxPerMetre)
+        umPerPixel = 1e6 / pxPerMetre;
 
     img = Image16(int(w), int(h));
     const int bps = int(b / 8);
@@ -536,7 +567,11 @@ static bool loadImageImpl(const QString &path, LoadedImage &out, QString *error)
             out.sourceBitDepth = bits;
             if (!desc.isEmpty() && ImageMetadata::fromJsonString(desc, out.meta))
                 out.hasMeta = true;
-            if (um > 0 && out.meta.umPerPixel <= 0)
+            // the file's own DM Imaging metadata is authoritative, including 0 =
+            // uncalibrated; the resolution tag is only used for other files
+            const bool jsonHasPixelSize =
+                out.hasMeta && QJsonDocument::fromJson(desc.toUtf8()).object().contains(QLatin1String("umPerPixel"));
+            if (!jsonHasPixelSize && um > 0 && out.meta.umPerPixel <= 0)
                 out.meta.umPerPixel = um;
             return true;
         }
@@ -564,7 +599,7 @@ static bool loadImageImpl(const QString &path, LoadedImage &out, QString *error)
             }
         }
     }
-    if (out.meta.umPerPixel <= 0 && img.dotsPerMeterX() > 20000) // > 20 px/mm: physical calibration
+    if (out.meta.umPerPixel <= 0 && img.dotsPerMeterX() > kMinCalibratedPxPerMetre) // > 20 px/mm: physical calibration
         out.meta.umPerPixel = 1e6 / img.dotsPerMeterX();
     return true;
 }

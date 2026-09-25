@@ -47,6 +47,13 @@ QImage toQImage8(const Image8 &img);
 Image16 fromQImage(const QImage &img);
 
 // Low level TIFF
+// Classic TIFF stores 32-bit offsets: larger files cannot be written.
+constexpr qint64 kTiffMaxBytes = 0xFFFFFFFFLL;
+// Worst-case (uncompressed) TIFF file size in bytes for an RGB image.
+qint64 tiffUncompressedSize(qint64 width, qint64 height, int bits);
+// Resolutions at or below this (px per metre, i.e. >= 50 um/px) are not a
+// microscope calibration (e.g. the 72 dpi screen default) and are ignored.
+constexpr double kMinCalibratedPxPerMetre = 20000.0;
 bool writeTiff(const QString &path, const Image16 &img, int bits, bool deflate, double umPerPixel,
                const QString &description, QString *error);
 bool readTiff(const QString &path, Image16 &img, int &bits, QString &description, double &umPerPixel,
