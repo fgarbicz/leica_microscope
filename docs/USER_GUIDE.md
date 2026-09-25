@@ -63,7 +63,10 @@ file, so ImageJ/Fiji and QuPath show the correct µm scale.
 
 ## 4. Objectives and calibration
 
-The current objective is shown in the title bar. Select it in the *Microscope*
+The current objective is shown in the title bar. Each objective remembers its
+own exposure, gain and white balance; they are restored when you switch
+(*Remember exposure & white balance per objective* in the Microscope panel).
+ Select it in the *Microscope*
 panel or with Ctrl+1 … Ctrl+6. The post-capture window also updates it.
 
 The pixel size is computed from the camera adapter factor (*Camera adapter*,
@@ -84,13 +87,19 @@ the stage slowly. New areas are added automatically; the blue rectangle shows th
 current position, and red means the position was lost (move back over the already
 scanned area). Press *Finish & save*.
 
-## 7. Browse
+## 7. Video
+
+*Video recording* (Acquire panel): choose the frame rate, optionally include the
+scale bar, and press **Record video**. Press it again to stop. The AVI file is
+saved in the image folder and plays in Windows Media Player, VLC and PowerPoint.
+
+## 8. Browse
 
 Choose a folder on the left. Thumbnails, a preview and all metadata (objective,
 pixel size, exposure, date, …) are shown. Double-click an image to open it in
 Process.
 
-## 8. Process: measure and annotate
+## 9. Process: measure and annotate
 
 Tools in the toolbar:
 
@@ -109,7 +118,7 @@ CSV file). Annotations are saved automatically next to the image. *Export with
 overlays* writes an image with the scale bar and annotations burned in, ready
 for presentations.
 
-## 9. Keyboard shortcuts
+## 10. Keyboard shortcuts
 
 | Key | Action |
 |---|---|
@@ -125,12 +134,13 @@ for presentations.
 | Ctrl+drag / middle-drag | pan |
 | F11 | full screen |
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 | Problem | Solution |
 |---|---|
 | "No Leica camera found" | Check the USB cable (use a USB 3.0 port). Use *Tools → Install / repair camera driver*. |
 | Camera disconnected | The application reconnects automatically when the camera is back. |
+| "Sensor is not ready" | Unplug the camera's USB cable for 5 seconds and plug it back in. |
 | Colours wrong | Press Auto white balance on an empty field. |
 | Dark corners | Acquire a shading reference for this objective. |
 | Measurements wrong | Check the selected objective and calibrate with a stage micrometer. |

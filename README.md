@@ -19,6 +19,7 @@ daily imaging and includes its own native camera driver.
   - 16-shot 3840 × 2400
   - 36-shot 5760 × 3600
 - Automatic reconnection if the USB connection drops.
+- Video recording of the live image (Motion-JPEG AVI, optional scale bar).
 - Also supports any UVC/DirectShow camera and includes a simulator.
 
 **Image quality**
@@ -34,6 +35,7 @@ daily imaging and includes its own native camera driver.
 - Objectives 2.5×, 5×, 10×, 20×, 40× and 100×.
 - Calibration is nominal (from the camera adapter) or measured with a stage micrometer.
 - After every capture, a dialog asks for the **magnification and image name**.
+- Exposure, gain and white balance are remembered per objective.
 - Calibrated scale bar, grid and crosshair overlays.
 
 **Advanced acquisition**
