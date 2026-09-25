@@ -269,6 +269,8 @@ void BatchIhcDialog::run()
             row.strongPct = r.strong * 100;
             row.hScore = r.hScore;
             row.meanDabPositive = r.meanDabPositive;
+            if (r.lowBackground())
+                row.warning = tr("little bare glass in the field: DAB may be underestimated (include some background)");
             NucleusResult nr;
             if (countCells) {
                 const NucleusOptions no = nucleusOptionsFromSettings(li.meta.umPerPixel, o.dabThreshold);
@@ -411,6 +413,11 @@ void BatchIhcDialog::addRow(const Row &r)
     }
     set(ColObjective, r.objective, false);
     set(ColRegion, r.error.isEmpty() ? r.region : r.error, false);
+    if (!r.warning.isEmpty()) {
+        m_table->item(row, ColRegion)->setText(r.region + QStringLiteral(" ⚠"));
+        m_table->item(row, ColRegion)->setToolTip(r.warning);
+        m_table->item(row, ColRegion)->setForeground(QColor(232, 163, 61));
+    }
     const bool cal = r.umPerPixel > 0;
     set(ColTissue, cal ? formatArea(r.tissueArea) : tr("%1 px").arg(qint64(r.tissueArea)));
     set(ColPositive, QString::number(r.positivePct, 'f', 1));
@@ -469,7 +476,7 @@ QString BatchIhcDialog::csv(QChar sep) const
                                num(r.meanDabPositive, 4), counted ? QString::number(r.cells) : QString(),
                                counted ? QString::number(r.positiveCells) : QString(),
                                counted ? num(r.positiveCellPct, 2) : QString(), counted ? num(r.cellDensity, 1) : QString(),
-                               q(r.error)};
+                               q(r.error.isEmpty() ? r.warning : r.error)};
         out += f.join(sep) + QLatin1Char('\n');
     }
     return out;
@@ -605,7 +612,7 @@ void BatchIhcDialog::exportPdf()
     }
     h += QStringLiteral("</table>");
 
-    const bool anyNote = std::any_of(m_rows.begin(), m_rows.end(), [](const Row &r) { return !r.error.isEmpty(); });
+    const bool anyNote = std::any_of(m_rows.begin(), m_rows.end(), [](const Row &r) { return !r.error.isEmpty() || !r.warning.isEmpty(); });
     // "N PLAN 40x/0.65" -> "40x/0.65"
     auto shortObjective = [](const QString &o) {
         const int i = o.indexOf(QRegularExpression(QStringLiteral("[0-9.]+x")));
@@ -636,7 +643,7 @@ void BatchIhcDialog::exportPdf()
             row += r.cells < 0 ? td(QStringLiteral("–"), true) + td(QStringLiteral("–"), true)
                                : td(QString::number(r.cells), true) + td(QString::number(r.positiveCellPct, 'f', 1), true, true);
         if (anyNote)
-            row += QStringLiteral("<td>") + r.error.toHtmlEscaped() + QStringLiteral("</td>");
+            row += QStringLiteral("<td>") + (r.error.isEmpty() ? r.warning : r.error).toHtmlEscaped() + QStringLiteral("</td>");
         h += row + QStringLiteral("</tr>");
     }
     h += QStringLiteral("</table>");

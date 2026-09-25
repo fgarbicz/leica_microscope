@@ -271,6 +271,16 @@ static void testStains()
     // region restriction: only the DAB block
     StainResult rr = analyzeStains(img, opt, [](int x, int) { return x >= 220; });
     CHECK_NEAR(rr.positiveFraction, 1.0, 0.01);
+    // background estimate: this slide has bare glass; a field full of tissue does not
+    CHECK(!r.lowBackground());
+    {
+        Image16 dense(120, 80);
+        for (int y = 0; y < dense.height; ++y)
+            for (int x = 0; x < dense.width; ++x)
+                for (int c = 0; c < 3; ++c)
+                    dense.row(y)[x * 3 + c] = encode(std::pow(10.0, -0.4 * hv[c] / std::sqrt(0.65 * 0.65 + 0.704 * 0.704 + 0.286 * 0.286)));
+        CHECK(analyzeStains(dense, opt).lowBackground());
+    }
 
     // blank glass with isolated noisy pixels: not tissue when denoising
     {

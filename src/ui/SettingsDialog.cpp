@@ -149,7 +149,7 @@ AboutDialog::AboutDialog(const QString &cameraInfo, QWidget *parent) : QDialog(p
 {
     setWindowTitle(tr("About DM Imaging"));
     auto *lay = new QVBoxLayout(this);
-    auto *title = new QLabel(QStringLiteral("<h2>DM Imaging %1</h2>").arg(QCoreApplication::applicationVersion()), this);
+    auto *title = new QLabel(QStringLiteral("<h2>DM Imaging %1</h2><p>build " DMI_GIT_HASH "</p>").arg(QCoreApplication::applicationVersion()), this);
     lay->addWidget(title);
     auto *text = new QLabel(tr("<p>Image acquisition and analysis for the Leica DM2000 microscope.</p>"
                                "<p>Native driver for the Leica DMC6200 camera (Jenoptik GRYPHAX platform, "

@@ -961,7 +961,7 @@ ImageMetadata MainWindow::currentMetadata(const CaptureResult &r) const
 {
     const auto &S = AppSettings::instance();
     ImageMetadata m;
-    m.softwareVersion = QCoreApplication::applicationVersion();
+    m.softwareVersion = QCoreApplication::applicationVersion() + QStringLiteral(" (" DMI_GIT_HASH ")");
     m.acquired = QDateTime::currentDateTime();
     if (Camera *cam = m_engine->camera()) {
         const CameraInfo ci = cam->info();

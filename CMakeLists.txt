@@ -79,6 +79,14 @@ add_executable(DMImaging WIN32
     resources/app.rc
 )
 target_link_libraries(DMImaging PRIVATE lmcore Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Svg Qt6::PrintSupport)
+# commit of this build (About box, image metadata), refreshed on every configure
+find_package(Git QUIET)
+set(DMI_GIT_HASH "unknown")
+if(GIT_FOUND)
+    execute_process(COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                    OUTPUT_VARIABLE DMI_GIT_HASH OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+endif()
+target_compile_definitions(DMImaging PRIVATE DMI_GIT_HASH="${DMI_GIT_HASH}")
 install(TARGETS DMImaging RUNTIME DESTINATION .)
 
 # engine integration test (simulated camera)

@@ -25,6 +25,7 @@ public:
 
     struct Row {
         QString file, objective, region, error;
+        QString warning; // result valid but to be checked
         double umPerPixel = 0;
         QString colorCorrection; // from the image metadata (empty: not recorded)
         double tissueArea = 0, positiveArea = 0; // µm² when calibrated, else pixels

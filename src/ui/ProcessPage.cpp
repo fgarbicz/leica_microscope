@@ -633,7 +633,10 @@ void ProcessPage::analyzeIhcImpl(bool regionOnly, bool nuclei)
                              .arg(r.moderate * 100, 0, 'f', 1)
                              .arg(r.strong * 100, 0, 'f', 1)
                              .arg(r.hScore, 0, 'f', 0)
-                             .arg(r.meanDabPositive, 0, 'f', 3));
+                             .arg(r.meanDabPositive, 0, 'f', 3)
+                         + (r.lowBackground() ? tr("<br><span style='color:#e8a33d'>Little bare glass in this field: DAB values "
+                                                   "may be underestimated. Include some background in the image.</span>")
+                                              : QString()));
     m_ihcText = QStringLiteral("image\tregion\tDAB_threshold_OD\tDAB_positive_%\ttissue_area\tpositive_area\tweak_%\tmoderate_%\tstrong_%\tH_score\tmean_DAB_OD_pos\n")
                 + QStringList{QFileInfo(m_path).fileName(), regionName, QString::number(opt.dabThreshold),
                               QString::number(r.positiveFraction * 100, 'f', 2), area(r.tissueAreaUm2, r.tissuePixels),

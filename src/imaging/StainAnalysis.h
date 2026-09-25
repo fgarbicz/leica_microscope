@@ -4,6 +4,7 @@
 
 #include "core/Frame.h"
 
+#include <algorithm>
 #include <functional>
 #include <string>
 #include <vector>
@@ -38,6 +39,9 @@ struct StainResult {
     double weak = 0, moderate = 0, strong = 0;
     double hScore = 0.0;          // 1*weak + 2*moderate + 3*strong, in % (0..300)
     double background[3] = {1, 1, 1}; // estimated white level per channel
+    // true when the brightest part of the field is not bare glass (white level
+    // below 0.8): optical densities, and so DAB results, are then underestimated
+    bool lowBackground() const { return std::min({background[0], background[1], background[2]}) < 0.8; }
 };
 
 // Estimates the haematoxylin and DAB OD vectors of this slide from the image
