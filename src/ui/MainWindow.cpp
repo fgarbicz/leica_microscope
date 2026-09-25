@@ -1147,8 +1147,14 @@ void MainWindow::onCaptureFinished(std::shared_ptr<CaptureResult> r)
         m_gallery->addImage(path, thumbSrc);
         showMessage(tr("Saved %1 (%2 × %3)").arg(QDir::toNativeSeparators(path)).arg(r->rendered16.width).arg(r->rendered16.height), 6000);
         if (AppSettings::instance().capture.openInProcess && !m_timelapse.isActive()) {
-            m_process->openImage(r->rendered16, meta, path);
-            m_tabs->setCurrentIndex(2);
+            if (m_process->hasUnsavedResult()) { // don't replace an unsaved result without asking
+                showMessage(tr("Saved %1 (not opened in Process: the image there has not been saved)")
+                                .arg(QFileInfo(path).fileName()),
+                            8000);
+            } else {
+                m_process->openImage(r->rendered16, meta, path);
+                m_tabs->setCurrentIndex(2);
+            }
         }
     });
 }
@@ -1251,6 +1257,10 @@ bool MainWindow::eventFilter(QObject *o, QEvent *e)
 
 void MainWindow::closeEvent(QCloseEvent *e)
 {
+    if (!m_process->maybeDiscardUnsaved()) {
+        e->ignore();
+        return;
+    }
     if (m_capturing || m_engine->isBusy()) {
         if (QMessageBox::question(this, tr("Quit"), tr("A capture is in progress. Quit anyway?")) != QMessageBox::Yes) {
             e->ignore();

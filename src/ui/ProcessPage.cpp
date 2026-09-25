@@ -421,8 +421,25 @@ void ProcessPage::openDialog()
         openFile(f);
 }
 
+bool ProcessPage::maybeDiscardUnsaved()
+{
+    if (!hasUnsavedResult())
+        return true;
+    const auto answer = QMessageBox::question(
+        this, tr("Unsaved image"),
+        tr("The image in Process (a multifocus or stitched result) has not been saved. Save it first?"),
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+    if (answer == QMessageBox::Save) {
+        saveAs();
+        return !m_path.isEmpty(); // saved (Save as sets the path) or cancelled
+    }
+    return answer == QMessageBox::Discard;
+}
+
 bool ProcessPage::openFile(const QString &path)
 {
+    if (!maybeDiscardUnsaved())
+        return false;
     LoadedImage li;
     QString err;
     if (!loadImage(path, li, &err)) {
@@ -792,6 +809,8 @@ void ProcessPage::print()
 
 void ProcessPage::multifocusFromFiles()
 {
+    if (!maybeDiscardUnsaved())
+        return;
     const QStringList files = QFileDialog::getOpenFileNames(this, tr("Select images of a focus series"),
                                                             AppSettings::instance().browseFolder, tr(kFileFilter));
     if (files.size() < 2)
@@ -823,6 +842,8 @@ void ProcessPage::multifocusFromFiles()
 
 void ProcessPage::stitchFromFiles()
 {
+    if (!maybeDiscardUnsaved())
+        return;
     const QStringList files = QFileDialog::getOpenFileNames(this, tr("Select overlapping images in acquisition order"),
                                                             AppSettings::instance().browseFolder, tr(kFileFilter));
     if (files.size() < 2)
