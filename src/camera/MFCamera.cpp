@@ -1,7 +1,11 @@
 #include "MFCamera.h"
 
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #include <mfapi.h>
 #include <mferror.h>
@@ -23,6 +27,8 @@
 #pragma comment(lib, "ole32.lib")
 
 namespace lm {
+
+static const DWORD kVideoStream = DWORD(MF_SOURCE_READER_FIRST_VIDEO_STREAM);
 
 namespace {
 
@@ -152,7 +158,7 @@ bool MFCamera::open(std::string &error)
     std::map<std::pair<int, int>, Cand> best;
     for (DWORD i = 0;; ++i) {
         IMFMediaType *t = nullptr;
-        if (FAILED(m_reader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, i, &t)))
+        if (FAILED(m_reader->GetNativeMediaType(kVideoStream, i, &t)))
             break;
         UINT32 w = 0, h = 0, num = 0, den = 1;
         MFGetAttributeSize(t, MF_MT_FRAME_SIZE, &w, &h);
@@ -197,11 +203,11 @@ bool MFCamera::open(std::string &error)
 bool MFCamera::configureType(int index, std::string &error)
 {
     IMFMediaType *native = nullptr;
-    if (FAILED(m_reader->GetNativeMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, DWORD(m_typeIndex[index]), &native))) {
+    if (FAILED(m_reader->GetNativeMediaType(kVideoStream, DWORD(m_typeIndex[index]), &native))) {
         error = "Cannot get media type";
         return false;
     }
-    m_reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, native);
+    m_reader->SetCurrentMediaType(kVideoStream, nullptr, native);
     UINT32 w = 0, h = 0;
     MFGetAttributeSize(native, MF_MT_FRAME_SIZE, &w, &h);
     native->Release();
@@ -211,7 +217,7 @@ bool MFCamera::configureType(int index, std::string &error)
     out->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
     out->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
     MFSetAttributeSize(out, MF_MT_FRAME_SIZE, w, h);
-    HRESULT hr = m_reader->SetCurrentMediaType(MF_SOURCE_READER_FIRST_VIDEO_STREAM, nullptr, out);
+    HRESULT hr = m_reader->SetCurrentMediaType(kVideoStream, nullptr, out);
     out->Release();
     if (FAILED(hr)) {
         error = "Cannot configure RGB32 output";
@@ -403,7 +409,7 @@ void MFCamera::run()
             std::lock_guard<std::mutex> lock(m_mutex);
             if (!m_reader)
                 break;
-            hr = m_reader->ReadSample(MF_SOURCE_READER_FIRST_VIDEO_STREAM, 0, &streamIndex, &flags, &ts, &sample);
+            hr = m_reader->ReadSample(kVideoStream, 0, &streamIndex, &flags, &ts, &sample);
             w = m_outW;
             h = m_outH;
         }

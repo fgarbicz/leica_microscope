@@ -65,8 +65,8 @@ int main(int argc, char **argv)
             printf("  -- live exposure write 5000us: %s\n", ok ? "ok" : p.lastError().c_str());
         }
         if (i == 2 * frames / 3) {
-            bool ok = p.writeRegister(dmc::Reg::GainA, 120);
-            printf("  -- live gain write reg 0x1070=120: %s\n", ok ? "ok" : p.lastError().c_str());
+            bool ok = p.writeRegister(dmc::Reg::Reg1013, 0x20000);
+            printf("  -- live write 0x1013=0x20000 (gain 2.0?): %s\n", ok ? "ok" : p.lastError().c_str());
         }
         dmc::FrameEvent ev;
         if (!p.waitFrameEvent(ev, 3000)) {
@@ -95,6 +95,7 @@ int main(int argc, char **argv)
     printf("%d/%d frames in %.2fs = %.1f fps\n", got, frames, dt, got / dt);
     p.acquisition(dmc::Acq::Stop);
     p.acquisition(dmc::Acq::Flush);
-    p.writeRegister(dmc::Reg::GainA, 46);
+    p.writeRegister(dmc::Reg::Reg1013, 0x10000);
+    printf("restore sequence: %s\n", p.uploadSequence(liveSequence(46, 46)) ? "ok" : p.lastError().c_str());
     return 0;
 }

@@ -6,6 +6,6 @@ $vs = if (Test-Path $vswhere) { & $vswhere -latest -products * -property install
 if (-not $vs) { $vs = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools" }
 $bat = Join-Path $vs 'VC\Auxiliary\Build\vcvarsall.bat'
 $target = if ($Arch -eq 'x86') { 'x64_x86' } else { 'x64' }
-cmd /c "`"$bat`" $target >nul && set" | ForEach-Object {
+cmd /c "`"$bat`" $target >nul 2>nul && set" | ForEach-Object {
     if ($_ -match '^([^=]+)=(.*)$') { Set-Item -Path "env:$($Matches[1])" -Value $Matches[2] }
 }

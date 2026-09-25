@@ -89,6 +89,27 @@ public:
     // white balance etc.) or already processed by camera/driver.
     virtual bool deliversRaw() const { return true; }
 
+    // Multi-shot (sensor shift) capture modes, e.g. "4-shot true colour".
+    struct ShotMode {
+        std::string name;
+        int shots = 1;
+        int upscale = 1;      // output resolution factor
+        std::vector<std::pair<double, double>> offsets; // nominal sensor offsets (pixels)
+    };
+    virtual std::vector<ShotMode> shotModes() const { return {}; }
+    // Captures all shots of a mode. Blocks; live streaming is paused and
+    // resumed internally. `progress` is called with (done, total).
+    virtual bool captureShots(int modeIndex, std::vector<RawFramePtr> &shots, std::string &error,
+                              const std::function<void(int, int)> &progress = {})
+    {
+        (void)modeIndex; (void)shots; (void)progress;
+        error = "multi-shot capture not supported";
+        return false;
+    }
+
+    // Human readable device details (sensor, firmware, ...), shown in the UI.
+    virtual std::vector<std::pair<std::string, std::string>> details() const { return {}; }
+
     void setFrameCallback(FrameCallback cb)
     {
         std::lock_guard<std::mutex> l(m_cbMutex);

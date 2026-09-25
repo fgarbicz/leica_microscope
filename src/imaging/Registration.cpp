@@ -122,11 +122,18 @@ Shift phaseCorrelate(const ImageF &ref, const ImageF &mov)
         }
     fft2d(A, W, H, false);
     fft2d(B, W, H, false);
+    // Normalised cross power spectrum. The regularisation (relative to the
+    // strongest component) keeps numerically empty frequencies from being
+    // amplified to unit magnitude, which would drown the true peak for smooth
+    // or low-texture images.
+    float maxMag = 0.f;
     for (size_t i = 0; i < A.size(); ++i) {
-        std::complex<float> c = A[i] * std::conj(B[i]);
-        float m = std::abs(c);
-        A[i] = m > 1e-12f ? c / m : std::complex<float>(0, 0);
+        A[i] = A[i] * std::conj(B[i]);
+        maxMag = std::max(maxMag, std::abs(A[i]));
     }
+    const float eps = std::max(1e-20f, maxMag * 1e-6f);
+    for (auto &c : A)
+        c /= (std::abs(c) + eps);
     fft2d(A, W, H, true);
 
     int bx = 0, by = 0;
