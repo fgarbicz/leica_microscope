@@ -21,11 +21,6 @@
 
 namespace lm::usb {
 
-struct WinUsbDevice::AsyncRead {
-    OVERLAPPED ov{};
-    uint8_t ep = 0;
-};
-
 std::string win32ErrorText(unsigned long code)
 {
     char *msg = nullptr;
@@ -145,32 +140,46 @@ int WinUsbDevice::control(uint8_t requestType, uint8_t request, uint16_t value, 
 }
 
 namespace {
+// Owns a manual-reset Win32 event (h is null if creation failed).
+struct EventHandle {
+    HANDLE h = CreateEventA(nullptr, TRUE, FALSE, nullptr);
+    EventHandle() = default;
+    EventHandle(const EventHandle &) = delete;
+    EventHandle &operator=(const EventHandle &) = delete;
+    ~EventHandle()
+    {
+        if (h)
+            CloseHandle(h);
+    }
+};
+
 long long syncTransfer(void *h, uint8_t ep, void *data, size_t len, unsigned timeoutMs, bool isRead,
                        unsigned long &lastError)
 {
+    EventHandle event;
+    if (!event.h) {
+        lastError = GetLastError();
+        return -1;
+    }
     OVERLAPPED ov{};
-    ov.hEvent = CreateEventA(nullptr, TRUE, FALSE, nullptr);
+    ov.hEvent = event.h;
     ULONG done = 0;
     BOOL ok = isRead ? WinUsb_ReadPipe(h, ep, static_cast<PUCHAR>(data), ULONG(len), &done, &ov)
                      : WinUsb_WritePipe(h, ep, static_cast<PUCHAR>(const_cast<void *>(data)), ULONG(len), &done, &ov);
     if (!ok && GetLastError() != ERROR_IO_PENDING) {
         lastError = GetLastError();
-        CloseHandle(ov.hEvent);
         return -1;
     }
     if (WaitForSingleObject(ov.hEvent, timeoutMs) != WAIT_OBJECT_0) {
         WinUsb_AbortPipe(h, ep);
         WinUsb_GetOverlappedResult(h, &ov, &done, TRUE);
         lastError = ERROR_SEM_TIMEOUT;
-        CloseHandle(ov.hEvent);
         return -1;
     }
     if (!WinUsb_GetOverlappedResult(h, &ov, &done, FALSE)) {
         lastError = GetLastError();
-        CloseHandle(ov.hEvent);
         return -1;
     }
-    CloseHandle(ov.hEvent);
     return done;
 }
 } // namespace
@@ -256,52 +265,6 @@ std::string WinUsbDevice::getString(uint8_t index, uint16_t lang)
     std::string s(size_t(n), '\0');
     WideCharToMultiByte(CP_UTF8, 0, w.c_str(), int(w.size()), s.data(), n, nullptr, nullptr);
     return s;
-}
-
-WinUsbDevice::AsyncRead *WinUsbDevice::beginRead(uint8_t ep, uint8_t *buffer, size_t len)
-{
-    auto *r = new AsyncRead();
-    r->ep = ep;
-    r->ov.hEvent = CreateEventA(nullptr, TRUE, FALSE, nullptr);
-    if (!WinUsb_ReadPipe(m_winusb, ep, buffer, ULONG(len), nullptr, &r->ov) && GetLastError() != ERROR_IO_PENDING) {
-        m_lastError = GetLastError();
-        CloseHandle(r->ov.hEvent);
-        delete r;
-        return nullptr;
-    }
-    return r;
-}
-
-long long WinUsbDevice::finishRead(AsyncRead *r, unsigned timeoutMs, bool &timedOut)
-{
-    timedOut = false;
-    if (!r)
-        return -1;
-    DWORD w = WaitForSingleObject(r->ov.hEvent, timeoutMs);
-    if (w == WAIT_TIMEOUT) {
-        timedOut = true;
-        return -1; // request still pending; caller may wait again or cancel
-    }
-    ULONG done = 0;
-    long long res = -1;
-    if (WinUsb_GetOverlappedResult(m_winusb, &r->ov, &done, FALSE))
-        res = done;
-    else
-        m_lastError = GetLastError();
-    CloseHandle(r->ov.hEvent);
-    delete r;
-    return res;
-}
-
-void WinUsbDevice::cancelRead(AsyncRead *r)
-{
-    if (!r)
-        return;
-    WinUsb_AbortPipe(m_winusb, r->ep);
-    ULONG done = 0;
-    WinUsb_GetOverlappedResult(m_winusb, &r->ov, &done, TRUE);
-    CloseHandle(r->ov.hEvent);
-    delete r;
 }
 
 } // namespace lm::usb

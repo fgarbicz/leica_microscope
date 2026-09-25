@@ -52,13 +52,6 @@ public:
     std::string getString(uint8_t index, uint16_t lang = 0x0409);
     std::vector<uint8_t> getDescriptor(uint8_t type, uint8_t index, uint16_t lang, uint16_t length);
 
-    // Overlapped read support for high-throughput streaming.
-    struct AsyncRead;
-    AsyncRead *beginRead(uint8_t ep, uint8_t *buffer, size_t len);
-    // Waits for completion; returns bytes read or -1. Releases the request.
-    long long finishRead(AsyncRead *req, unsigned timeoutMs, bool &timedOut);
-    void cancelRead(AsyncRead *req);
-
     unsigned long lastError() const { return m_lastError; }
     std::string lastErrorText() const;
 

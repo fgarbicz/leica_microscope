@@ -58,6 +58,7 @@ public:
 
 private:
     struct Roi { int x, y, w, h; };
+    void stopAndFlush();                        // stop + flush acquisition, reset stream pipes
     bool configure(std::string &error);         // stop + registers + sequence
     bool startLiveLocked(std::string &error);
     void stopLiveLocked();

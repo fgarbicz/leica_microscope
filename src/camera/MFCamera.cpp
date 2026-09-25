@@ -132,7 +132,10 @@ bool MFCamera::open(std::string &error)
         return true;
     const std::string link = m_info.id.substr(3);
     IMFAttributes *attr = nullptr;
-    MFCreateAttributes(&attr, 2);
+    if (FAILED(MFCreateAttributes(&attr, 2)) || !attr) {
+        error = "Cannot open video device (MFCreateAttributes failed)";
+        return false;
+    }
     attr->SetGUID(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE, MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
     attr->SetString(MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK, widen(link).c_str());
     HRESULT hr = MFCreateDeviceSource(attr, &m_source);
@@ -142,12 +145,15 @@ bool MFCamera::open(std::string &error)
         return false;
     }
     IMFAttributes *rattr = nullptr;
-    MFCreateAttributes(&rattr, 2);
-    rattr->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
-    rattr->SetUINT32(MF_READWRITE_DISABLE_CONVERTERS, FALSE);
-    hr = MFCreateSourceReaderFromMediaSource(m_source, rattr, &m_reader);
-    rattr->Release();
-    if (FAILED(hr)) {
+    hr = MFCreateAttributes(&rattr, 2);
+    if (SUCCEEDED(hr) && rattr) {
+        rattr->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE);
+        rattr->SetUINT32(MF_READWRITE_DISABLE_CONVERTERS, FALSE);
+        hr = MFCreateSourceReaderFromMediaSource(m_source, rattr, &m_reader);
+        rattr->Release();
+    }
+    if (FAILED(hr) || !m_reader) {
+        m_source->Shutdown();
         safeRelease(m_source);
         error = "Cannot create source reader";
         return false;
@@ -284,7 +290,14 @@ bool MFCamera::startStreaming(std::string &error)
     if (m_thread.joinable())
         m_thread.join();
     m_streaming = true;
-    m_thread = std::thread([this] { run(); });
+    m_thread = std::thread([this] {
+        try {
+            run();
+        } catch (...) {
+            m_streaming = false;
+            emitCurrentException("Video stream stopped: ");
+        }
+    });
     return true;
 }
 

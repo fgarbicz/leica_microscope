@@ -5,6 +5,7 @@
 #include "core/Frame.h"
 
 #include <array>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -148,6 +149,23 @@ protected:
         }
         if (cb)
             cb(e);
+    }
+    // For catch blocks of thread entry functions: reports the exception being
+    // handled through emitError(). Never throws (an exception escaping a thread
+    // would terminate the application).
+    void emitCurrentException(const char *context) noexcept
+    {
+        try {
+            std::string what = "unknown error";
+            try {
+                throw;
+            } catch (const std::exception &e) {
+                what = e.what();
+            } catch (...) {
+            }
+            emitError(std::string(context) + what);
+        } catch (...) {
+        }
     }
 
 private:
