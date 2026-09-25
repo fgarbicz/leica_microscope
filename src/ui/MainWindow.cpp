@@ -989,6 +989,10 @@ ImageMetadata MainWindow::currentMetadata(const CaptureResult &r) const
     m.gamma = cs.gamma;
     m.saturation = cs.saturation;
     m.blackLevel = cs.blackLevel;
+    if (!cs.grayscale && (cs.filterTemperature != 0.0 || cs.filterTint != 0.0))
+        m.lightFilter = QStringLiteral("temperature %1, tint %2")
+                            .arg(cs.filterTemperature, 0, 'f', 0)
+                            .arg(cs.filterTint, 0, 'f', 0);
     m.shadingCorrected = m_engine->shadingEnabled() && m_engine->shading();
     {
         static const std::array<double, 9> identity{1, 0, 0, 0, 1, 0, 0, 0, 1};

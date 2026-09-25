@@ -56,7 +56,7 @@ int main(int argc, char **argv)
     QImageReader::setAllocationLimit(4096);
     QApplication::setOrganizationName(QStringLiteral("DM Imaging"));
     QApplication::setApplicationName(QStringLiteral("DM Imaging"));
-    QApplication::setApplicationVersion(QStringLiteral("1.0.0"));
+    QApplication::setApplicationVersion(QStringLiteral("1.0.1"));
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/app.png")));
 
     // log file for support

@@ -192,6 +192,31 @@ static void testPipeline()
         cp.applyLinear(plain);
         CHECK(plain.row(0)[3] == 40000 && plain.row(0)[5] == 20000);
     }
+    {
+        std::printf("light filter\n");
+        const auto n = lightFilterGains(0, 0);
+        CHECK(n[0] == 1.0 && n[1] == 1.0 && n[2] == 1.0);
+        const auto cool = lightFilterGains(60, 0);
+        CHECK(cool[2] == 1.0 && cool[0] < 0.8 && cool[1] < 1.0 && cool[1] > cool[0]);
+        const auto warm = lightFilterGains(-60, 0);
+        CHECK(warm[0] == 1.0 && warm[2] < 0.8);
+        const auto mag = lightFilterGains(0, 50);
+        CHECK(mag[0] == 1.0 && mag[2] == 1.0 && mag[1] < 1.0);
+        const auto grn = lightFilterGains(0, -50);
+        CHECK(grn[1] == 1.0 && grn[0] < 1.0);
+        const auto clamped = lightFilterGains(1000, 0);
+        CHECK(clamped == lightFilterGains(100, 0));
+        // grey stays unclipped and turns blue with a cooling filter
+        ColorSettings cs;
+        cs.srgbEncode = false;
+        cs.filterTemperature = 60;
+        ColorPipeline cp;
+        cp.update(cs);
+        Image16 px(1, 1);
+        px.row(0)[0] = px.row(0)[1] = px.row(0)[2] = 60000;
+        cp.applyLinear(px);
+        CHECK(px.row(0)[2] >= 59900 && px.row(0)[0] < px.row(0)[1] && px.row(0)[1] < px.row(0)[2]);
+    }
 }
 
 static void testFastPreview()

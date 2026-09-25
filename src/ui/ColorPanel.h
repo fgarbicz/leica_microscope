@@ -38,6 +38,9 @@ private:
     ColorSettings m_s;
     bool m_updating = false;
     QComboBox *m_presets;
+    QComboBox *m_filterPresets;
+    SliderSpin *m_filterTemp, *m_filterTint;
+    void syncFilterPreset();
     SliderSpin *m_wbR, *m_wbG, *m_wbB;
     SliderSpin *m_black;
     SliderSpin *m_blackPoint, *m_whitePoint;

@@ -30,7 +30,8 @@ QVariantMap colorToVariant(const ColorSettings &c)
             {"sharpen", c.sharpenAmount}, {"sharpenRadius", c.sharpenRadius},
             {"flipH", c.flipHorizontal},  {"flipV", c.flipVertical},    {"rotation", c.rotation},
             {"grayscale", c.grayscale},   {"invert", c.invert},
-            {"colorCorrection", c.colorCorrection}};
+            {"colorCorrection", c.colorCorrection},
+            {"filterTemperature", c.filterTemperature}, {"filterTint", c.filterTint}};
 }
 
 ColorSettings colorFromVariant(const QVariantMap &m)
@@ -58,6 +59,8 @@ ColorSettings colorFromVariant(const QVariantMap &m)
     c.grayscale = b("grayscale", false);
     c.invert = b("invert", false);
     c.colorCorrection = b("colorCorrection", true);
+    c.filterTemperature = std::clamp(d("filterTemperature", 0), -100.0, 100.0);
+    c.filterTint = std::clamp(d("filterTint", 0), -100.0, 100.0);
     return c;
 }
 

@@ -28,6 +28,7 @@ public:
         QString warning; // result valid but to be checked
         double umPerPixel = 0;
         QString colorCorrection; // from the image metadata (empty: not recorded)
+        QString lightFilter;     // from the image metadata (empty: none)
         double tissueArea = 0, positiveArea = 0; // µm² when calibrated, else pixels
         double positivePct = 0, weakPct = 0, moderatePct = 0, strongPct = 0;
         double hScore = 0, meanDabPositive = 0;

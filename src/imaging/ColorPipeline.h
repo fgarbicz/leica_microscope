@@ -49,6 +49,11 @@ struct ColorSettings {
     // user switch it off.
     bool colorCorrection = true;
     std::array<double, 9> cameraMatrix{1, 0, 0, 0, 1, 0, 0, 0, 1};
+    // light filter: emulates a colour filter in front of the lamp, applied after
+    // white balance. Temperature -100 (warm / yellow) .. +100 (cool / blue),
+    // tint -100 (green) .. +100 (magenta); 0 = no filter.
+    double filterTemperature = 0.0;
+    double filterTint = 0.0;
 
     bool operator==(const ColorSettings &) const = default;
 };
@@ -99,6 +104,10 @@ private:
     uint16_t m_black = 0;
     float m_blackScale = 1.f;
 };
+
+// Per-channel gains (R, G, B) of the light filter; the largest gain is 1 so a
+// white background never clips.
+std::array<double, 3> lightFilterGains(double temperature, double tint);
 
 // Geometry & sharpening helpers (exposed for reuse by capture/export).
 Image16 applyGeometry(const Image16 &in, bool flipH, bool flipV, int rotation);

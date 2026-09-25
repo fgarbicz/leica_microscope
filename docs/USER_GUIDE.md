@@ -32,6 +32,13 @@ The window has three workspaces (tabs at the top):
    *Camera colour correction* (Colour panel, on by default) applies the sensor's calibrated
    colour matrix (IMX174 under halogen light), so DAB, haematoxylin and eosin look as in the
    eyepieces. Extra *Saturation* is rarely needed.
+   **Light filter** (Colour panel): emulates a colour filter in front of the lamp. The halogen
+   lamp is slightly yellow; a blue filter (*Light blue 82A*, *Medium blue 80C*, *Daylight blue
+   80B*, ...) gives a cleaner, whiter-looking background and crisper stain contrast. Warming
+   (81, 85) and green / magenta correction filters are also available, and *Warm ↔ Cool* and
+   *Green ↔ Magenta* allow fine adjustment (0 = no filter; the ⟲ button resets).
+   The filter is applied to the live image and to captures and is recorded in the image
+   information. For IHC measurements use the same filter for all images of a study.
 4. **Shading correction** (*Microscope* panel): with an empty field in view, press
    *Acquire reference* and tick *Apply shading correction*. This removes darker
    corners and uneven illumination. The reference is stored per objective.

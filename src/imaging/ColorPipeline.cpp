@@ -169,6 +169,12 @@ void ColorPipeline::update(const ColorSettings &s)
         for (int i = 0; i < 9; ++i)
             ccm[size_t(i)] = float(s.cameraMatrix[size_t(i)]);
     m_matrix = mul(hm, mul(sm, mul(ccm, wb)));
+    // light filter in output colour space (after white balance and colour correction)
+    if (s.filterTemperature != 0.0 || s.filterTint != 0.0) {
+        const auto fg = lightFilterGains(s.filterTemperature, s.filterTint);
+        const std::array<float, 9> fm{float(fg[0]), 0, 0, 0, float(fg[1]), 0, 0, 0, float(fg[2])};
+        m_matrix = mul(fm, m_matrix);
+    }
     if (s.grayscale) {
         // collapse to luma after white balance
         std::array<float, 9> g{};
@@ -181,6 +187,19 @@ void ColorPipeline::update(const ColorSettings &s)
     m_black = uint16_t(bl * 65535.0 + 0.5);
     m_blackScale = float(1.0 / (1.0 - bl));
     buildTables();
+}
+
+std::array<double, 3> lightFilterGains(double temperature, double tint)
+{
+    const double t = std::clamp(temperature, -100.0, 100.0) / 100.0;
+    const double n = std::clamp(tint, -100.0, 100.0) / 100.0;
+    // +100 is roughly a Wratten 80A (3200 K -> 5500 K), -100 roughly an 85B
+    double r = std::exp(-0.45 * t);
+    double b = std::exp(0.60 * t);
+    // tint: magenta = less green, green = more green (about CC30M / CC30G at +-100)
+    double g = std::exp(-0.35 * n);
+    const double m = std::max({r, g, b});
+    return {r / m, g / m, b / m};
 }
 
 void ColorPipeline::buildTables()

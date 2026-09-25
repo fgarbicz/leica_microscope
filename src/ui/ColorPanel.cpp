@@ -10,9 +10,13 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QMessageBox>
+#include <QPointF>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QToolButton>
 #include <QVBoxLayout>
+
+#include <cmath>
 
 namespace lm {
 
@@ -54,6 +58,61 @@ ColorPanel::ColorPanel(QWidget *parent) : QWidget(parent)
         pre->contentLayout()->addWidget(s);
     }
     root->addWidget(pre);
+
+    // --- light filter (emulates a colour filter in front of the lamp)
+    auto *filt = new CollapsibleSection(tr("Light filter"), this);
+    m_filterPresets = new QComboBox(this);
+    m_filterPresets->setToolTip(tr("Emulates a colour filter in front of the lamp. A halogen lamp looks slightly "
+                                   "yellow; a blue (cooling) filter gives a cleaner white background and crisper "
+                                   "stain contrast. Applied to the live image and to captures."));
+    struct FilterPreset
+    {
+        QString name;
+        double temp, tint;
+    };
+    const QList<FilterPreset> presets = {
+        {tr("None (neutral)"), 0, 0},
+        {tr("Slight blue (82)"), 12, 0},
+        {tr("Light blue (82A)"), 25, 0},
+        {tr("Medium blue (80C)"), 40, 0},
+        {tr("Daylight blue (80B)"), 60, 0},
+        {tr("Strong blue (80A)"), 85, 0},
+        {tr("Cool white, slightly magenta"), 30, 10},
+        {tr("Slight warm (81)"), -12, 0},
+        {tr("Warm (81B)"), -25, 0},
+        {tr("Warm halogen (85)"), -55, 0},
+        {tr("Strong amber (85B)"), -85, 0},
+        {tr("Green correction (CC10G)"), 0, -25},
+        {tr("Magenta correction (CC10M)"), 0, 25},
+    };
+    for (const auto &p : presets)
+        m_filterPresets->addItem(p.name, QPointF(p.temp, p.tint));
+    m_filterPresets->addItem(tr("Custom"), QVariant());
+    filt->contentLayout()->addWidget(m_filterPresets);
+    m_filterTemp = new SliderSpin(tr("Warm ↔ Cool"), -100, 100, 0, this);
+    m_filterTemp->setToolTip(tr("Negative: warmer (yellow / amber) light. Positive: cooler (bluer) light, "
+                                "like a daylight-blue filter."));
+    m_filterTemp->setDefault(0.0);
+    m_filterTint = new SliderSpin(tr("Green ↔ Magenta"), -100, 100, 0, this);
+    m_filterTint->setToolTip(tr("Negative: greener. Positive: more magenta (removes a green cast)."));
+    m_filterTint->setDefault(0.0);
+    filt->contentLayout()->addWidget(m_filterTemp);
+    filt->contentLayout()->addWidget(m_filterTint);
+    auto *filtNote = new QLabel(tr("For DAB / IHC measurements use the same filter for all images of a study."), this);
+    filtNote->setWordWrap(true);
+    filtNote->setEnabled(false);
+    filt->contentLayout()->addWidget(filtNote);
+    root->addWidget(filt);
+    connect(m_filterPresets, &QComboBox::activated, this, [this](int i) {
+        const QVariant v = m_filterPresets->itemData(i);
+        if (!v.isValid())
+            return; // "Custom": keep the sliders
+        const QPointF p = v.toPointF();
+        m_s.filterTemperature = p.x();
+        m_s.filterTint = p.y();
+        setSettings(m_s);
+        emitChanged();
+    });
 
     // --- tone
     auto *tone = new CollapsibleSection(tr("Brightness & contrast"), this, false);
@@ -132,6 +191,13 @@ ColorPanel::ColorPanel(QWidget *parent) : QWidget(parent)
     hook(m_hue, &ColorSettings::hue);
     hook(m_sharpen, &ColorSettings::sharpenAmount);
     hook(m_sharpenRadius, &ColorSettings::sharpenRadius);
+    hook(m_filterTemp, &ColorSettings::filterTemperature);
+    hook(m_filterTint, &ColorSettings::filterTint);
+    for (auto *s : {m_filterTemp, m_filterTint})
+        connect(s, &SliderSpin::valueChanged, this, [this] {
+            if (!m_updating)
+                syncFilterPreset();
+        });
     auto hookB = [this](QCheckBox *c, bool ColorSettings::*field) {
         connect(c, &QCheckBox::toggled, this, [this, field](bool on) {
             if (m_updating)
@@ -163,10 +229,12 @@ ColorPanel::ColorPanel(QWidget *parent) : QWidget(parent)
         auto &S = AppSettings::instance();
         const auto builtin = AppSettings::builtinPresets();
         ColorSettings c = S.colorPresets.contains(name) ? S.colorPresets.value(name) : builtin.value(name);
-        // presets never change white balance or orientation (depend on lamp and optics)
+        // presets never change white balance, light filter or orientation (depend on lamp and optics)
         c.wbRed = m_s.wbRed;
         c.wbGreen = m_s.wbGreen;
         c.wbBlue = m_s.wbBlue;
+        c.filterTemperature = m_s.filterTemperature;
+        c.filterTint = m_s.filterTint;
         c.flipHorizontal = m_s.flipHorizontal;
         c.flipVertical = m_s.flipVertical;
         c.rotation = m_s.rotation;
@@ -232,7 +300,30 @@ void ColorPanel::setSettings(const ColorSettings &s)
     m_ccm->setChecked(s.colorCorrection);
     m_invert->setChecked(s.invert);
     m_srgb->setChecked(s.srgbEncode);
+    m_filterTemp->setValue(s.filterTemperature);
+    m_filterTint->setValue(s.filterTint);
+    syncFilterPreset();
     m_updating = false;
+}
+
+void ColorPanel::syncFilterPreset()
+{
+    // select the preset matching the sliders, otherwise "Custom"
+    const QSignalBlocker block(m_filterPresets);
+    int custom = m_filterPresets->count() - 1;
+    for (int i = 0; i < m_filterPresets->count(); ++i) {
+        const QVariant v = m_filterPresets->itemData(i);
+        if (!v.isValid()) {
+            custom = i;
+            continue;
+        }
+        const QPointF p = v.toPointF();
+        if (std::abs(p.x() - m_s.filterTemperature) < 0.5 && std::abs(p.y() - m_s.filterTint) < 0.5) {
+            m_filterPresets->setCurrentIndex(i);
+            return;
+        }
+    }
+    m_filterPresets->setCurrentIndex(custom);
 }
 
 void ColorPanel::setWhiteBalance(double r, double g, double b)

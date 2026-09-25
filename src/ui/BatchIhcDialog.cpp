@@ -238,6 +238,7 @@ void BatchIhcDialog::run()
                                 : li.meta.objective;
             row.umPerPixel = li.meta.umPerPixel;
             row.colorCorrection = li.meta.colorCorrection;
+            row.lightFilter = li.meta.lightFilter;
             StainOptions o = opt;
             o.umPerPixel = li.meta.umPerPixel;
             QImage region;
@@ -489,12 +490,23 @@ QString BatchIhcDialog::colourMixWarning() const
     int corrected = 0, other = 0;
     for (const auto &r : m_rows)
         (r.colorCorrection.startsWith(QStringLiteral("camera matrix")) ? corrected : other)++;
-    if (!corrected || !other)
-        return {};
-    return tr("%1 image(s) were taken with camera colour correction and %2 without (or by an older version); "
-              "their DAB results are not directly comparable.")
-        .arg(corrected)
-        .arg(other);
+    QStringList filters;
+    for (const auto &r : m_rows)
+        if (!filters.contains(r.lightFilter))
+            filters << r.lightFilter;
+    QString warning;
+    if (corrected && other)
+        warning = tr("%1 image(s) were taken with camera colour correction and %2 without (or by an older version); "
+                     "their DAB results are not directly comparable.")
+                      .arg(corrected)
+                      .arg(other);
+    if (filters.size() > 1) {
+        if (!warning.isEmpty())
+            warning += QLatin1Char(' ');
+        warning += tr("The images were taken with different light filter settings; "
+                      "their DAB results are not directly comparable.");
+    }
+    return warning;
 }
 
 QString BatchIhcDialog::stainDescription() const

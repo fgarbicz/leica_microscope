@@ -1,5 +1,13 @@
 # DM Imaging release notes
 
+## 1.0.1 (2026-09-25)
+
+- **Light filter** (Colour panel): emulates colour filters in front of the lamp, from
+  strong blue (80A) through daylight / light blue (80B, 80C, 82A, 82) to warming (81, 81B,
+  85, 85B) and green / magenta correction, plus fine *Warm ↔ Cool* and *Green ↔ Magenta*
+  sliders. Makes the slightly yellow halogen light look like daylight. Applied to the live
+  image and captures, saved with presets and settings, and recorded in the image metadata.
+
 ## 1.0.0 (2026-09-25)
 
 First release for the Leica DM2000 with the Leica DMC6200 camera.
