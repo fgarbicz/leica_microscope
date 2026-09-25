@@ -175,7 +175,13 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     ms->contentLayout()->addWidget(csv);
     sl->addWidget(ms);
 
-    auto *adj = new CollapsibleSection(tr("Adjust"), sideContent);
+    auto *adj = new CollapsibleSection(tr("Adjust"), sideContent, false);
+    {
+        auto *hint = new QLabel(tr("For display and export only. IHC analysis always uses the original image."), sideContent);
+        hint->setObjectName(QStringLiteral("Hint"));
+        hint->setWordWrap(true);
+        adj->contentLayout()->addWidget(hint);
+    }
     m_brightness = new SliderSpin(tr("Brightness"), -0.5, 0.5, 3, sideContent);
     m_contrast = new SliderSpin(tr("Contrast"), 0.3, 3.0, 2, sideContent, true);
     m_gamma = new SliderSpin(tr("Gamma"), 0.3, 3.0, 2, sideContent, true);
@@ -206,7 +212,8 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     ihcHint->setObjectName(QStringLiteral("Hint"));
     ihcHint->setWordWrap(true);
     ihc->contentLayout()->addWidget(ihcHint);
-    m_dabThreshold = new SliderSpin(tr("DAB positivity threshold (OD)"), 0.05, 1.0, 2, sideContent);
+    m_dabThreshold = new SliderSpin(tr("DAB threshold (optical density)"), 0.05, 1.0, 2, sideContent);
+    m_dabThreshold->setToolTip(tr("How brown a pixel must be to count as DAB-positive (optical density). Lower = more pixels positive. Default 0.15. Use the same value for all slides of a study."));
     m_dabThreshold->setValue(AppSettings::instance().ihc.dabThreshold);
     m_dabThreshold->setDefault(0.15);
     ihc->contentLayout()->addWidget(m_dabThreshold);
@@ -220,8 +227,8 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     auto *stainEst = new QPushButton(tr("Estimate stain colours"), sideContent);
     stainEst->setToolTip(tr("Measure the haematoxylin and DAB colours of this staining from the current image "
                             "(needs both stains in view). Used for all IHC analyses until reset."));
-    auto *stainStd = new QPushButton(tr("Standard"), sideContent);
-    stainStd->setToolTip(tr("Use the standard haematoxylin-DAB colour vectors (Ruifrok & Johnston)"));
+    auto *stainStd = new QPushButton(tr("Reset to standard"), sideContent);
+    stainStd->setToolTip(tr("Use the standard textbook haematoxylin and DAB colours"));
     stainRow->addWidget(stainEst, 1);
     stainRow->addWidget(stainStd);
     ihc->contentLayout()->addLayout(stainRow);
@@ -270,6 +277,7 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     ihc->contentLayout()->addLayout(ihcRow);
     // nucleus counting (nuclear markers such as Ki-67, p53, ER/PR)
     m_nucleusDiameter = new SliderSpin(tr("Nucleus diameter (µm)"), 3.0, 20.0, 1, sideContent);
+    m_nucleusDiameter->setToolTip(tr("Typical nucleus size: about 7 µm for lymphocytes, larger for tumour cells"));
     m_nucleusDiameter->setValue(AppSettings::instance().ihc.nucleusDiameterUm);
     m_nucleusDiameter->setDefault(7.0);
     ihc->contentLayout()->addWidget(m_nucleusDiameter);
@@ -286,6 +294,7 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     auto *sens = new QComboBox(sideContent);
     sens->addItems({tr("Low (strongly stained nuclei)"), tr("Normal"), tr("High (also pale nuclei)")});
     sens->setCurrentIndex(AppSettings::instance().ihc.nucleusSensitivity);
+    sens->setToolTip(tr("Low: only clearly stained nuclei. High: also pale nuclei (may count some debris)."));
     nucForm->addRow(tr("Sensitivity"), sens);
     ihc->contentLayout()->addLayout(nucForm);
     connect(marker, &QComboBox::currentIndexChanged, this, [](int i) { AppSettings::instance().ihc.nuclearMarker = i == 0; });
@@ -488,6 +497,19 @@ void ProcessPage::saveAnnotations()
 
 void ProcessPage::analyzeIhc(bool regionOnly, bool nuclei)
 {
+    // large images can run out of memory: report it instead of terminating
+    try {
+        analyzeIhcImpl(regionOnly, nuclei);
+    } catch (const std::exception &e) {
+        while (QApplication::overrideCursor())
+            QApplication::restoreOverrideCursor();
+        QMessageBox::warning(this, tr("IHC quantification"),
+                             tr("The analysis could not be completed: %1").arg(QString::fromUtf8(e.what())));
+    }
+}
+
+void ProcessPage::analyzeIhcImpl(bool regionOnly, bool nuclei)
+{
     if (m_data.empty())
         return;
     // region mask from the selected annotation
@@ -630,9 +652,11 @@ void ProcessPage::updateStainLabel()
         return QStringLiteral("%1 %2 %3").arg(v[0], 0, 'f', 2).arg(v[1], 0, 'f', 2).arg(v[2], 0, 'f', 2);
     };
     m_stainLabel->setText(ih.customVectors
-                              ? tr("Stain colours: estimated from %1 (H %2, DAB %3)")
+                              ? tr("Custom stain colours active (from %1), applied to all IHC analyses. H %2, DAB %3")
                                     .arg(ih.vectorSource.isEmpty() ? tr("an image") : ih.vectorSource, vec(ih.h), vec(ih.dab))
-                              : tr("Stain colours: standard H-DAB"));
+                              : tr("Stain colours: standard haematoxylin-DAB"));
+    // make custom colours hard to overlook
+    m_stainLabel->setStyleSheet(ih.customVectors ? QStringLiteral("color: #e8a33d;") : QString());
 }
 
 void ProcessPage::setCalibration()
@@ -652,7 +676,11 @@ void ProcessPage::saveAs()
 {
     if (m_data.empty())
         return;
-    const QString start = m_path.isEmpty() ? AppSettings::instance().nextFileName(QString(), QStringLiteral("processed")) : m_path;
+    // never suggest overwriting the original capture
+    const QString start = m_path.isEmpty()
+                              ? AppSettings::instance().nextFileName(QString(), QStringLiteral("processed"))
+                              : QFileInfo(m_path).dir().filePath(QFileInfo(m_path).completeBaseName() + QStringLiteral("_edited.")
+                                                                  + QFileInfo(m_path).suffix());
     QString selected;
     const QString f = QFileDialog::getSaveFileName(this, tr("Save image"), start,
                                                    tr("TIFF 16-bit (*.tif);;TIFF 8-bit (*.tif);;PNG (*.png);;JPEG (*.jpg);;BMP (*.bmp)"),

@@ -57,7 +57,9 @@ QString installCameraDriver(QWidget *parent)
     const QString out = QString::fromLocal8Bit(p.readAllStandardOutput()) + QString::fromLocal8Bit(p.readAllStandardError());
     const bool ok = p.exitStatus() == QProcess::NormalExit && p.exitCode() == 0;
     QMessageBox box(ok ? QMessageBox::Information : QMessageBox::Warning, QObject::tr("Camera driver"),
-                    ok ? QObject::tr("The camera driver was installed.") : QObject::tr("Driver installation failed."),
+                    ok ? QObject::tr("The camera driver was installed.")
+                       : QObject::tr("Driver installation failed. Check that you allowed the administrator request, then try "
+                                     "again. The details below say what went wrong."),
                     QMessageBox::Ok, parent);
     box.setDetailedText(out);
     box.exec();
@@ -86,7 +88,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent)
     fr->addWidget(browse);
     form->addRow(tr("Image folder"), fr);
     m_pattern = new QLineEdit(S.capture.pattern, this);
-    m_pattern->setToolTip(tr("Tokens: {sample} {objective} {date} {time} {counter} {mode} {operator}"));
+    m_pattern->setToolTip(tr("Placeholders replaced when saving: {sample} {objective} {date} {time} {counter} {mode} "
+                             "{operator}. Example: {sample}_{objective}_{counter} gives Liver01_20x_003."));
     form->addRow(tr("File name template"), m_pattern);
     m_digits = new QSpinBox(this);
     m_digits->setRange(1, 8);
@@ -113,7 +116,11 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent)
     });
     connect(drv, &QPushButton::clicked, this, [this] { installCameraDriver(this); });
     connect(reset, &QPushButton::clicked, this, [this] {
-        if (QMessageBox::question(this, tr("Reset"), tr("Reset all settings to their defaults? The application will close."))
+        if (QMessageBox::warning(this, tr("Reset all settings"),
+                                 tr("This erases ALL settings, including the objective calibrations (µm/pixel), shading "
+                                    "references, exposure and white balance saved per objective, and colour presets.\n\n"
+                                    "This cannot be undone. The application will close."),
+                                 QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
             == QMessageBox::Yes) {
             QSettings().clear();
             QSettings().sync();

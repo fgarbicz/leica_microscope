@@ -56,22 +56,25 @@ ColorPanel::ColorPanel(QWidget *parent) : QWidget(parent)
     root->addWidget(pre);
 
     // --- tone
-    auto *tone = new CollapsibleSection(tr("Brightness & contrast"), this);
+    auto *tone = new CollapsibleSection(tr("Brightness & contrast"), this, false);
     auto *toneRow = new QHBoxLayout;
     auto *autoBlack = new QPushButton(tr("Black balance"), this);
-    autoBlack->setToolTip(tr("Measure the sensor black level (close the light path first)"));
+    autoBlack->setToolTip(tr("Measures the camera's dark signal. Turn the lamp off (or close the light path) first. "
+                             "Rarely needed."));
     auto *autoLevels = new QPushButton(tr("Auto levels"), this);
-    autoLevels->setToolTip(tr("Stretch the histogram of the current image"));
+    autoLevels->setToolTip(tr("Automatically sets the black and white points for the best contrast of this image"));
     toneRow->addWidget(autoBlack);
     toneRow->addWidget(autoLevels);
     tone->contentLayout()->addLayout(toneRow);
-    m_black = new SliderSpin(tr("Black level (offset)"), 0.0, 0.2, 4, this);
+    m_black = new SliderSpin(tr("Camera black level"), 0.0, 0.2, 4, this);
+    m_black->setToolTip(tr("Signal subtracted as 'no light'. Set it with Black balance; normally leave it alone."));
     m_black->setDefault(0.002);
     m_blackPoint = new SliderSpin(tr("Black point"), 0.0, 0.9, 3, this);
     m_blackPoint->setDefault(0.0);
     m_whitePoint = new SliderSpin(tr("White point"), 0.1, 1.0, 3, this);
     m_whitePoint->setDefault(1.0);
     m_gamma = new SliderSpin(tr("Gamma"), 0.3, 3.0, 2, this, true);
+    m_gamma->setToolTip(tr("Brightens (above 1) or darkens (below 1) the mid-tones without changing black and white"));
     m_gamma->setDefault(1.0);
     m_brightness = new SliderSpin(tr("Brightness"), -0.5, 0.5, 3, this);
     m_brightness->setDefault(0.0);
@@ -82,7 +85,7 @@ ColorPanel::ColorPanel(QWidget *parent) : QWidget(parent)
     root->addWidget(tone);
 
     // --- colour appearance
-    auto *col = new CollapsibleSection(tr("Saturation & sharpness"), this);
+    auto *col = new CollapsibleSection(tr("Saturation & sharpness"), this, false);
     m_saturation = new SliderSpin(tr("Saturation"), 0.0, 3.0, 2, this);
     m_saturation->setDefault(1.0);
     m_hue = new SliderSpin(tr("Hue"), -180, 180, 0, this, false, QStringLiteral("°"));
@@ -98,7 +101,8 @@ ColorPanel::ColorPanel(QWidget *parent) : QWidget(parent)
                          "accurate stain colours. Switch off only to compare with uncorrected sensor colours."));
     m_gray = new QCheckBox(tr("Monochrome"), this);
     m_invert = new QCheckBox(tr("Invert (negative)"), this);
-    m_srgb = new QCheckBox(tr("sRGB tone curve (recommended)"), this);
+    m_srgb = new QCheckBox(tr("Standard display brightness curve (recommended)"), this);
+    m_srgb->setToolTip(tr("sRGB tone curve. Keep on for images that look natural on screen and in reports."));
     for (auto *c : {m_ccm, m_gray, m_invert, m_srgb})
         col->contentLayout()->addWidget(c);
     auto *reset = new QPushButton(tr("Reset all colour settings"), this);

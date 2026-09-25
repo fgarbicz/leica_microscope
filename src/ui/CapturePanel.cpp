@@ -69,7 +69,7 @@ CapturePanel::CapturePanel(QWidget *parent) : QWidget(parent)
     root->addWidget(cap);
 
     // --- files
-    auto *files = new CollapsibleSection(tr("Save settings"), this);
+    auto *files = new CollapsibleSection(tr("Save settings"), this, false);
     auto *ff = new QFormLayout;
     ff->setContentsMargins(0, 0, 0, 0);
     auto *folderRow = new QHBoxLayout;
@@ -87,10 +87,12 @@ CapturePanel::CapturePanel(QWidget *parent) : QWidget(parent)
     m_sample->setToolTip(tr("Sample / slide identifier used in file names ({sample})"));
     ff->addRow(tr("Sample"), m_sample);
     m_pattern = new QLineEdit(this);
-    m_pattern->setToolTip(tr("Tokens: {sample} {objective} {date} {time} {counter} {mode} {operator}"));
+    m_pattern->setToolTip(tr("Placeholders replaced when saving: {sample} {objective} {date} {time} {counter} {mode} "
+                             "{operator}. Example: {sample}_{objective}_{counter} gives Liver01_20x_003."));
     ff->addRow(tr("File name"), m_pattern);
     m_counter = new QSpinBox(this);
     m_counter->setRange(0, 999999);
+    m_counter->setToolTip(tr("Number used for {counter} in the next file name"));
     ff->addRow(tr("Next number"), m_counter);
     m_format = new QComboBox(this);
     for (const auto &f : kFormats)
@@ -102,6 +104,8 @@ CapturePanel::CapturePanel(QWidget *parent) : QWidget(parent)
     ff->addRow(tr("JPEG quality"), m_jpegQuality);
     files->contentLayout()->addLayout(ff);
     m_burnScale = new QCheckBox(tr("Burn scale bar into saved image"), this);
+    m_burnScale->setToolTip(tr("Draws the scale bar into the image pixels permanently. Not recommended for images you "
+                               "will analyse (IHC); use Export with overlays in Process instead."));
     files->contentLayout()->addWidget(m_burnScale);
     m_openProcess = new QCheckBox(tr("Open captured image in Process"), this);
     files->contentLayout()->addWidget(m_openProcess);

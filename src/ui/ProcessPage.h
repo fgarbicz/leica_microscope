@@ -42,6 +42,7 @@ public slots:
     void stitchFromFiles();
     void setCalibration();
     void analyzeIhc(bool regionOnly, bool nuclei = false);
+    void analyzeIhcImpl(bool regionOnly, bool nuclei);
     void updateStainLabel();
 
 signals:

@@ -98,6 +98,15 @@ BatchExportDialog::BatchExportDialog(const QStringList &files, QWidget *parent) 
     });
 }
 
+void BatchExportDialog::reject()
+{
+    // Esc / window close during an export cancels it instead of hiding a running dialog
+    if (m_running)
+        m_cancel = true;
+    else
+        QDialog::reject();
+}
+
 void BatchExportDialog::run()
 {
     if (m_running)
@@ -163,7 +172,15 @@ void BatchExportDialog::run()
             QApplication::processEvents(QEventLoop::AllEvents, 50);
             QThread::msleep(10);
         }
-        if (future.result().isEmpty())
+        QString result;
+        try {
+            result = future.result(); // rethrows an exception from the worker (e.g. out of memory)
+        } catch (const std::exception &e) {
+            result = QString::fromUtf8(e.what());
+        } catch (...) {
+            result = tr("export failed");
+        }
+        if (result.isEmpty())
             ++ok;
         else
             ++failed;

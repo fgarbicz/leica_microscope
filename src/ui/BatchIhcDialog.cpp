@@ -99,7 +99,8 @@ BatchIhcDialog::BatchIhcDialog(const QStringList &files, QWidget *parent) : QDia
     m_threshold->setDecimals(2);
     m_threshold->setValue(AppSettings::instance().ihc.dabThreshold);
     m_threshold->setToolTip(tr("DAB optical density above which a pixel counts as positive (same as in Process)"));
-    form->addRow(tr("DAB positivity threshold (OD)"), m_threshold);
+    m_threshold->setToolTip(tr("How brown a pixel must be to count as DAB-positive (optical density). Lower = more pixels positive. Default 0.15. Use the same value for all slides of a study."));
+    form->addRow(tr("DAB threshold (optical density)"), m_threshold);
     {
         const auto &ih = AppSettings::instance().ihc;
         auto *stains = new QLabel(ih.customVectors
@@ -280,7 +281,7 @@ void BatchIhcDialog::run()
                 row.cellDensity = nr.densityPerMm2;
             }
             if (r.tissuePixels == 0)
-                row.error = tr("no tissue found");
+                row.error = tr("no tissue found (image blank or overexposed?)");
             {
                 QImage ov = overlayImage(img, r);
                 if (countCells && !nr.nuclei.empty()) {
@@ -344,7 +345,16 @@ void BatchIhcDialog::run()
             QApplication::processEvents(QEventLoop::AllEvents, 50);
             QThread::msleep(10);
         }
-        const Row row = future.result();
+        Row row;
+        try {
+            row = future.result(); // rethrows an exception from the worker (e.g. out of memory)
+        } catch (const std::exception &e) {
+            row.file = QFileInfo(src).fileName();
+            row.error = tr("analysis failed: %1").arg(QString::fromUtf8(e.what()));
+        } catch (...) {
+            row.file = QFileInfo(src).fileName();
+            row.error = tr("analysis failed");
+        }
         m_rows.push_back(row);
         addRow(row);
         m_progress->setValue(i + 1);

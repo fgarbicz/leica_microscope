@@ -56,7 +56,7 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
     exportAct->setToolTip(tr("Export the selected images (JPEG/PNG, scale bar, annotations, resize)"));
     auto *ihc = tb->addAction(tr("IHC quantification…"));
     ihc->setToolTip(tr("DAB quantification of the selected images (or all images in the folder), exported as CSV"));
-    auto *compare = tb->addAction(tr("Compare"));
+    auto *compare = tb->addAction(tr("Compare…"));
     compare->setToolTip(tr("Compare two selected images side by side"));
     auto *rename = tb->addAction(tr("Rename…"));
     auto *del = tb->addAction(tr("Delete…"));

@@ -27,3 +27,6 @@ usbspy*.log
 # python
 __pycache__/
 *.pyc
+
+# installer output
+dist/

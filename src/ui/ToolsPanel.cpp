@@ -44,6 +44,7 @@ ToolsPanel::ToolsPanel(QWidget *parent) : QWidget(parent)
     auto *fRow = new QHBoxLayout;
     auto *region = new QPushButton(tr("Focus region…"), this);
     auto *resetPeak = new QPushButton(tr("Reset peak"), this);
+    resetPeak->setToolTip(tr("Start a new search for the best focus (after moving to another field)"));
     fRow->addWidget(region);
     fRow->addWidget(resetPeak);
     fs->contentLayout()->addLayout(fRow);
@@ -94,7 +95,7 @@ ToolsPanel::ToolsPanel(QWidget *parent) : QWidget(parent)
     os->contentLayout()->addLayout(of);
     root->addWidget(os);
 
-    auto *is = new CollapsibleSection(tr("Information"), this);
+    auto *is = new CollapsibleSection(tr("Information"), this, false);
     m_info = new QLabel(this);
     m_info->setObjectName(QStringLiteral("Hint"));
     m_info->setWordWrap(true);

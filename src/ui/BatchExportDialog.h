@@ -22,6 +22,7 @@ public:
 
 private:
     void run();
+    void reject() override;
 
     QStringList m_files;
     QComboBox *m_format;

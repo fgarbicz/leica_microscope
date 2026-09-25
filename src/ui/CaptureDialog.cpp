@@ -9,6 +9,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QRegularExpressionValidator>
 #include <QVBoxLayout>
@@ -75,6 +76,10 @@ CaptureDialog::CaptureDialog(const QImage &preview, const MicroscopeConfig &scop
         if (!m_name->text().trimmed().isEmpty())
             accept();
     });
+    // an image needs a name: Save is only available with one
+    connect(m_name, &QLineEdit::textChanged, save,
+            [save](const QString &t) { save->setEnabled(!t.trimmed().isEmpty()); });
+    save->setToolTip(tr("Save the image under this name (Enter)"));
     connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
     connect(m_group, &QButtonGroup::idClicked, this, &CaptureDialog::onObjectiveChanged);
 
@@ -85,6 +90,20 @@ CaptureDialog::CaptureDialog(const QImage &preview, const MicroscopeConfig &scop
     m_name->selectAll();
     m_name->setFocus();
     m_name->installEventFilter(this);
+}
+
+void CaptureDialog::reject()
+{
+    // Esc, the window's close button and "Discard" all end up here: the image
+    // (maybe a long pixel-shift capture) is lost unless the user confirms
+    QMessageBox box(QMessageBox::Question, tr("Discard image"), tr("Discard this image? It has not been saved."),
+                    QMessageBox::NoButton, this);
+    auto *discard = box.addButton(tr("Discard"), QMessageBox::DestructiveRole);
+    auto *keep = box.addButton(tr("Keep editing"), QMessageBox::RejectRole);
+    box.setDefaultButton(keep);
+    box.exec();
+    if (box.clickedButton() == discard)
+        QDialog::reject();
 }
 
 void CaptureDialog::onObjectiveChanged(int index)

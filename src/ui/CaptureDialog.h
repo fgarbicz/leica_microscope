@@ -29,6 +29,7 @@ public:
 
 protected:
     bool eventFilter(QObject *o, QEvent *e) override;
+    void reject() override;
 
 private:
     void onObjectiveChanged(int index);

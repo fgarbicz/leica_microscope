@@ -142,6 +142,10 @@ MainWindow::MainWindow()
         showMessage(tr("%1: %2 / %3").arg(what).arg(done).arg(total), 0);
     });
     connect(m_engine, &AcquisitionEngine::cameraError, this, &MainWindow::onCameraLost);
+    connect(m_engine, &AcquisitionEngine::processingError, this, [this](const QString &msg) {
+        qWarning("processing error: %s", qPrintable(msg));
+        showMessage(tr("Image processing error: %1").arg(msg), 8000);
+    });
     m_reconnect.setInterval(2000);
     connect(&m_reconnect, &QTimer::timeout, this, &MainWindow::tryReconnect);
     connect(m_engine, &AcquisitionEngine::whiteBalanceComputed, this, [this](double r, double g, double b) {
@@ -359,6 +363,12 @@ QWidget *MainWindow::buildAcquirePage()
         AppSettings::instance().shadingEnabled = on;
     });
     connect(m_scopePanel, &MicroscopePanel::shadingClearRequested, this, [this] {
+        if (QMessageBox::question(this, tr("Delete shading reference"),
+                                  tr("Delete the shading reference for %1? You will need to acquire it again.")
+                                      .arg(m_scope.currentObjective().name),
+                                  QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
+            != QMessageBox::Yes)
+            return;
         Objective &o = m_scope.currentObjective();
         if (!o.shadingFile.isEmpty())
             QFile::remove(o.shadingFile);
@@ -611,7 +621,7 @@ void MainWindow::buildMenus()
     help->addAction(tr("&Keyboard shortcuts"), this, [this] {
         QMessageBox::information(this, tr("Keyboard shortcuts"),
                                  tr("F5\tLive on/off\nF6\tFreeze\nF7\tAuto white balance\nF8\tAuto exposure once\n"
-                                    "F9 / Space\tCapture image\nF11\tFull screen\nCtrl+1…9\tSelect objective\n"
+                                    "F9 / Space\tCapture image\nF11\tFull screen\nCtrl+1, Ctrl+2, …\tSelect objective (one per objective)\n"
                                     "Alt+1/2/3\tAcquire / Browse / Process\nMouse wheel\tZoom\nDouble click\tFit / 100%\n"
                                     "Ctrl+drag, middle drag\tPan\n0 / 1 / 2\tFit / 100% / 200%\nDel\tDelete annotation\n"
                                     "Ctrl+Z / Ctrl+Y\tUndo / redo annotations"));
@@ -880,7 +890,9 @@ void MainWindow::startCalibration()
         const double dy = m_calibPoints[1].y() - m_calibPoints[0].y();
         const double px = std::hypot(dx, dy) / std::max(0.01, m_lastStats.displayScale);
         if (px < 10) {
-            QMessageBox::warning(this, tr("Calibration"), tr("The points are too close together."));
+            QMessageBox::warning(this, tr("Calibration"),
+                                 tr("The points are too close together. Click two marks at least 100 µm apart "
+                                    "(further apart is more accurate)."));
             return;
         }
         bool ok = false;
@@ -976,26 +988,39 @@ void MainWindow::onCaptureFinished(std::shared_ptr<CaptureResult> r)
     m_capturePanel->setBusy(false);
     m_cameraPanel->setBusy(false);
     if (!r || r->rendered16.empty()) {
-        showMessage(tr("Capture produced no image"), 6000);
+        showMessage(tr("Capture produced no image. Try again; if it repeats, stop and restart the live image (F5)."), 8000);
         return;
     }
     auto &S = AppSettings::instance();
     QDir().mkpath(S.capture.folder);
     const QString mode = QString::fromStdString(r->kind);
-    auto suggested = [&](int objective) {
-        QString p = S.nextFileName(shortObjective(m_scope.objectives.value(objective, m_scope.currentObjective())), mode);
-        while (QFileInfo::exists(p)) {
-            S.capture.counter++;
-            p = S.nextFileName(shortObjective(m_scope.objectives.value(objective, m_scope.currentObjective())), mode);
+    // names on disk or of images still being written must not be reused
+    auto taken = [this](const QString &p) { return QFileInfo::exists(p) || m_pendingSaves.contains(p); };
+    auto withSuffix = [&](const QString &p) {
+        if (!taken(p))
+            return p;
+        const QFileInfo fi(p);
+        for (int n = 2;; ++n) {
+            const QString q = fi.dir().filePath(QStringLiteral("%1_%2.%3").arg(fi.completeBaseName()).arg(n).arg(fi.suffix()));
+            if (!taken(q))
+                return q;
         }
-        return p;
+    };
+    auto suggested = [&](int objective) {
+        const QString obj = shortObjective(m_scope.objectives.value(objective, m_scope.currentObjective()));
+        QString p = S.nextFileName(obj, mode);
+        // advance the counter past existing files; a template without {counter}
+        // (the name does not change) gets a _2, _3, ... suffix instead
+        for (int i = 0; i < 100000 && taken(p); ++i) {
+            S.capture.counter++;
+            const QString next = S.nextFileName(obj, mode);
+            if (next == p)
+                break;
+            p = next;
+        }
+        return withSuffix(p);
     };
     QString path = suggested(m_scope.current);
-    // names of images still being written must not be reused
-    while (m_pendingSaves.contains(path)) {
-        S.capture.counter++;
-        path = suggested(m_scope.current);
-    }
     QString notes;
 
     // ask for the objective and the image name (manual microscope: the turret is not coded)
@@ -1039,7 +1064,8 @@ void MainWindow::onCaptureFinished(std::shared_ptr<CaptureResult> r)
     const QImage thumbSrc = toQImage8(r->rendered8);
     showMessage(tr("Saving %1…").arg(QFileInfo(path).fileName()), 0);
     m_pendingSaves.insert(path);
-    QtConcurrent::run([r, path, meta, opt, burn, ov] {
+    QtConcurrent::run([r, path, meta, opt, burn, ov]() -> QString {
+      try {
         QString err;
         bool ok;
         if (burn && meta.umPerPixel > 0) {
@@ -1059,6 +1085,11 @@ void MainWindow::onCaptureFinished(std::shared_ptr<CaptureResult> r)
             ok = saveImage(path, r->rendered16, meta, opt, &err);
         }
         return ok ? QString() : (err.isEmpty() ? QObject::tr("unknown error") : err);
+      } catch (const std::exception &e) {
+        return QObject::tr("internal error: %1").arg(QString::fromUtf8(e.what()));
+      } catch (...) {
+        return QObject::tr("internal error");
+      }
     }).then(this, [this, path, thumbSrc, r, meta](const QString &err) {
         m_pendingSaves.remove(path);
         if (!err.isEmpty()) {
@@ -1182,6 +1213,7 @@ void MainWindow::closeEvent(QCloseEvent *e)
     m_recorder.stop();
     QApplication::setOverrideCursor(Qt::WaitCursor);
     m_engine->waitForJobs();                  // finish captures in progress
+    m_engine->stopLive();                     // no more frames queued while waiting below
     QThreadPool::globalInstance()->waitForDone(); // finish image saves
     QApplication::restoreOverrideCursor();
     QSettings qs;

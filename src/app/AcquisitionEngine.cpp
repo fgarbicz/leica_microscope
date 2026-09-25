@@ -741,7 +741,7 @@ void AcquisitionEngine::processingLoop()
             st.displayFps = m_displayFps;
             emit frameReady(display, st);
         } catch (const std::exception &e) {
-            emit cameraError(QString::fromUtf8(e.what()));
+            emit processingError(QString::fromUtf8(e.what()));
         }
     }
 }

@@ -13,6 +13,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QTableWidget>
 #include <QUuid>
@@ -30,7 +31,7 @@ MicroscopePanel::MicroscopePanel(MicroscopeConfig *config, QWidget *parent) : QW
     auto *form = new QFormLayout;
     form->setContentsMargins(0, 0, 0, 0);
     m_objective = new QComboBox(this);
-    m_objective->setToolTip(tr("Select the objective currently in the light path (Ctrl+1 … Ctrl+6)"));
+    m_objective->setToolTip(tr("Select the objective currently in the light path (Ctrl+1, Ctrl+2, … one per objective)"));
     form->addRow(tr("Objective"), m_objective);
     m_adapter = new QDoubleSpinBox(this);
     m_adapter->setRange(0.1, 3.0);
@@ -70,6 +71,7 @@ MicroscopePanel::MicroscopePanel(MicroscopeConfig *config, QWidget *parent) : QW
     auto *acq = new QPushButton(tr("Acquire reference"), this);
     sh->contentLayout()->addWidget(acq);
     m_shading = new QCheckBox(tr("Apply shading correction"), this);
+    m_shading->setToolTip(tr("Evens out uneven illumination (darker corners), using the reference of this objective"));
     sh->contentLayout()->addWidget(m_shading);
     m_shadingInfo = new QLabel(tr("No reference"), this);
     m_shadingInfo->setObjectName(QStringLiteral("Hint"));
@@ -147,7 +149,7 @@ void MicroscopePanel::editObjectives()
     dlg.resize(720, 380);
     auto *lay = new QVBoxLayout(&dlg);
     auto *table = new QTableWidget(int(m_cfg->objectives.size()), 5, &dlg);
-    table->setHorizontalHeaderLabels({tr("Name"), tr("Magnification"), tr("NA"), tr("Immersion"), tr("Calibrated µm/px (0 = nominal)")});
+    table->setHorizontalHeaderLabels({tr("Name"), tr("Magnification"), tr("NA"), tr("Immersion"), tr("Calibrated µm/pixel (0 = use nominal)")});
     table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     auto fill = [&](int r, const Objective &o, int original) {
         auto *nameItem = new QTableWidgetItem(o.name);
@@ -180,10 +182,22 @@ void MicroscopePanel::editObjectives()
         fill(r, o, -1);
     });
     connect(del, &QPushButton::clicked, &dlg, [&] {
-        if (table->currentRow() >= 0)
+        if (table->currentRow() < 0)
+            return;
+        const QString name = table->item(table->currentRow(), 0) ? table->item(table->currentRow(), 0)->text() : QString();
+        if (QMessageBox::question(&dlg, tr("Remove objective"),
+                                  tr("Remove %1 and its calibration?").arg(name.isEmpty() ? tr("this objective") : name),
+                                  QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
+            == QMessageBox::Yes)
             table->removeRow(table->currentRow());
     });
     connect(def, &QPushButton::clicked, &dlg, [&] {
+        if (QMessageBox::question(&dlg, tr("Restore defaults"),
+                                  tr("Restore the default objectives? Your calibrations (µm/pixel) and shading "
+                                     "references for all objectives are discarded when you press OK."),
+                                  QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
+            != QMessageBox::Yes)
+            return;
         const auto d = MicroscopeConfig::defaultObjectives();
         table->setRowCount(int(d.size()));
         for (int r = 0; r < d.size(); ++r)

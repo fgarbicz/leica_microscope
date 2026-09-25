@@ -50,6 +50,23 @@ function Find-SdkTool([string]$name) {
     throw "$name not found (install the Windows 10/11 SDK)"
 }
 
+# already installed and in use? then nothing to do (an app upgrade must not disturb the camera)
+function Get-OurPublishedInfs {
+    $names = @()
+    foreach ($block in ((pnputil /enum-drivers | Out-String) -split "(\r?\n){2,}")) {
+        if ($block -match 'Original Name:\s+leicausb3cam\.inf' -and $block -match 'Published Name:\s+(oem\d+\.inf)') { $names += $Matches[1] }
+    }
+    return $names
+}
+$camera = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.InstanceId -like 'USB\VID_1711&PID_30E0*' } | Select-Object -First 1
+if ($camera -and $camera.Status -eq 'OK') {
+    $inUse = (Get-PnpDeviceProperty -InstanceId $camera.InstanceId -KeyName DEVPKEY_Device_DriverInfPath -ErrorAction SilentlyContinue).Data
+    if ($inUse -and (Get-OurPublishedInfs) -contains $inUse) {
+        Write-Host "The camera driver is already installed and in use ($inUse)."
+        exit 0
+    }
+}
+
 # 1. certificate
 $cert = Get-ChildItem Cert:\LocalMachine\My | Where-Object { $_.Subject -eq "CN=$certName" } | Select-Object -First 1
 if (-not $cert) {
@@ -99,11 +116,17 @@ if ($LASTEXITCODE -ne 0) { throw 'signtool failed' }
 }
 
 # 3. install + bind
+# pnputil /install also binds the driver to a connected camera, so the camera's USB
+# device is not restarted here (restarting it can leave the camera without its sensor)
 Write-Host 'Installing driver package'
 pnputil /add-driver $inf /install | Out-Host
-$dev = Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -like 'USB\VID_1711&PID_30E0*' }
-foreach ($d in $dev) {
-    Write-Host "Restarting $($d.InstanceId)"
-    pnputil /restart-device "$($d.InstanceId)" | Out-Host
+$rc = $LASTEXITCODE
+# 0 = ok, 259 = already up to date / no matching device, 3010 = ok, restart needed
+if ($rc -eq 3010) {
+    Write-Host 'Driver installed. Windows asks for a restart before the camera can use it.'
+} elseif ($rc -ne 0 -and $rc -ne 259) {
+    throw "pnputil failed with exit code $rc"
 }
 Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -like 'USB\VID_1711&PID_30E0*' } | Format-Table Status, Class, FriendlyName -AutoSize | Out-Host
+Write-Host 'Camera driver ready.'
+exit 0

@@ -135,6 +135,8 @@ public:
 signals:
     void frameReady(const QImage &display, const lm::LiveStats &stats);
     void cameraError(const QString &message);
+    // an error while processing a frame (the camera itself is fine)
+    void processingError(const QString &message);
     void whiteBalanceComputed(double r, double g, double b);
     void blackLevelComputed(double level);
     void levelsComputed(double blackPoint, double whitePoint);

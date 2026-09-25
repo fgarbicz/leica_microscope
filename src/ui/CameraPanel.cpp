@@ -68,7 +68,7 @@ CameraPanel::CameraPanel(AcquisitionEngine *engine, QWidget *parent) : QWidget(p
     acq->contentLayout()->addWidget(m_exposure);
     m_autoExposure = new QCheckBox(tr("Auto exposure"), this);
     m_autoExposure->setChecked(S.autoExposure);
-    m_aeOnce = new QPushButton(tr("Auto once"), this);
+    m_aeOnce = new QPushButton(tr("Auto exposure once"), this);
     m_aeOnce->setToolTip(tr("Adjust the exposure once, then keep it fixed"));
     auto *aeRow = new QHBoxLayout;
     aeRow->addWidget(m_autoExposure, 1);
@@ -80,12 +80,14 @@ CameraPanel::CameraPanel(AcquisitionEngine *engine, QWidget *parent) : QWidget(p
     m_aeTarget->setToolTip(tr("Brightness of the brightest 1% of the image (bright field background)"));
     acq->contentLayout()->addWidget(m_aeTarget);
     m_gain = new SliderSpin(tr("Gain"), 1.0, 16.0, 2, this, true, tr(" ×"));
+    m_gain->setToolTip(tr("Amplifies the signal but also the noise. Prefer a longer exposure; keep the gain at 1×."));
     m_gain->setValue(S.gain);
     m_gain->setDefault(1.0);
     acq->contentLayout()->addWidget(m_gain);
     m_aeGain = new QCheckBox(tr("Auto exposure may raise gain"), this);
     acq->contentLayout()->addWidget(m_aeGain);
-    m_hqPreview = new QCheckBox(tr("High quality live demosaicing"), this);
+    m_hqPreview = new QCheckBox(tr("Sharper live image (uses more CPU)"), this);
+    m_hqPreview->setToolTip(tr("Uses the same colour reconstruction as captured images. Turn off if the live image is slow."));
     m_hqPreview->setToolTip(tr("Uses the capture-quality demosaicing for the live image (more CPU)"));
     acq->contentLayout()->addWidget(m_hqPreview);
     root->addWidget(acq);
@@ -232,7 +234,10 @@ bool CameraPanel::connectCamera(int index)
     QString err;
     emit message(tr("Connecting to %1…").arg(QString::fromStdString(m_cameras[size_t(index)].name)), 0);
     if (!m_engine->openCamera(m_cameras[size_t(index)], err)) {
-        emit message(tr("Cannot open camera: %1").arg(err), 10000);
+        emit message(tr("Cannot open camera: %1. Unplug the camera for 5 seconds and plug it in again, or use "
+                        "Tools → Install / repair camera driver.")
+                         .arg(err),
+                     15000);
         m_info->setText(tr("Error: %1").arg(err));
         updateEnabled();
         return false;
