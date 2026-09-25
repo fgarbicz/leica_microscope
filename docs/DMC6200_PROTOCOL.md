@@ -132,3 +132,12 @@ frames. Only removing power fixes this.
   the camera, using `UcsiControl.exe` from Microsoft's MUTT package. The PD
   controller drops VBUS, the camera reboots cleanly and reports `IMX174` again.
   The script enables the UCSI test interface only for the duration of the reset.
+
+  **Reliability:** this recovered the stuck camera once (2026-09-25: the port
+  read *disconnected* 10 s after the reset, and the camera came back with a
+  fresh firmware boot). Later hard resets sent to the same port while the camera
+  was working were accepted (CCI "command completed") but ignored: the port never
+  disconnected, and streaming continued. The PD firmware apparently only acts on
+  it in some states. `dmctest --usbc-cycle` (native implementation in
+  `src/camera/usb/UsbCPower.cpp`, admin rights needed) watches the connector and
+  reports whether power was really removed. If it was not, unplug the camera.

@@ -34,6 +34,7 @@ add_library(lmcore STATIC
     src/camera/SimulatedCamera.cpp
     src/camera/MFCamera.cpp
     src/camera/usb/WinUsbDevice.cpp
+    src/camera/usb/UsbCPower.cpp
     src/camera/leica/Dmc6200Protocol.cpp
     src/camera/leica/Dmc6200Camera.cpp
 )

@@ -7,6 +7,10 @@
 # (MUTT) package: https://www.microsoft.com/download/details.aspx?id=51604
 # (x64_ucsicontrol inside the MSI's cabinet, renamed to UcsiControl.exe).
 #
+# NOTE: the PD controller does not always act on the reset (see
+# docs/DMC6200_PROTOCOL.md, "Recovery"); dmctest --usbc-cycle reports whether
+# the port really switched off.
+#
 # Only the connector that sources power to a USB device (the camera) is reset;
 # a connector that charges the laptop is never touched.
 param(

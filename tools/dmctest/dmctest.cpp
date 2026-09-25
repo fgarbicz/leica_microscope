@@ -1,10 +1,12 @@
 // Command line test for the native DMC6200 driver (no Leica/Jenoptik software).
 #include "camera/leica/Dmc6200Protocol.h"
+#include "camera/usb/UsbCPower.h"
 
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace lm;
@@ -24,6 +26,31 @@ static std::vector<dmc::SequenceEntry> liveSequence(uint32_t gainA, uint32_t gai
 
 int main(int argc, char **argv)
 {
+    if (argc > 1 && std::string(argv[1]) == "--usbc-status") {
+        // needs administrator rights: enables the UCSI test interface temporarily
+        std::string err;
+        if (!usbc::setTestInterface(true, err))
+            printf("enable: %s\n", err.c_str());
+        std::vector<usbc::ConnectorStatus> conns;
+        for (int i = 0; i < 50 && !usbc::queryConnectors(conns, err); ++i)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (conns.empty())
+            printf("query: %s\n", err.c_str());
+        for (const auto &c : conns)
+            printf("connector %d: connected=%d providing=%d usb=%d alt=%d mode=%d partner=%d\n", c.number, c.connected,
+                   c.providingPower, c.usbPartner, c.altModePartner, c.powerOperationMode, c.partnerType);
+        err.clear();
+        printf("camera connector: %d %s\n", usbc::findPoweredUsbDeviceConnector(conns, err), err.c_str());
+        if (!usbc::setTestInterface(false, err))
+            printf("disable: %s\n", err.c_str());
+        return 0;
+    }
+    if (argc > 1 && std::string(argv[1]) == "--usbc-cycle") {
+        std::string log;
+        const bool ok = usbc::powerCycleCameraPort(log);
+        printf("%s%s\n", log.c_str(), ok ? "OK" : "FAILED");
+        return ok ? 0 : 2;
+    }
     const int frames = argc > 1 ? atoi(argv[1]) : 30;
     auto paths = dmc::Protocol::findDevices();
     if (paths.empty()) {
