@@ -558,6 +558,11 @@ void MainWindow::startup()
         const bool anyLeica = std::any_of(cams.begin(), cams.end(), [](const CameraInfo &c) { return c.backend == "Leica USB"; });
         if (!anyLeica)
             showMessage(tr("No Leica camera found. Check the USB cable, or install the driver (Tools menu)."), 15000);
+        // keep looking for the camera (plugged in later, or power cycled)
+        m_lostCameraId.clear();
+        m_view->setPlaceholder(tr("Waiting for the Leica camera…\n\nConnect the camera (USB 3.0). If it is connected, unplug it for "
+                                  "5 seconds and plug it back in.\nThe live image starts automatically."));
+        m_reconnect.start();
     }
     onCameraChanged();
 }
@@ -925,6 +930,8 @@ void MainWindow::onCameraLost(const QString &reason)
     m_cameraPanel->syncFromCamera();
     onCameraChanged();
     m_view->setStatusText(tr("CAMERA DISCONNECTED — reconnecting automatically…"));
+    m_view->setPlaceholder(tr("Camera disconnected.\n\nReconnecting automatically. If this persists, unplug the camera's "
+                              "USB cable for 5 seconds and plug it back in."));
     showMessage(tr("Camera connection lost: %1").arg(reason), 0);
     m_reconnect.start();
 }

@@ -77,6 +77,16 @@ bool Dmc6200Camera::open(std::string &error)
     m_proto.command(dmc::Cmd::MaxPacket, {}, 4, &r);
     m_serial = m_proto.serial();
     m_sensor = m_proto.sensorName();
+    // After a USB-only reset (the camera kept its power) the sensor board is not
+    // initialised: the firmware then reports a synthetic placeholder sensor and
+    // cannot deliver images. Only a power cycle recovers it.
+    if (m_sensor.find("Synth") != std::string::npos || m_sensor.empty()) {
+        error = "The camera's sensor is not ready (it reports \"" + (m_sensor.empty() ? std::string("no sensor") : m_sensor)
+                + "\"). Unplug the camera's USB cable for 5 seconds and plug it back in; "
+                  "the application reconnects automatically.";
+        m_proto.close();
+        return false;
+    }
     std::vector<uint32_t> v;
     if (m_proto.readRegisters({dmc::Reg::SensorWidth, dmc::Reg::SensorHeight, dmc::Reg::AdcBits}, v)) {
         m_sensorW = int(v[0]);
