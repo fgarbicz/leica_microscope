@@ -2,6 +2,7 @@
 
 #include "app/AppSettings.h"
 #include "io/ImageIO.h"
+#include "ui/CompareWindow.h"
 #include "ui/GalleryWidget.h"
 #include "ui/ImageView.h"
 
@@ -49,6 +50,8 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
     auto *openExt = tb->addAction(tr("Open externally"));
     auto *reveal = tb->addAction(tr("Show in Explorer"));
     tb->addSeparator();
+    auto *compare = tb->addAction(tr("Compare"));
+    compare->setToolTip(tr("Compare two selected images side by side"));
     auto *rename = tb->addAction(tr("Rename…"));
     auto *del = tb->addAction(tr("Delete…"));
     root->addWidget(tb);
@@ -126,6 +129,15 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
             QProcess::startDetached(QStringLiteral("explorer.exe"), {QStringLiteral("/select,"), QDir::toNativeSeparators(sel.first())});
         else
             QDesktopServices::openUrl(QUrl::fromLocalFile(m_folder));
+    });
+    connect(compare, &QAction::triggered, this, [this] {
+        const auto sel = selectedPaths();
+        auto *w = new CompareWindow(this);
+        if (sel.size() >= 1)
+            w->openLeft(sel[0]);
+        if (sel.size() >= 2)
+            w->openRight(sel[1]);
+        w->show();
     });
     connect(rename, &QAction::triggered, this, [this] {
         const auto sel = selectedPaths();

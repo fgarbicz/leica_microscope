@@ -7,6 +7,7 @@
 #include "ui/CaptureDialog.h"
 #include "ui/CapturePanel.h"
 #include "ui/ColorPanel.h"
+#include "ui/CompareWindow.h"
 #include "ui/GalleryWidget.h"
 #include "ui/HistogramWidget.h"
 #include "ui/ImageView.h"
@@ -583,6 +584,13 @@ void MainWindow::buildMenus()
         m_process->stitchFromFiles();
     });
     proc->addAction(tr("Set &pixel size…"), m_process, &ProcessPage::setCalibration);
+    proc->addSeparator();
+    proc->addAction(tr("&Compare two images…"), QKeySequence(tr("Ctrl+K")), this, [this] {
+        auto *w = new CompareWindow(this);
+        if (m_process->hasImage() && !m_process->currentPath().isEmpty())
+            w->openLeft(m_process->currentPath());
+        w->show();
+    });
 
     // ---- Tools
     QMenu *tools = menuBar()->addMenu(tr("&Tools"));

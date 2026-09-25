@@ -69,6 +69,7 @@ add_executable(DMImaging WIN32
     src/ui/Theme.cpp
     src/ui/SettingsDialog.cpp
     src/ui/CaptureDialog.cpp
+    src/ui/CompareWindow.cpp
     resources/resources.qrc
     resources/app.rc
 )

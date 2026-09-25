@@ -311,8 +311,10 @@ void ImageView::drawMinimap(QPainter &p)
 {
     const double maxW = 180, maxH = 130;
     const double s = std::min(maxW / m_image.width(), maxH / m_image.height());
-    const QRectF mr(width() - m_image.width() * s - 14, height() - m_image.height() * s - 14, m_image.width() * s,
-                    m_image.height() * s);
+    // top corner opposite to the scale bar (scale bar positions: 0 TL, 1 TR, 2 BL, 3 BR)
+    const bool left = m_overlays && m_overlays->scaleBarPosition == 1;
+    const double mw = m_image.width() * s, mh = m_image.height() * s;
+    const QRectF mr(left ? 14 : width() - mw - 14, 14, mw, mh);
     p.setPen(QColor(255, 255, 255, 160));
     p.setBrush(Qt::NoBrush);
     p.setRenderHint(QPainter::SmoothPixmapTransform);
@@ -332,6 +334,7 @@ void ImageView::wheelEvent(QWheelEvent *e)
         return;
     const double steps = e->angleDelta().y() / 120.0;
     setZoom(m_zoom * std::pow(1.2, steps), e->position());
+    emit viewChanged();
     e->accept();
 }
 
@@ -390,6 +393,7 @@ void ImageView::mouseMoveEvent(QMouseEvent *e)
         m_center = m_panCenterStart - QPointF(e->pos() - m_panStart) / m_zoom;
         clampCenter();
         update();
+        emit viewChanged();
         return;
     }
     if (m_layer)
@@ -430,6 +434,7 @@ void ImageView::mouseDoubleClickEvent(QMouseEvent *e)
             setZoom(1.0, e->position());
         else
             zoomFit();
+        emit viewChanged();
     }
 }
 
@@ -464,6 +469,29 @@ void ImageView::contextMenuEvent(QContextMenuEvent *e)
     if (m_layer && m_layer->tool() != 0) // drawing tools use the right button
         return;
     emit contextMenuRequested(e->globalPos());
+}
+
+QPointF ImageView::relativeCenter() const
+{
+    if (m_image.isNull())
+        return {0.5, 0.5};
+    return {m_center.x() / m_image.width(), m_center.y() / m_image.height()};
+}
+
+void ImageView::setViewState(const QPointF &rel, double zoom, bool fit)
+{
+    if (m_image.isNull())
+        return;
+    if (fit) {
+        zoomFit();
+        return;
+    }
+    m_fit = false;
+    m_zoom = std::clamp(zoom, 0.02, 64.0);
+    m_center = QPointF(rel.x() * m_image.width(), rel.y() * m_image.height());
+    clampCenter();
+    emit zoomChanged(m_zoom);
+    update();
 }
 
 QImage ImageView::renderWithOverlays(bool scaleBar, bool annotations) const

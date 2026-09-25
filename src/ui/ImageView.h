@@ -54,6 +54,10 @@ public:
     // Renders the currently visible image with overlays at image resolution.
     QImage renderWithOverlays(bool scaleBar, bool annotations) const;
 
+    // View state in relative image coordinates (0..1), for synchronising views
+    QPointF relativeCenter() const;
+    void setViewState(const QPointF &relCenter, double zoom, bool fit);
+
 public slots:
     void zoomFit();
     void zoomActual();
@@ -68,6 +72,7 @@ signals:
     void pickCancelled();
     void zoomChanged(double zoom);
     void contextMenuRequested(const QPoint &globalPos);
+    void viewChanged(); // zoom or pan changed by the user
 
 protected:
     void paintEvent(QPaintEvent *) override;
