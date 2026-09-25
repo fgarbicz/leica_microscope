@@ -24,6 +24,13 @@ setting: to change a value, drag its slider, type in its box, or use the arrow k
 This is deliberate — scrolling past a control used to alter the exposure or the
 objective by accident.
 
+**If the text is too small** (or too large), change *Interface size* in
+*File → Settings*: it ranges from 75% to 200% and scales the text, the controls and
+the icons together. The list previews each size as you pick it. It is also on the
+*View → Interface size* menu, with Ctrl+Shift+Plus and Ctrl+Shift+Minus (Cmd on a
+Mac) to step up and down and Ctrl+Shift+0 to go back to the default. The setting is
+remembered and applies immediately — there is no need to restart.
+
 The window has three workspaces (tabs at the top):
 
 | Workspace | Purpose |

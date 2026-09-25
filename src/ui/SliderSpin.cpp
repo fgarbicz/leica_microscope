@@ -1,5 +1,8 @@
 #include "SliderSpin.h"
 
+#include "ui/Icons.h"
+#include "ui/Theme.h"
+
 #include <QDoubleSpinBox>
 #include <QGridLayout>
 #include <QLabel>
@@ -32,7 +35,7 @@ SliderSpin::SliderSpin(const QString &label, double min, double max, int decimal
     m_spin->setKeyboardTracking(false);
     m_spin->setSuffix(suffix);
     // wide enough for "20.000 ms" and "1.00 x" in every platform font
-    m_spin->setMinimumWidth(104);
+    m_spin->setMinimumWidth(px(104));
     m_spin->setAlignment(Qt::AlignRight);
     m_spin->setSingleStep(m_log ? std::pow(10.0, -decimals) * 10 : (max - min) / 100.0);
     if (m_log)
@@ -102,8 +105,10 @@ void SliderSpin::setDefault(double v)
     if (!m_reset) {
         m_reset = new QToolButton(this);
         m_reset->setObjectName(QStringLiteral("ResetButton"));
-        m_reset->setText(QStringLiteral("⟲"));
-        m_reset->setToolTip(tr("Reset to default (%1)").arg(v));
+        m_reset->setIcon(icon(Icon::Reset, theme().subText, 13));
+        m_reset->setProperty("lmIconBase", 13);
+        m_reset->setIconSize(iconSize(13));
+        m_reset->setToolTip(tr("Reset to the default (%1)").arg(v));
         m_reset->setAutoRaise(true);
         static_cast<QGridLayout *>(layout())->addWidget(m_reset, 1, 2);
         connect(m_reset, &QToolButton::clicked, this, [this] { setValueAndEmit(m_default); });

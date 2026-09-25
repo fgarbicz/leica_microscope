@@ -34,6 +34,7 @@ CameraPanel::CameraPanel(AcquisitionEngine *engine, QWidget *parent) : QWidget(p
 
     // --- device
     auto *dev = group->addSection(tr("Device"), Icon::Plug);
+    m_deviceSection = dev;
     auto *row = new QHBoxLayout;
     m_cameraCombo = new QComboBox(this);
     m_cameraCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
@@ -71,6 +72,7 @@ CameraPanel::CameraPanel(AcquisitionEngine *engine, QWidget *parent) : QWidget(p
 
     // --- acquisition
     auto *acq = group->addSection(tr("Exposure"), Icon::Exposure);
+    m_exposureSection = acq;
     m_resolution = new QComboBox(this);
     auto *resLabel = new QLabel(tr("Image format"), this);
     resLabel->setObjectName(QStringLiteral("ControlLabel"));
@@ -141,6 +143,7 @@ CameraPanel::CameraPanel(AcquisitionEngine *engine, QWidget *parent) : QWidget(p
         if (m_engine->camera())
             m_engine->camera()->setExposure(v);
         AppSettings::instance().exposureMs = v;
+        updateSummaries();
     });
     auto updateAe = [this] {
         AutoExposureSettings ae = m_engine->autoExposure();
@@ -153,6 +156,7 @@ CameraPanel::CameraPanel(AcquisitionEngine *engine, QWidget *parent) : QWidget(p
         S2.aeTarget = ae.target;
         m_exposure->setEnabledControls(m_canSetExposure && !ae.enabled);
         m_gain->setEnabledControls(m_canSetGain && !(ae.enabled && ae.allowGain));
+        updateSummaries();
     };
     connect(m_autoExposure, &QCheckBox::toggled, this, updateAe);
     connect(m_aeGain, &QCheckBox::toggled, this, updateAe);
@@ -165,6 +169,7 @@ CameraPanel::CameraPanel(AcquisitionEngine *engine, QWidget *parent) : QWidget(p
         if (m_engine->camera())
             m_engine->camera()->setGain(v);
         AppSettings::instance().gain = v;
+        updateSummaries();
     });
     connect(m_hqPreview, &QCheckBox::toggled, this, [this](bool on) { m_engine->setPreviewQuality(on); });
     connect(flipH, &QPushButton::toggled, this, [this](bool on) {
@@ -199,6 +204,27 @@ CameraPanel::CameraPanel(AcquisitionEngine *engine, QWidget *parent) : QWidget(p
     });
     updateAe();
     updateEnabled();
+}
+
+// Short lines for the collapsed section headers, so the panel still says what
+// the camera is doing when everything is folded away.
+void CameraPanel::updateSummaries()
+{
+    Camera *cam = m_engine->camera();
+    if (m_deviceSection)
+        m_deviceSection->setSummary(cam ? QString::fromStdString(cam->info().name) : tr("not connected"));
+    if (m_exposureSection) {
+        if (!cam) {
+            m_exposureSection->setSummary(QString());
+        } else if (m_autoExposure->isChecked()) {
+            m_exposureSection->setSummary(tr("auto"));
+        } else {
+            const double ms = m_exposure->value();
+            const QString t = ms >= 1000 ? tr("%1 s").arg(ms / 1000, 0, 'g', 3) : tr("%1 ms").arg(ms, 0, 'g', 3);
+            const double g = m_gain->value();
+            m_exposureSection->setSummary(g > 1.005 ? tr("%1 · %2×").arg(t).arg(g, 0, 'f', 1) : t);
+        }
+    }
 }
 
 void CameraPanel::setStatus(const QString &text, const char *role)
@@ -326,6 +352,7 @@ void CameraPanel::syncFromCamera()
         lines << QString::fromStdString(cam->info().backend);
     m_info->setText(lines.join(QLatin1Char('\n')));
     buildAdvanced();
+    updateSummaries();
     updateEnabled();
 }
 
@@ -368,6 +395,7 @@ void CameraPanel::setExposureDisplay(double ms, double gain)
     m_gain->setValue(gain);
     AppSettings::instance().exposureMs = ms;
     AppSettings::instance().gain = gain;
+    updateSummaries();
 }
 
 void CameraPanel::onConnectClicked()

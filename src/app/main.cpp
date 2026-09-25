@@ -127,7 +127,7 @@ int main(int argc, char **argv)
 
     auto &S = lm::AppSettings::instance();
     S.load();
-    lm::applyTheme(app, S.theme);
+    lm::applyTheme(app, S.theme, S.uiScale);
     // the mouse wheel scrolls the panels; it never changes a value
     lm::WheelGuard::install(app);
 

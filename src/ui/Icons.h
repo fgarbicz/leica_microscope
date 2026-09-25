@@ -79,12 +79,14 @@ enum class Icon {
     ScaleBar,
 };
 
-// Themed icon (uses ThemeColors::text, dimmed for the disabled state).
-QIcon icon(Icon which, int px = 16);
+// Themed icon (uses ThemeColors::subText, dimmed for the disabled state).
+// `size` is the size at 100% interface scale; the icon carries larger
+// resolutions too, so it stays sharp when the interface is enlarged.
+QIcon icon(Icon which, int size = 16);
 // Icon in an explicit colour, e.g. a panel group's colour.
-QIcon icon(Icon which, const QColor &color, int px = 16);
-// Single pixmap, for painting into a widget.
-QPixmap iconPixmap(Icon which, const QColor &color, int px);
+QIcon icon(Icon which, const QColor &color, int size = 16);
+// Single pixmap at exactly this size, for painting into a widget.
+QPixmap iconPixmap(Icon which, const QColor &color, int size);
 
 // Called by applyTheme(): drops the cache so icons are redrawn in the new
 // colours.

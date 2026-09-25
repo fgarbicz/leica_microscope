@@ -78,6 +78,9 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
 
     // ---- toolbar
     auto *tb = new QToolBar(this);
+    // icon plus label: the icons help people find an action again, the words
+    // say what it does the first time
+    tb->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     tb->setToolButtonStyle(Qt::ToolButtonTextOnly);
     tb->addAction(icon(Icon::Open, theme().subText, 16), tr("Open…"), this, &ProcessPage::openDialog);
     tb->addAction(icon(Icon::Save, theme().subText, 16), tr("Save as…"), this, &ProcessPage::saveAs);

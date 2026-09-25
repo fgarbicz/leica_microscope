@@ -28,8 +28,10 @@ namespace lm {
 SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent)
 {
     setWindowTitle(tr("Settings"));
-    resize(560, 360);
+    resize(560, 400);
     auto &S = AppSettings::instance();
+    m_themeOnEntry = S.theme;
+    m_scaleOnEntry = S.uiScale;
     auto *lay = new QVBoxLayout(this);
     auto *form = new QFormLayout;
     m_theme = new QComboBox(this);
@@ -37,6 +39,30 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent)
     m_theme->addItem(tr("Light"), QStringLiteral("light"));
     m_theme->setCurrentIndex(S.theme == QLatin1String("light") ? 1 : 0);
     form->addRow(tr("Appearance"), m_theme);
+
+    // Interface size. It previews immediately, because judging a text size from
+    // a number in a list does not work.
+    m_uiScale = new QComboBox(this);
+    const QList<QPair<int, QString>> sizes = {
+        {75, tr("75%  (very small)")},   {85, tr("85%  (small)")},
+        {100, tr("100%  (default)")},    {115, tr("115%  (large)")},
+        {130, tr("130%  (larger)")},     {150, tr("150%  (very large)")},
+        {175, tr("175%  (huge)")},       {200, tr("200%  (maximum)")},
+    };
+    for (const auto &[value, label] : sizes)
+        m_uiScale->addItem(label, value);
+    int idx = m_uiScale->findData(S.uiScale);
+    if (idx < 0) { // a size set by hand, between the steps
+        m_uiScale->addItem(tr("%1%").arg(S.uiScale), S.uiScale);
+        idx = m_uiScale->count() - 1;
+    }
+    m_uiScale->setCurrentIndex(idx);
+    // the same shortcuts as View > Interface size (Ctrl/Cmd is for image zoom)
+    m_uiScale->setToolTip(tr("Size of the text, controls and icons of the whole application. "
+                             "Also on the View menu, with %1 and %2.")
+                              .arg(QKeySequence(QStringLiteral("Ctrl+Shift+=")).toString(QKeySequence::NativeText),
+                                   QKeySequence(QStringLiteral("Ctrl+Shift+-")).toString(QKeySequence::NativeText)));
+    form->addRow(tr("Interface size"), m_uiScale);
     m_operator = new QLineEdit(S.capture.operatorName, this);
     form->addRow(tr("Operator"), m_operator);
     auto *fr = new QHBoxLayout;
@@ -71,7 +97,17 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent)
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     lay->addWidget(bb);
     connect(bb, &QDialogButtonBox::accepted, this, &SettingsDialog::accept);
-    connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(bb, &QDialogButtonBox::rejected, this, [this] {
+        // put back what the previews changed
+        emit appearanceChanged(m_themeOnEntry, m_scaleOnEntry);
+        reject();
+    });
+    connect(m_theme, &QComboBox::activated, this, [this] {
+        emit appearanceChanged(m_theme->currentData().toString(), m_uiScale->currentData().toInt());
+    });
+    connect(m_uiScale, &QComboBox::activated, this, [this] {
+        emit appearanceChanged(m_theme->currentData().toString(), m_uiScale->currentData().toInt());
+    });
     connect(browse, &QToolButton::clicked, this, [this] {
         const QString d = QFileDialog::getExistingDirectory(this, tr("Image folder"), m_folder->text());
         if (!d.isEmpty())
@@ -96,16 +132,15 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent)
 void SettingsDialog::accept()
 {
     auto &S = AppSettings::instance();
-    const QString theme = m_theme->currentData().toString();
-    const bool themeChangedFlag = theme != S.theme;
-    S.theme = theme;
+    S.theme = m_theme->currentData().toString();
+    S.uiScale = m_uiScale->currentData().toInt();
     S.capture.operatorName = m_operator->text();
     S.capture.folder = m_folder->text();
     S.capture.pattern = m_pattern->text();
     S.capture.counterDigits = m_digits->value();
     S.save();
-    if (themeChangedFlag)
-        emit themeChanged(theme);
+    // the previews already applied these; this makes them stick
+    emit appearanceChanged(S.theme, S.uiScale);
     QDialog::accept();
 }
 

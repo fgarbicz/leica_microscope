@@ -1,3 +1,4 @@
+#include "ui/Theme.h"
 #include "GalleryWidget.h"
 
 #include "ui/PlatformUi.h"
@@ -45,14 +46,14 @@ GalleryWidget::GalleryWidget(QWidget *parent) : QListWidget(parent)
     setViewMode(QListView::IconMode);
     setFlow(QListView::LeftToRight);
     setWrapping(false);
-    setIconSize(QSize(150, 100));
-    setGridSize(QSize(170, 132));
+    setIconSize(QSize(px(150), px(100)));
+    setGridSize(QSize(px(170), px(132)));
     setMovement(QListView::Static);
     setResizeMode(QListView::Adjust);
     setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
     setSelectionMode(QAbstractItemView::ExtendedSelection);
     setTextElideMode(Qt::ElideMiddle);
-    setMinimumHeight(140);
+    setMinimumHeight(px(140));
     connect(this, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *it) {
         emit openRequested(it->data(Qt::UserRole).toString());
     });

@@ -3,6 +3,7 @@
 #include "ui/CollapsibleSection.h"
 #include "ui/Theme.h"
 
+#include <QEvent>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -21,10 +22,10 @@ PanelGroup::PanelGroup(const QString &title, Icon iconId, const QColor &color, Q
     auto *header = new QWidget(this);
     header->setObjectName(QStringLiteral("PanelGroupHeader"));
     auto *hl = new QHBoxLayout(header);
-    hl->setContentsMargins(10, 9, 10, 5);
-    hl->setSpacing(7);
+    hl->setContentsMargins(px(10), px(9), px(10), px(5));
+    hl->setSpacing(px(7));
     m_icon = new QLabel(header);
-    m_icon->setPixmap(iconPixmap(iconId, color, 15));
+    updateIcon();
     hl->addWidget(m_icon);
     m_title = new QLabel(title.toUpper(), header);
     m_title->setObjectName(QStringLiteral("GroupTitle"));
@@ -36,7 +37,7 @@ PanelGroup::PanelGroup(const QString &title, Icon iconId, const QColor &color, Q
     // when every section is collapsed.
     auto *rule = new QFrame(this);
     rule->setFrameShape(QFrame::NoFrame);
-    rule->setFixedHeight(2);
+    rule->setFixedHeight(px(2));
     rule->setStyleSheet(QStringLiteral("background: %1;").arg(color.name()));
     outer->addWidget(rule);
 
@@ -59,6 +60,21 @@ void PanelGroup::addSection(CollapsibleSection *section)
 {
     section->setParent(this);
     m_sections->addWidget(section);
+}
+
+void PanelGroup::updateIcon()
+{
+    QPixmap pm = iconPixmap(m_iconId, m_color, px(15));
+    pm.setDevicePixelRatio(pm.devicePixelRatio());
+    m_icon->setPixmap(pm);
+}
+
+void PanelGroup::changeEvent(QEvent *e)
+{
+    QWidget::changeEvent(e);
+    // the interface size changed: the style sheet and the font were replaced
+    if (e->type() == QEvent::StyleChange || e->type() == QEvent::FontChange)
+        updateIcon();
 }
 
 void PanelGroup::addWidget(QWidget *w)

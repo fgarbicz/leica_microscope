@@ -49,6 +49,9 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
     root->setSpacing(0);
 
     auto *tb = new QToolBar(this);
+    // icon plus label: the icons help people find an action again, the words
+    // say what it does the first time
+    tb->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     auto *up = tb->addAction(icon(Icon::Up, theme().subText, 16), tr("Up"));
     auto *refreshAct = tb->addAction(icon(Icon::Refresh, theme().subText, 16), tr("Refresh"));
     tb->addSeparator();
@@ -74,12 +77,12 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
     // the model is created in ensureLoaded(); see the header
     m_tree = new QTreeView(split);
     m_tree->setHeaderHidden(true);
-    m_tree->setMinimumWidth(200);
+    m_tree->setMinimumWidth(px(200));
 
     m_grid = new QListWidget(split);
     m_grid->setViewMode(QListView::IconMode);
-    m_grid->setIconSize(QSize(160, 110));
-    m_grid->setGridSize(QSize(180, 150));
+    m_grid->setIconSize(QSize(px(160), px(110)));
+    m_grid->setGridSize(QSize(px(180), px(150)));
     m_grid->setResizeMode(QListView::Adjust);
     m_grid->setMovement(QListView::Static);
     m_grid->setSelectionMode(QAbstractItemView::ExtendedSelection);
