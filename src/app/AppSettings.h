@@ -21,7 +21,7 @@ struct CaptureSettings {
     int shotMode = -1;                       // -1 = single shot, else camera shot mode (pixel shift)
     bool burnScaleBar = false;               // render scale bar into exported pixels
     bool burnAnnotations = false;
-    bool askForNotes = false;
+    bool promptAfterCapture = true;          // ask for magnification + name after each capture
     bool openInProcess = false;              // switch to Process workspace after capture
     QString sample = QStringLiteral("Sample");
     QString operatorName;

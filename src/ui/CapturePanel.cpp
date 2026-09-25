@@ -105,6 +105,8 @@ CapturePanel::CapturePanel(QWidget *parent) : QWidget(parent)
     files->contentLayout()->addWidget(m_burnScale);
     m_openProcess = new QCheckBox(tr("Open captured image in Process"), this);
     files->contentLayout()->addWidget(m_openProcess);
+    m_prompt = new QCheckBox(tr("Ask for magnification and name after capture"), this);
+    files->contentLayout()->addWidget(m_prompt);
     root->addWidget(files);
 
     // --- multifocus
@@ -201,6 +203,7 @@ CapturePanel::CapturePanel(QWidget *parent) : QWidget(parent)
     connect(m_mode, &QComboBox::activated, this, &CapturePanel::store);
     connect(m_burnScale, &QCheckBox::toggled, this, &CapturePanel::store);
     connect(m_openProcess, &QCheckBox::toggled, this, &CapturePanel::store);
+    connect(m_prompt, &QCheckBox::toggled, this, &CapturePanel::store);
     connect(m_tlInterval, &QDoubleSpinBox::valueChanged, this, &CapturePanel::store);
     connect(m_tlCount, &QSpinBox::valueChanged, this, &CapturePanel::store);
     connect(m_tlStart, &QPushButton::toggled, this, &CapturePanel::timelapseToggled);
@@ -246,6 +249,7 @@ void CapturePanel::refreshFromSettings()
     m_average->setValue(c.averageFrames);
     m_burnScale->setChecked(c.burnScaleBar);
     m_openProcess->setChecked(c.openInProcess);
+    m_prompt->setChecked(c.promptAfterCapture);
     m_tlInterval->setValue(c.timelapseIntervalS);
     m_tlCount->setValue(c.timelapseCount);
     m_updating = false;
@@ -268,6 +272,7 @@ void CapturePanel::store()
     c.shotMode = m_mode->currentData().toInt();
     c.burnScaleBar = m_burnScale->isChecked();
     c.openInProcess = m_openProcess->isChecked();
+    c.promptAfterCapture = m_prompt->isChecked();
     c.timelapseIntervalS = m_tlInterval->value();
     c.timelapseCount = m_tlCount->value();
     m_jpegQuality->setEnabled(f.fmt == FileFormat::Jpeg);

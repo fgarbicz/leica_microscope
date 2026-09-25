@@ -66,6 +66,7 @@ add_executable(DMImaging WIN32
     src/ui/Annotations.cpp
     src/ui/Theme.cpp
     src/ui/SettingsDialog.cpp
+    src/ui/CaptureDialog.cpp
     resources/resources.qrc
     resources/app.rc
 )

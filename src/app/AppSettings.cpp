@@ -106,7 +106,7 @@ void AppSettings::load()
     capture.shotMode = s.value(QStringLiteral("shotMode"), -1).toInt();
     capture.burnScaleBar = s.value(QStringLiteral("burnScale"), false).toBool();
     capture.burnAnnotations = s.value(QStringLiteral("burnAnn"), false).toBool();
-    capture.askForNotes = s.value(QStringLiteral("askNotes"), false).toBool();
+    capture.promptAfterCapture = s.value(QStringLiteral("promptAfterCapture"), true).toBool();
     capture.openInProcess = s.value(QStringLiteral("openInProcess"), false).toBool();
     capture.sample = s.value(QStringLiteral("sample"), capture.sample).toString();
     capture.operatorName = s.value(QStringLiteral("operator")).toString();
@@ -166,7 +166,7 @@ void AppSettings::save() const
     s.setValue(QStringLiteral("shotMode"), capture.shotMode);
     s.setValue(QStringLiteral("burnScale"), capture.burnScaleBar);
     s.setValue(QStringLiteral("burnAnn"), capture.burnAnnotations);
-    s.setValue(QStringLiteral("askNotes"), capture.askForNotes);
+    s.setValue(QStringLiteral("promptAfterCapture"), capture.promptAfterCapture);
     s.setValue(QStringLiteral("openInProcess"), capture.openInProcess);
     s.setValue(QStringLiteral("sample"), capture.sample);
     s.setValue(QStringLiteral("operator"), capture.operatorName);

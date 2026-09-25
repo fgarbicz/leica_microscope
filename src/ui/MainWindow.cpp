@@ -4,6 +4,7 @@
 #include "io/ImageIO.h"
 #include "ui/BrowsePage.h"
 #include "ui/CameraPanel.h"
+#include "ui/CaptureDialog.h"
 #include "ui/CapturePanel.h"
 #include "ui/ColorPanel.h"
 #include "ui/GalleryWidget.h"
@@ -132,10 +133,9 @@ MainWindow::MainWindow()
         m_capturePanel->setProgress(done, total);
         showMessage(tr("%1: %2 / %3").arg(what).arg(done).arg(total), 0);
     });
-    connect(m_engine, &AcquisitionEngine::cameraError, this, [this](const QString &m) {
-        showMessage(tr("Camera: %1").arg(m), 15000);
-        QMessageBox::warning(this, tr("Camera"), m);
-    });
+    connect(m_engine, &AcquisitionEngine::cameraError, this, &MainWindow::onCameraLost);
+    m_reconnect.setInterval(2000);
+    connect(&m_reconnect, &QTimer::timeout, this, &MainWindow::tryReconnect);
     connect(m_engine, &AcquisitionEngine::whiteBalanceComputed, this, [this](double r, double g, double b) {
         m_colorPanel->setWhiteBalance(r, g, b);
         showMessage(tr("White balance: R %1  G %2  B %3").arg(r, 0, 'f', 3).arg(g, 0, 'f', 3).arg(b, 0, 'f', 3));
@@ -814,16 +814,50 @@ void MainWindow::onCaptureFinished(std::shared_ptr<CaptureResult> r)
     auto &S = AppSettings::instance();
     QDir().mkpath(S.capture.folder);
     const QString mode = QString::fromStdString(r->kind);
-    QString path = S.nextFileName(shortObjective(m_scope.currentObjective()), mode);
-    while (QFileInfo::exists(path)) {
-        S.capture.counter++;
-        path = S.nextFileName(shortObjective(m_scope.currentObjective()), mode);
+    auto suggested = [&](int objective) {
+        QString p = S.nextFileName(shortObjective(m_scope.objectives.value(objective, m_scope.currentObjective())), mode);
+        while (QFileInfo::exists(p)) {
+            S.capture.counter++;
+            p = S.nextFileName(shortObjective(m_scope.objectives.value(objective, m_scope.currentObjective())), mode);
+        }
+        return p;
+    };
+    QString path = suggested(m_scope.current);
+    QString notes;
+
+    // ask for the objective and the image name (manual microscope: the turret is not coded)
+    if (S.capture.promptAfterCapture && !m_timelapse.isActive()) {
+        const QString info = tr("%1 × %2 px  ·  %3  ·  exposure %4 ms")
+                                 .arg(r->rendered16.width)
+                                 .arg(r->rendered16.height)
+                                 .arg(mode)
+                                 .arg(r->exposureMs, 0, 'g', 4);
+        CaptureDialog dlg(toQImage8(r->rendered8), m_scope, m_scope.current,
+                          [&](int obj) { return QFileInfo(suggested(obj)).completeBaseName(); }, info, this);
+        if (dlg.exec() != QDialog::Accepted) {
+            showMessage(tr("Image discarded"), 4000);
+            return;
+        }
+        if (dlg.objectiveIndex() >= 0 && dlg.objectiveIndex() != m_scope.current) {
+            m_scope.current = dlg.objectiveIndex();
+            m_scope.save();
+            m_scopePanel->refresh();
+            onCalibrationChanged();
+        }
+        notes = dlg.notes();
+        const QString ext = QLatin1Char('.') + extensionFor(S.capture.save.format);
+        path = QDir(S.capture.folder).filePath(dlg.imageName() + ext);
+        for (int n = 2; QFileInfo::exists(path); ++n)
+            path = QDir(S.capture.folder).filePath(QStringLiteral("%1_%2").arg(dlg.imageName()).arg(n) + ext);
     }
     S.capture.counter++;
     S.save();
     updateNextName();
 
-    const ImageMetadata meta = currentMetadata(*r);
+    ImageMetadata meta = currentMetadata(*r);
+    meta.notes = notes;
+    if (S.capture.promptAfterCapture)
+        meta.sample = QFileInfo(path).completeBaseName();
     const SaveOptions opt = S.capture.save;
     const bool burn = S.capture.burnScaleBar;
     const OverlaySettings ov = S.overlays;
@@ -877,6 +911,45 @@ void MainWindow::onTimelapseTick()
     ++m_timelapseDone;
     capture();
     m_capturePanel->setTimelapseRunning(true, m_timelapseDone, c.timelapseCount);
+}
+
+void MainWindow::onCameraLost(const QString &reason)
+{
+    qWarning("camera error: %s", qPrintable(reason));
+    if (m_reconnect.isActive())
+        return;
+    if (Camera *cam = m_engine->camera())
+        m_lostCameraId = QString::fromStdString(cam->info().id);
+    m_timelapse.stop();
+    m_engine->closeCamera();
+    m_cameraPanel->syncFromCamera();
+    onCameraChanged();
+    m_view->setStatusText(tr("CAMERA DISCONNECTED — reconnecting automatically…"));
+    showMessage(tr("Camera connection lost: %1").arg(reason), 0);
+    m_reconnect.start();
+}
+
+void MainWindow::tryReconnect()
+{
+    m_cameraPanel->refreshCameras();
+    const auto cams = m_cameraPanel->cameras();
+    for (int i = 0; i < int(cams.size()); ++i) {
+        const auto &c = cams[size_t(i)];
+        if (QString::fromStdString(c.id) == m_lostCameraId || (m_lostCameraId.isEmpty() && c.backend == "Leica USB")) {
+            if (m_cameraPanel->connectCamera(i)) {
+                QString err;
+                if (m_engine->startLive(err)) {
+                    m_reconnect.stop();
+                    m_view->setStatusText(QString());
+                    showMessage(tr("Camera reconnected"), 5000);
+                    qInfo("camera reconnected");
+                } else {
+                    m_engine->closeCamera();
+                }
+            }
+            return;
+        }
+    }
 }
 
 void MainWindow::showMessage(const QString &text, int timeoutMs)

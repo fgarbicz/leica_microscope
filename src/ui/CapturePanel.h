@@ -60,6 +60,7 @@ private:
     QComboBox *m_mode;
     QCheckBox *m_burnScale;
     QCheckBox *m_openProcess;
+    QCheckBox *m_prompt;
     // time lapse
     QDoubleSpinBox *m_tlInterval;
     QSpinBox *m_tlCount;

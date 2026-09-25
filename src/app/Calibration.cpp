@@ -10,7 +10,7 @@ MicroscopeConfig::MicroscopeConfig() : objectives(defaultObjectives()) {}
 
 QList<Objective> MicroscopeConfig::defaultObjectives()
 {
-    // Typical Leica DM2000 turret (HI PLAN / N PLAN series)
+    // The objectives on this Leica DM2000 (N PLAN series)
     auto o = [](const char *name, double mag, double na, const char *imm = "Dry") {
         Objective ob;
         ob.name = QString::fromLatin1(name);
@@ -19,8 +19,8 @@ QList<Objective> MicroscopeConfig::defaultObjectives()
         ob.immersion = QString::fromLatin1(imm);
         return ob;
     };
-    return {o("HI PLAN 4x/0.10", 4, 0.10),   o("HI PLAN 10x/0.25", 10, 0.25), o("HI PLAN 20x/0.40", 20, 0.40),
-            o("HI PLAN 40x/0.65", 40, 0.65), o("HI PLAN 63x/0.75", 63, 0.75), o("HI PLAN 100x/1.25 Oil", 100, 1.25, "Oil")};
+    return {o("N PLAN 2.5x/0.07", 2.5, 0.07), o("N PLAN 5x/0.12", 5, 0.12),   o("N PLAN 10x/0.25", 10, 0.25),
+            o("N PLAN 20x/0.40", 20, 0.40),   o("N PLAN 40x/0.65", 40, 0.65), o("N PLAN 100x/1.25 Oil", 100, 1.25, "Oil")};
 }
 
 const Objective &MicroscopeConfig::currentObjective() const
@@ -63,6 +63,12 @@ void MicroscopeConfig::load()
 {
     QSettings s;
     s.beginGroup(QStringLiteral("microscope"));
+    // version 2: objective set of this microscope (2.5/5/10/20/40/100x)
+    if (s.value(QStringLiteral("objectivesVersion"), 1).toInt() < 2) {
+        s.remove(QStringLiteral("objectives"));
+        s.setValue(QStringLiteral("objectivesVersion"), 2);
+        s.setValue(QStringLiteral("current"), 4); // 40x
+    }
     microscopeName = s.value(QStringLiteral("name"), microscopeName).toString();
     adapterFactor = s.value(QStringLiteral("adapter"), adapterFactor).toDouble();
     sensorPixelUm = s.value(QStringLiteral("sensorPixel"), sensorPixelUm).toDouble();

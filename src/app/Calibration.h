@@ -22,7 +22,7 @@ public:
     MicroscopeConfig();
 
     QList<Objective> objectives;
-    int current = 3;
+    int current = 4; // 40x
     double adapterFactor = 0.7;   // C-mount adapter magnification
     double sensorPixelUm = 5.86;  // camera pixel pitch
     QString microscopeName = QStringLiteral("Leica DM2000");

@@ -57,6 +57,8 @@ private:
     void showMessage(const QString &text, int timeoutMs = 4000);
     void updateTitle();
     void updateNextName();
+    void onCameraLost(const QString &reason);
+    void tryReconnect();
 
     AcquisitionEngine *m_engine;
     MicroscopeConfig m_scope;
@@ -75,6 +77,8 @@ private:
 
     QLabel *m_statusCamera, *m_statusFps, *m_statusExposure, *m_statusCursor, *m_statusZoom;
     QTimer m_timelapse;
+    QTimer m_reconnect;   // polls for a lost camera
+    QString m_lostCameraId;
     int m_timelapseDone = 0;
     bool m_multifocus = false, m_mosaic = false;
     bool m_capturing = false;
