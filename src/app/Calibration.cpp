@@ -73,6 +73,7 @@ void MicroscopeConfig::load()
     adapterFactor = s.value(QStringLiteral("adapter"), adapterFactor).toDouble();
     sensorPixelUm = s.value(QStringLiteral("sensorPixel"), sensorPixelUm).toDouble();
     current = s.value(QStringLiteral("current"), current).toInt();
+    rememberSettings = s.value(QStringLiteral("rememberSettings"), true).toBool();
     const int n = s.beginReadArray(QStringLiteral("objectives"));
     if (n > 0) {
         objectives.clear();
@@ -85,6 +86,11 @@ void MicroscopeConfig::load()
             o.immersion = s.value(QStringLiteral("immersion"), QStringLiteral("Dry")).toString();
             o.calibratedUmPerPixel = s.value(QStringLiteral("umpp"), 0.0).toDouble();
             o.shadingFile = s.value(QStringLiteral("shading")).toString();
+            o.exposureMs = s.value(QStringLiteral("exposure"), 0.0).toDouble();
+            o.gain = s.value(QStringLiteral("gain"), 1.0).toDouble();
+            o.wbRed = s.value(QStringLiteral("wbR"), 0.0).toDouble();
+            o.wbGreen = s.value(QStringLiteral("wbG"), 0.0).toDouble();
+            o.wbBlue = s.value(QStringLiteral("wbB"), 0.0).toDouble();
             objectives.append(o);
         }
     }
@@ -103,6 +109,7 @@ void MicroscopeConfig::save() const
     s.setValue(QStringLiteral("adapter"), adapterFactor);
     s.setValue(QStringLiteral("sensorPixel"), sensorPixelUm);
     s.setValue(QStringLiteral("current"), current);
+    s.setValue(QStringLiteral("rememberSettings"), rememberSettings);
     s.beginWriteArray(QStringLiteral("objectives"), int(objectives.size()));
     for (int i = 0; i < objectives.size(); ++i) {
         s.setArrayIndex(i);
@@ -113,6 +120,11 @@ void MicroscopeConfig::save() const
         s.setValue(QStringLiteral("immersion"), o.immersion);
         s.setValue(QStringLiteral("umpp"), o.calibratedUmPerPixel);
         s.setValue(QStringLiteral("shading"), o.shadingFile);
+        s.setValue(QStringLiteral("exposure"), o.exposureMs);
+        s.setValue(QStringLiteral("gain"), o.gain);
+        s.setValue(QStringLiteral("wbR"), o.wbRed);
+        s.setValue(QStringLiteral("wbG"), o.wbGreen);
+        s.setValue(QStringLiteral("wbB"), o.wbBlue);
     }
     s.endArray();
     s.endGroup();

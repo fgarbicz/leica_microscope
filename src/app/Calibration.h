@@ -15,6 +15,9 @@ struct Objective {
     QString immersion = QStringLiteral("Dry");
     double calibratedUmPerPixel = 0.0; // 0 = use nominal
     QString shadingFile;               // flat-field reference for this objective
+    // camera settings last used with this objective (exposureMs 0 = none stored)
+    double exposureMs = 0.0, gain = 1.0;
+    double wbRed = 0.0, wbGreen = 0.0, wbBlue = 0.0;
 };
 
 class MicroscopeConfig {
@@ -26,6 +29,7 @@ public:
     double adapterFactor = 0.7;   // C-mount adapter magnification
     double sensorPixelUm = 5.86;  // camera pixel pitch
     QString microscopeName = QStringLiteral("Leica DM2000");
+    bool rememberSettings = true; // restore exposure/gain/WB when the objective changes
 
     const Objective &currentObjective() const;
     Objective &currentObjective();

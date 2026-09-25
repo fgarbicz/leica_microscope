@@ -84,6 +84,10 @@ private:
     bool m_capturing = false;
     QList<QPoint> m_calibPoints;
     LiveStats m_lastStats;
+    int m_prevObjective = -1;
+    bool m_objectiveFromCapture = false;
+    void storeObjectiveSettings(int index);
+    void restoreObjectiveSettings(int index);
 };
 
 } // namespace lm

@@ -681,8 +681,54 @@ void MainWindow::onCameraChanged()
     updateTitle();
 }
 
+void MainWindow::storeObjectiveSettings(int index)
+{
+    if (index < 0 || index >= m_scope.objectives.size())
+        return;
+    Objective &o = m_scope.objectives[index];
+    Camera *cam = m_engine->camera();
+    o.exposureMs = cam ? cam->exposure() : AppSettings::instance().exposureMs;
+    o.gain = cam ? cam->gain() : AppSettings::instance().gain;
+    const ColorSettings cs = m_engine->colorSettings();
+    o.wbRed = cs.wbRed;
+    o.wbGreen = cs.wbGreen;
+    o.wbBlue = cs.wbBlue;
+}
+
+void MainWindow::restoreObjectiveSettings(int index)
+{
+    if (index < 0 || index >= m_scope.objectives.size())
+        return;
+    const Objective &o = m_scope.objectives[index];
+    if (o.exposureMs <= 0)
+        return; // nothing stored yet for this objective
+    if (Camera *cam = m_engine->camera()) {
+        if (!m_engine->autoExposure().enabled)
+            cam->setExposure(o.exposureMs);
+        cam->setGain(o.gain);
+        m_cameraPanel->setExposureDisplay(cam->exposure(), cam->gain());
+    }
+    if (o.wbRed > 0 && o.wbGreen > 0 && o.wbBlue > 0)
+        m_colorPanel->setWhiteBalance(o.wbRed, o.wbGreen, o.wbBlue);
+    showMessage(tr("%1: exposure %2 ms and white balance restored").arg(m_scope.objectiveLabel(o)).arg(o.exposureMs, 0, 'g', 4));
+}
+
 void MainWindow::onCalibrationChanged()
 {
+    // objective switched: keep per-objective camera settings
+    if (m_prevObjective != m_scope.current) {
+        if (m_prevObjective >= 0 && m_scope.rememberSettings) {
+            if (m_objectiveFromCapture) {
+                // the settings just used belong to the objective chosen in the capture dialog
+                storeObjectiveSettings(m_scope.current);
+            } else {
+                storeObjectiveSettings(m_prevObjective);
+                restoreObjectiveSettings(m_scope.current);
+            }
+            m_scope.save();
+        }
+        m_prevObjective = m_scope.current;
+    }
     m_view->setUmPerPixel(m_scope.umPerPixel() / std::max(0.01, m_lastStats.displayScale));
     loadShadingForObjective();
     updateNextName();
@@ -847,7 +893,9 @@ void MainWindow::onCaptureFinished(std::shared_ptr<CaptureResult> r)
             m_scope.current = dlg.objectiveIndex();
             m_scope.save();
             m_scopePanel->refresh();
+            m_objectiveFromCapture = true;
             onCalibrationChanged();
+            m_objectiveFromCapture = false;
         }
         notes = dlg.notes();
         const QString ext = QLatin1Char('.') + extensionFor(S.capture.save.format);
@@ -938,6 +986,12 @@ void MainWindow::onCameraLost(const QString &reason)
 
 void MainWindow::tryReconnect()
 {
+    if (m_engine->camera()) {
+        // the user connected a camera manually in the meantime
+        m_reconnect.stop();
+        m_view->setStatusText(QString());
+        return;
+    }
     m_cameraPanel->refreshCameras();
     const auto cams = m_cameraPanel->cameras();
     for (int i = 0; i < int(cams.size()); ++i) {
@@ -1004,6 +1058,8 @@ void MainWindow::closeEvent(QCloseEvent *e)
     QSettings qs;
     qs.setValue(QStringLiteral("ui/geometry"), saveGeometry());
     AppSettings::instance().save();
+    if (m_scope.rememberSettings && m_engine->camera())
+        storeObjectiveSettings(m_scope.current);
     m_scope.save();
     m_engine->closeCamera();
     e->accept();

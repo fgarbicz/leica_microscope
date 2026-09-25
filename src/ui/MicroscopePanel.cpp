@@ -43,6 +43,14 @@ MicroscopePanel::MicroscopePanel(MicroscopeConfig *config, QWidget *parent) : QW
     m_scaleInfo->setObjectName(QStringLiteral("Hint"));
     m_scaleInfo->setWordWrap(true);
     sec->contentLayout()->addWidget(m_scaleInfo);
+    auto *remember = new QCheckBox(tr("Remember exposure && white balance per objective"), this);
+    remember->setChecked(m_cfg->rememberSettings);
+    remember->setToolTip(tr("Each objective keeps its own exposure, gain and white balance; they are restored when you switch."));
+    connect(remember, &QCheckBox::toggled, this, [this](bool on) {
+        m_cfg->rememberSettings = on;
+        m_cfg->save();
+    });
+    sec->contentLayout()->addWidget(remember);
     auto *row = new QHBoxLayout;
     auto *edit = new QPushButton(tr("Objectives…"), this);
     auto *cal = new QPushButton(tr("Calibrate…"), this);
