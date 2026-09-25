@@ -74,7 +74,6 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
     m_grid->setGridSize(QSize(180, 150));
     m_grid->setResizeMode(QListView::Adjust);
     m_grid->setMovement(QListView::Static);
-    m_grid->setUniformItemSizes(true);
     m_grid->setSelectionMode(QAbstractItemView::ExtendedSelection);
     m_grid->setTextElideMode(Qt::ElideMiddle);
     m_grid->setWordWrap(true);
@@ -215,9 +214,13 @@ void BrowsePage::refresh()
     const QFileInfoList files = QDir(m_folder).entryInfoList(kImageFilters, QDir::Files, QDir::Time);
     m_header->setText(tr("%1 — %n image(s)", nullptr, int(files.size())).arg(QDir::toNativeSeparators(m_folder)));
     QPointer<QListWidget> grid = m_grid;
+    // correctly sized placeholder so the layout does not change when thumbnails arrive
+    QPixmap ph(m_grid->iconSize());
+    ph.fill(palette().color(QPalette::AlternateBase));
+    const QIcon placeholder(ph);
     auto generation = m_generation;
     for (const QFileInfo &fi : files) {
-        auto *it = new QListWidgetItem(fi.fileName());
+        auto *it = new QListWidgetItem(placeholder, fi.fileName());
         it->setData(Qt::UserRole, fi.absoluteFilePath());
         it->setToolTip(QStringLiteral("%1\n%2 KB, %3").arg(fi.fileName()).arg(fi.size() / 1024).arg(
             QLocale().toString(fi.lastModified(), QLocale::ShortFormat)));
@@ -246,7 +249,7 @@ void BrowsePage::refresh()
                 return;
             for (int i = 0; i < grid->count(); ++i)
                 if (grid->item(i)->data(Qt::UserRole).toString() == path) {
-                    grid->item(i)->setIcon(QIcon(QPixmap::fromImage(thumb)));
+                    grid->item(i)->setIcon(thumbnailIcon(thumb));
                     break;
                 }
         });

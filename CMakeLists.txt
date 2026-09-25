@@ -71,6 +71,12 @@ add_executable(DMImaging WIN32
 )
 target_link_libraries(DMImaging PRIVATE lmcore Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Svg Qt6::PrintSupport)
 install(TARGETS DMImaging RUNTIME DESTINATION .)
+
+# engine integration test (simulated camera)
+add_executable(enginetest tests/enginetest.cpp src/app/AcquisitionEngine.cpp)
+target_include_directories(enginetest PRIVATE src)
+target_link_libraries(enginetest PRIVATE lmcore Qt6::Core Qt6::Gui Qt6::Concurrent)
+add_test(NAME enginetest COMMAND enginetest)
 endif()
 
 # ---------------------------------------------------------------- tools & tests

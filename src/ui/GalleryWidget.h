@@ -22,5 +22,7 @@ protected:
 };
 
 QImage makeThumbnail(const QImage &src, int size = 160);
+// Icon that keeps its true colours when the item is selected.
+QIcon thumbnailIcon(const QImage &thumb);
 
 } // namespace lm

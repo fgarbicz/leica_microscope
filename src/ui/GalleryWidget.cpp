@@ -27,6 +27,16 @@ QImage makeThumbnail(const QImage &src, int size)
     return t.convertToFormat(QImage::Format_RGB888);
 }
 
+QIcon thumbnailIcon(const QImage &thumb)
+{
+    const QPixmap pm = QPixmap::fromImage(thumb);
+    QIcon icon;
+    icon.addPixmap(pm, QIcon::Normal);
+    icon.addPixmap(pm, QIcon::Selected); // no highlight tint over microscopy colours
+    icon.addPixmap(pm, QIcon::Active);
+    return icon;
+}
+
 GalleryWidget::GalleryWidget(QWidget *parent) : QListWidget(parent)
 {
     setObjectName(QStringLiteral("Gallery"));
@@ -37,7 +47,6 @@ GalleryWidget::GalleryWidget(QWidget *parent) : QListWidget(parent)
     setGridSize(QSize(170, 132));
     setMovement(QListView::Static);
     setResizeMode(QListView::Adjust);
-    setUniformItemSizes(true);
     setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
     setSelectionMode(QAbstractItemView::ExtendedSelection);
     setTextElideMode(Qt::ElideMiddle);
@@ -49,7 +58,7 @@ GalleryWidget::GalleryWidget(QWidget *parent) : QListWidget(parent)
 
 void GalleryWidget::addImage(const QString &path, const QImage &src)
 {
-    auto *it = new QListWidgetItem(QIcon(QPixmap::fromImage(makeThumbnail(src))), QFileInfo(path).fileName());
+    auto *it = new QListWidgetItem(thumbnailIcon(makeThumbnail(src)), QFileInfo(path).fileName());
     it->setData(Qt::UserRole, path);
     it->setToolTip(path);
     insertItem(0, it);
@@ -68,7 +77,7 @@ void GalleryWidget::addFile(const QString &path)
         const QImage img = watcher->result();
         for (int i = 0; i < count(); ++i)
             if (item(i)->data(Qt::UserRole).toString() == path)
-                item(i)->setIcon(QIcon(QPixmap::fromImage(img)));
+                item(i)->setIcon(thumbnailIcon(img));
         watcher->deleteLater();
     });
     watcher->setFuture(QtConcurrent::run([path] {

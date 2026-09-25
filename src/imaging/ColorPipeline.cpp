@@ -680,7 +680,7 @@ std::array<double, 3> computeWhiteBalance(const Image16 &img, Rect r)
             lumHist[std::min(255, l)]++;
         }
     }
-    // find the 60th percentile of luminance, average everything above it
+    // average the brightest 10%: in bright field that is the empty background
     uint64_t total = 0;
     for (auto v : lumHist)
         total += v;
@@ -688,7 +688,7 @@ std::array<double, 3> computeWhiteBalance(const Image16 &img, Rect r)
     int thr = 0;
     for (int i = 0; i < 256; ++i) {
         acc += lumHist[i];
-        if (acc >= total * 0.6) { thr = i; break; }
+        if (acc >= total * 0.9) { thr = i; break; }
     }
     for (int y = r.y; y < r.y + r.h; y += 2) {
         const uint16_t *p = img.row(y) + size_t(r.x) * 3;

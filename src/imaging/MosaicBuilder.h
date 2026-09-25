@@ -24,7 +24,7 @@ public:
 
     struct Options {
         double minNewArea = 0.15;      // add a tile when this fraction of the view is uncovered
-        double maxRestMotion = 1.5;    // px/frame (registration scale) considered "at rest"
+        double maxRestMotion = 3.0;    // px/frame (registration scale): slow enough to add a tile
         double minConfidence = 0.04;
         int featherPixels = 64;        // blending ramp width at tile edges
         bool autoAdd = true;

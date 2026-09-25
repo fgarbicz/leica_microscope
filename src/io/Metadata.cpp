@@ -105,7 +105,7 @@ QList<QPair<QString, QString>> ImageMetadata::describe() const
         umPerPixel > 0 && width > 0
             ? QStringLiteral("%1 × %2 µm").arg(width * umPerPixel, 0, 'f', 1).arg(height * umPerPixel, 0, 'f', 1)
             : QString());
-    add(QObject::tr("Camera"), camera + (cameraSerial.isEmpty() ? QString() : QStringLiteral(" (%1)").arg(cameraSerial)));
+    add(QObject::tr("Camera"), camera + (cameraSerial.isEmpty() || camera.contains(cameraSerial) ? QString() : QStringLiteral(" (%1)").arg(cameraSerial)));
     add(QObject::tr("Sensor"), sensor);
     add(QObject::tr("Exposure"), exposureMs > 0 ? QStringLiteral("%1 ms").arg(exposureMs, 0, 'g', 4) : QString());
     add(QObject::tr("Gain"), QStringLiteral("%1×").arg(gain, 0, 'f', 2));
