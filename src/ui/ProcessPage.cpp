@@ -32,6 +32,7 @@
 #include <QSplitter>
 #include <QTableWidget>
 #include <QTextStream>
+#include <QIcon>
 #include <QToolBar>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -78,21 +79,23 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     m_layer = new AnnotationLayer(this);
     m_tools = new QActionGroup(this);
     m_tools->setExclusive(true);
-    struct T { const char *label; const char *tip; AnnotationLayer::Tool tool; };
+    struct T { const char *label; const char *tip; AnnotationLayer::Tool tool; const char *icon; };
     const T tools[] = {
-        {"Select", "Select, move and edit annotations; drag the image to pan", AnnotationLayer::SelectTool},
-        {"Line", "Measure a distance", AnnotationLayer::LineTool},
-        {"Path", "Measure a curved length (double-click to finish)", AnnotationLayer::PolylineTool},
-        {"Rect", "Rectangle with area", AnnotationLayer::RectTool},
-        {"Ellipse", "Ellipse / circle with area", AnnotationLayer::EllipseTool},
-        {"Area", "Polygon area (double-click to finish)", AnnotationLayer::PolygonTool},
-        {"Angle", "Measure an angle (3 clicks)", AnnotationLayer::AngleTool},
-        {"Count", "Count objects (click to add, right-click to remove)", AnnotationLayer::CountTool},
-        {"Arrow", "Arrow annotation", AnnotationLayer::ArrowTool},
-        {"Text", "Text label", AnnotationLayer::TextTool},
+        {"Select", "Select, move and edit annotations; drag the image to pan", AnnotationLayer::SelectTool, "select"},
+        {"Line", "Measure a distance", AnnotationLayer::LineTool, "line"},
+        {"Path", "Measure a curved length (double-click to finish)", AnnotationLayer::PolylineTool, "path"},
+        {"Rect", "Rectangle with area", AnnotationLayer::RectTool, "rect"},
+        {"Ellipse", "Ellipse / circle with area", AnnotationLayer::EllipseTool, "ellipse"},
+        {"Area", "Polygon area (double-click to finish)", AnnotationLayer::PolygonTool, "area"},
+        {"Angle", "Measure an angle (3 clicks)", AnnotationLayer::AngleTool, "angle"},
+        {"Count", "Count objects (click to add, right-click to remove)", AnnotationLayer::CountTool, "count"},
+        {"Arrow", "Arrow annotation", AnnotationLayer::ArrowTool, "arrow"},
+        {"Text", "Text label", AnnotationLayer::TextTool, "text"},
     };
+    tb->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    tb->setIconSize(QSize(20, 20));
     for (const auto &t : tools) {
-        QAction *a = tb->addAction(tr(t.label));
+        QAction *a = tb->addAction(QIcon(QStringLiteral(":/icons/tool_%1.svg").arg(QLatin1String(t.icon))), tr(t.label));
         a->setToolTip(tr(t.tip));
         a->setCheckable(true);
         a->setData(int(t.tool));

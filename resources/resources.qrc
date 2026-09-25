@@ -2,5 +2,15 @@
 <RCC version="1.0">
     <qresource prefix="/">
         <file>icons/app.png</file>
+        <file>icons/tool_select.svg</file>
+        <file>icons/tool_line.svg</file>
+        <file>icons/tool_path.svg</file>
+        <file>icons/tool_rect.svg</file>
+        <file>icons/tool_ellipse.svg</file>
+        <file>icons/tool_area.svg</file>
+        <file>icons/tool_angle.svg</file>
+        <file>icons/tool_count.svg</file>
+        <file>icons/tool_arrow.svg</file>
+        <file>icons/tool_text.svg</file>
     </qresource>
 </RCC>
