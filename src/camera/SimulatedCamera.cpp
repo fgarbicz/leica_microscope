@@ -143,7 +143,14 @@ bool SimulatedCamera::startStreaming(std::string &error)
     if (m_streaming)
         return true;
     m_streaming = true;
-    m_thread = std::thread([this] { run(); });
+    m_thread = std::thread([this] {
+        try {
+            run();
+        } catch (...) {
+            m_streaming = false;
+            emitCurrentException("Simulated stream stopped: ");
+        }
+    });
     return true;
 }
 

@@ -132,11 +132,16 @@ std::vector<dmc::SequenceEntry> Dmc6200Camera::sequenceFor(const std::vector<std
     return e;
 }
 
-bool Dmc6200Camera::configure(std::string &error)
+void Dmc6200Camera::stopAndFlush()
 {
     m_proto.acquisition(dmc::Acq::Stop);
     m_proto.acquisition(dmc::Acq::Flush);
     m_proto.resetStreamPipes();
+}
+
+bool Dmc6200Camera::configure(std::string &error)
+{
+    stopAndFlush();
     const Roi &roi = m_rois[size_t(std::clamp(m_resIndex, 0, int(m_rois.size()) - 1))];
     const uint32_t expUs = uint32_t(std::clamp(m_exposureMs.load() * 1000.0, 26.0, 60e6));
     const uint32_t gainFx = uint32_t(std::lround(std::clamp(m_gain.load(), 1.0, 16.0) * 65536.0));
@@ -174,9 +179,9 @@ bool Dmc6200Camera::startLiveLocked(std::string &error)
     m_thread = std::thread([this] {
         try {
             streamLoop();
-        } catch (const std::exception &e) {
+        } catch (...) {
             m_streaming = false;
-            emitError(std::string("Streaming stopped: ") + e.what());
+            emitCurrentException("Streaming stopped: ");
         }
         m_threadDone = true;
     });
@@ -197,9 +202,7 @@ void Dmc6200Camera::stopLiveLocked()
     if (m_thread.joinable())
         m_thread.join();
     m_streaming = false;
-    m_proto.acquisition(dmc::Acq::Stop);
-    m_proto.acquisition(dmc::Acq::Flush);
-    m_proto.resetStreamPipes();
+    stopAndFlush();
 }
 
 bool Dmc6200Camera::startStreaming(std::string &error)
@@ -270,8 +273,16 @@ void Dmc6200Camera::streamLoop()
                       + "). Check the USB connection and restart live view.");
             return;
         }
+        // each command can block for seconds: give up as soon as a stop is requested
+        // (stopLiveLocked() then stops and flushes the camera itself)
+        if (m_stopRequested)
+            break;
         m_proto.acquisition(dmc::Acq::Stop);
+        if (m_stopRequested)
+            break;
         m_proto.acquisition(dmc::Acq::Flush);
+        if (m_stopRequested)
+            break;
         m_proto.resetStreamPipes();
         m_proto.acquisition(dmc::Acq::Live);
     }
@@ -398,7 +409,7 @@ bool Dmc6200Camera::captureShots(int modeIndex, std::vector<RawFramePtr> &shots,
     bool ok = configure(error) && m_proto.uploadSequence(sequenceFor(*table));
     if (!ok && error.empty())
         error = m_proto.lastError();
-    if (ok && !m_proto.acquisition(1)) {
+    if (ok && !m_proto.acquisition(dmc::Acq::Sequence)) {
         error = "Cannot start sequence: " + m_proto.lastError();
         ok = false;
     }
@@ -419,9 +430,12 @@ bool Dmc6200Camera::captureShots(int modeIndex, std::vector<RawFramePtr> &shots,
     }
     m_resIndex = oldRes;
     std::string err2;
-    configure(err2); // restores the single-shot sequence
-    if (was)
-        startLiveLocked(err2);
+    if (!configure(err2)) { // restores the single-shot sequence
+        emitError("Camera could not be reconfigured after the capture (" + err2
+                  + "). Restart live view or reconnect the camera.");
+    } else if (was && !startLiveLocked(err2)) {
+        emitError("Live view could not be restarted after the capture (" + err2 + "). Restart live view.");
+    }
     return ok;
 }
 

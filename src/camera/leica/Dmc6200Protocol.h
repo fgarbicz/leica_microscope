@@ -45,6 +45,7 @@ constexpr uint16_t FlashRead = 0x2000;
 
 namespace Acq {
 constexpr uint32_t Stop = 0;
+constexpr uint32_t Sequence = 1; // run the uploaded shot sequence once (pixel shift capture)
 constexpr uint32_t Live = 2;
 constexpr uint32_t Flush = 3;
 } // namespace Acq
@@ -136,6 +137,9 @@ private:
         m_error = e;
     }
     std::vector<uint8_t> m_trailer;
+    // Discards queued replies on the response pipe (bounded, < 1 s). Call with
+    // m_cmdMutex held or before the device is shared.
+    void drainReplies();
 };
 
 } // namespace lm::dmc

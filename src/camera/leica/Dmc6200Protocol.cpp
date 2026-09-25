@@ -64,7 +64,24 @@ bool Protocol::open(const std::string &path, std::string &error)
     m_dev->setAutoClearStall(kEpImage, true);
     m_dev->setAutoClearStall(kEpEvent, true);
     m_trailer.resize(1024);
+    drainReplies(); // a reply left over from a previous session would shift every command
     return true;
+}
+
+void Protocol::drainReplies()
+{
+    // Discards replies still queued on the response pipe (e.g. the late reply of
+    // a timed out command) so the next command reads its own reply. Bounded: at
+    // most kMaxReads short reads, i.e. well under a second.
+    constexpr int kMaxReads = 16;
+    constexpr unsigned kReadTimeoutMs = 40;
+    if (!m_dev)
+        return;
+    std::vector<uint8_t> buf(64 * 1024);
+    for (int i = 0; i < kMaxReads; ++i) {
+        if (m_dev->read(kEpCmdIn, buf.data(), buf.size(), kReadTimeoutMs) <= 0)
+            break;
+    }
 }
 
 void Protocol::close()
@@ -93,19 +110,31 @@ bool Protocol::command(uint16_t cmd, const std::vector<uint8_t> &payload, uint32
         return false;
     }
     std::vector<uint8_t> resp(size_t(maxResponse) + 8 + 512);
-    int n = m_dev->read(kEpCmdIn, resp.data(), resp.size(), timeoutMs);
-    if (n < 8) {
-        setError("command response failed: " + (n < 0 ? m_dev->lastErrorText() : std::string("short response")));
-        return false;
+    int n = 0;
+    uint16_t rcmd = 0;
+    // A stale reply to an earlier (timed out) command may be queued ahead of
+    // ours: skip a few replies whose command does not match.
+    constexpr int kMaxStaleReplies = 4;
+    for (int attempt = 0;; ++attempt) {
+        n = m_dev->read(kEpCmdIn, resp.data(), resp.size(), timeoutMs);
+        if (n < 8) {
+            setError("command response failed: " + (n < 0 ? m_dev->lastErrorText() : std::string("short response")));
+            drainReplies(); // the late reply must not be taken for the next command's
+            return false;
+        }
+        rcmd = get16(resp.data());
+        if (rcmd == cmd)
+            break;
+        if (attempt >= kMaxStaleReplies) {
+            setError("unexpected response header");
+            drainReplies();
+            return false;
+        }
     }
     // the 4th word (0x7BBB on one boot, 0x3B3A on another) varies per firmware boot, so it is not checked
-    const uint16_t rcmd = get16(resp.data()), plen = get16(resp.data() + 2), st = get16(resp.data() + 4);
+    const uint16_t plen = get16(resp.data() + 2), st = get16(resp.data() + 4);
     if (status)
         *status = st;
-    if (rcmd != cmd) {
-        setError("unexpected response header");
-        return false;
-    }
     if (response) {
         const size_t avail = std::min<size_t>(plen, size_t(n) - 8);
         response->assign(resp.begin() + 8, resp.begin() + 8 + avail);
@@ -185,12 +214,19 @@ bool Protocol::uploadSequence(const std::vector<SequenceEntry> &entries)
     if (m_dev->write(kEpCmdOut, hdr.data(), hdr.size(), 1000) != int(hdr.size())
         || m_dev->write(kEpCmdOut, body.data(), body.size(), 1000) != int(body.size())) {
         setError("sequence upload failed: " + m_dev->lastErrorText());
+        // the camera may still be waiting for the announced body: drop whatever
+        // is left of the transfer and resynchronise the response pipe
+        m_dev->abortPipe(kEpCmdOut);
+        m_dev->resetPipe(kEpCmdOut);
+        drainReplies();
         return false;
     }
     uint8_t resp[64];
     int n = m_dev->read(kEpCmdIn, resp, sizeof(resp), 1000);
     if (n < 8 || get16(resp) != Cmd::SequenceTable || get16(resp + 4) != 0) {
         setError("sequence upload not acknowledged");
+        if (n < 8 || get16(resp) != Cmd::SequenceTable)
+            drainReplies();
         return false;
     }
     return true;
