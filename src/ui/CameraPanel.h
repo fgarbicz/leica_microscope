@@ -51,6 +51,7 @@ private:
     QPushButton *m_live;
     QPushButton *m_freeze;
     QLabel *m_info;
+    QLabel *m_status;   // connection state, colour coded
     QComboBox *m_resolution;
     SliderSpin *m_exposure;
     QCheckBox *m_autoExposure;
@@ -62,6 +63,8 @@ private:
     CollapsibleSection *m_advanced;
     QFormLayout *m_advancedForm = nullptr;
     bool m_busy = false;
+    bool m_canSetExposure = true, m_canSetGain = true;
+    void setStatus(const QString &text, const char *role); // role: StatusOk/StatusWarn/StatusError
 };
 
 } // namespace lm

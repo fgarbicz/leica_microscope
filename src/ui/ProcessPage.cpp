@@ -1,5 +1,8 @@
 #include "ProcessPage.h"
 
+#include "ui/Icons.h"
+#include "ui/Theme.h"
+
 #include "app/AppSettings.h"
 #include "imaging/FocusStacker.h"
 #include "imaging/MosaicBuilder.h"
@@ -76,11 +79,12 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     // ---- toolbar
     auto *tb = new QToolBar(this);
     tb->setToolButtonStyle(Qt::ToolButtonTextOnly);
-    tb->addAction(tr("Open…"), this, &ProcessPage::openDialog);
-    tb->addAction(tr("Save as…"), this, &ProcessPage::saveAs);
-    tb->addAction(tr("Export with overlays…"), this, &ProcessPage::exportWithOverlays);
-    tb->addAction(tr("Copy"), this, &ProcessPage::copyToClipboard);
-    tb->addAction(tr("Print…"), this, &ProcessPage::print);
+    tb->addAction(icon(Icon::Open, theme().subText, 16), tr("Open…"), this, &ProcessPage::openDialog);
+    tb->addAction(icon(Icon::Save, theme().subText, 16), tr("Save as…"), this, &ProcessPage::saveAs);
+    tb->addAction(icon(Icon::Export, theme().subText, 16), tr("Export with overlays…"), this,
+                  &ProcessPage::exportWithOverlays);
+    tb->addAction(icon(Icon::Compare, theme().subText, 16), tr("Copy"), this, &ProcessPage::copyToClipboard);
+    tb->addAction(icon(Icon::Print, theme().subText, 16), tr("Print…"), this, &ProcessPage::print);
     tb->addSeparator();
 
     m_layer = new AnnotationLayer(this);
@@ -136,9 +140,11 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     width->setToolTip(tr("Line width"));
     connect(width, &QDoubleSpinBox::valueChanged, m_layer, &AnnotationLayer::setLineWidth);
     tb->addWidget(width);
-    tb->addAction(tr("Undo"), m_layer, &AnnotationLayer::undo)->setShortcut(QKeySequence::Undo);
-    tb->addAction(tr("Redo"), m_layer, &AnnotationLayer::redo)->setShortcut(QKeySequence::Redo);
-    tb->addAction(tr("Delete"), m_layer, &AnnotationLayer::removeSelected);
+    tb->addAction(icon(Icon::Reset, theme().subText, 16), tr("Undo"), m_layer, &AnnotationLayer::undo)
+        ->setShortcut(QKeySequence::Undo);
+    tb->addAction(icon(Icon::Refresh, theme().subText, 16), tr("Redo"), m_layer, &AnnotationLayer::redo)
+        ->setShortcut(QKeySequence::Redo);
+    tb->addAction(icon(Icon::Trash, theme().danger, 16), tr("Delete"), m_layer, &AnnotationLayer::removeSelected);
     tb->addAction(tr("Clear all"), this, [this] {
         if (!m_layer->annotations().isEmpty()
             && QMessageBox::question(this, tr("Clear"), tr("Remove all annotations?")) == QMessageBox::Yes)

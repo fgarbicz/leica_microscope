@@ -3,7 +3,10 @@
 #include "app/AppSettings.h"
 #include "ui/CollapsibleSection.h"
 #include "ui/HistogramWidget.h"
+#include "ui/Icons.h"
 #include "ui/Overlays.h"
+#include "ui/PanelGroup.h"
+#include "ui/Theme.h"
 
 #include <QCheckBox>
 #include <QColorDialog>
@@ -25,16 +28,20 @@ ToolsPanel::ToolsPanel(QWidget *parent) : QWidget(parent)
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(0);
 
-    auto *hs = new CollapsibleSection(tr("Histogram"), this);
+    // What the image currently is: measurements and read-outs, nothing that
+    // changes the picture.
+    auto *imageGroup = new PanelGroup(tr("Image"), Icon::Histogram, theme().groupImage, this);
+    root->addWidget(imageGroup);
+
+    auto *hs = imageGroup->addSection(tr("Histogram"), Icon::Histogram);
     m_hist = new HistogramWidget(this);
     m_hist->setMinimumHeight(130);
     hs->contentLayout()->addWidget(m_hist);
     auto *hHint = new QLabel(tr("Drag the handles to set black and white points."), this);
     hHint->setObjectName(QStringLiteral("Hint"));
     hs->contentLayout()->addWidget(hHint);
-    root->addWidget(hs);
 
-    auto *fs = new CollapsibleSection(tr("Focus"), this);
+    auto *fs = imageGroup->addSection(tr("Focus"), Icon::Focus);
     m_focus = new QLabel(this);
     m_focus->setObjectName(QStringLiteral("ValueLabel"));
     fs->contentLayout()->addWidget(m_focus);
@@ -43,14 +50,33 @@ ToolsPanel::ToolsPanel(QWidget *parent) : QWidget(parent)
     fs->contentLayout()->addWidget(fa);
     auto *fRow = new QHBoxLayout;
     auto *region = new QPushButton(tr("Focus region…"), this);
+    region->setIcon(icon(Icon::Focus, theme().text, 15));
     auto *resetPeak = new QPushButton(tr("Reset peak"), this);
+    resetPeak->setIcon(icon(Icon::Reset, theme().text, 15));
     resetPeak->setToolTip(tr("Start a new search for the best focus (after moving to another field)"));
     fRow->addWidget(region);
     fRow->addWidget(resetPeak);
     fs->contentLayout()->addLayout(fRow);
-    root->addWidget(fs);
 
-    auto *os = new CollapsibleSection(tr("Overlays"), this);
+    auto *is = imageGroup->addSection(tr("Information"), Icon::Info, false);
+    m_info = new QLabel(this);
+    m_info->setObjectName(QStringLiteral("Hint"));
+    m_info->setWordWrap(true);
+    m_info->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    is->contentLayout()->addWidget(m_info);
+    m_pixel = new QLabel(this);
+    m_pixel->setObjectName(QStringLiteral("Hint"));
+    is->contentLayout()->addWidget(m_pixel);
+
+    // Drawn on top of the image. Kept in its own widget so MainWindow can place
+    // it after the colour panel (see ToolsPanel::overlaysPanel()).
+    m_overlays = new QWidget(this);
+    auto *ol = new QVBoxLayout(m_overlays);
+    ol->setContentsMargins(0, 0, 0, 0);
+    ol->setSpacing(0);
+    auto *overlayGroup = new PanelGroup(tr("Overlays"), Icon::Overlay, theme().groupOverlay, m_overlays);
+    ol->addWidget(overlayGroup);
+    auto *os = overlayGroup->addSection(tr("On the image"), Icon::Overlay);
     auto *scale = new QCheckBox(tr("Scale bar"), this);
     scale->setChecked(O.scaleBar);
     auto *grid = new QCheckBox(tr("Grid"), this);
@@ -93,18 +119,6 @@ ToolsPanel::ToolsPanel(QWidget *parent) : QWidget(parent)
     div->setValue(O.gridDivisions);
     of->addRow(tr("Grid divisions"), div);
     os->contentLayout()->addLayout(of);
-    root->addWidget(os);
-
-    auto *is = new CollapsibleSection(tr("Information"), this, false);
-    m_info = new QLabel(this);
-    m_info->setObjectName(QStringLiteral("Hint"));
-    m_info->setWordWrap(true);
-    m_info->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    is->contentLayout()->addWidget(m_info);
-    m_pixel = new QLabel(this);
-    m_pixel->setObjectName(QStringLiteral("Hint"));
-    is->contentLayout()->addWidget(m_pixel);
-    root->addWidget(is);
     root->addStretch();
 
     auto changed = [this] {

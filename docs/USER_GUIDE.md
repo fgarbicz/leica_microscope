@@ -2,15 +2,27 @@
 
 ## 1. Start up
 
-**Installation:** run `DMImaging-Setup-<version>.exe` once on the microscope PC (Windows asks
-for administrator permission). Keep *Install the camera driver* ticked. Afterwards DM Imaging
-is in the Start menu and on the desktop.
+**Installation**
+
+- *Windows:* run `DMImaging-Setup-<version>.exe` once on the microscope PC (Windows asks
+  for administrator permission). Keep *Install the camera driver* ticked. Afterwards DM
+  Imaging is in the Start menu and on the desktop.
+- *macOS:* run `./install.sh`; the app lands in Applications. No driver is needed.
+- *Linux:* run `./install.sh`, then `sudo sh driver/install_udev_rule.sh` once so the
+  camera can be opened without root, and replug the camera.
+
+DM Imaging looks and works the same on all three; only the installation differs.
 
 1. Switch on the microscope lamp and connect the camera (USB 3.0 port, blue connector).
 2. Start **DM Imaging** from the desktop or Start menu. The camera connects and
    the live image starts automatically.
 3. On the first start, the white balance is set automatically. For best colour,
    move to an empty area of the slide and press **Auto white balance** (F7).
+
+**The mouse wheel** scrolls the side panels and zooms the image. It never changes a
+setting: to change a value, drag its slider, type in its box, or use the arrow keys.
+This is deliberate — scrolling past a control used to alter the exposure or the
+objective by accident.
 
 The window has three workspaces (tabs at the top):
 
@@ -105,7 +117,7 @@ scanned area). Press *Finish & save*.
 
 *Video recording* (Acquire panel): choose the frame rate, optionally include the
 scale bar, and press **Record video**. Press it again to stop. The AVI file is
-saved in the image folder and plays in Windows Media Player, VLC and PowerPoint.
+saved in the image folder and plays in VLC, QuickTime, Windows Media Player and PowerPoint.
 
 ## 8. Browse
 
@@ -191,9 +203,11 @@ using the marker type, nucleus size and sensitivity set in Process.
 
 | Problem | Solution |
 |---|---|
-| "No Leica camera found" | Check the USB cable (use a USB 3.0 port). Use *Tools → Install / repair camera driver*. |
+| "No Leica camera found" | Check the USB cable (use a USB 3.0 port). On Windows use *Tools → Install / repair camera driver*; on Linux use *Tools → Install camera access rule*; on macOS no driver is needed, so just replug the camera. |
 | Camera disconnected | The application reconnects automatically when the camera is back. |
-| "Sensor is not ready" | Unplug the camera's USB cable for 5 seconds and plug it back in. (Resetting the USB port or restarting Windows is not enough: the camera must lose power.) |
+| "Sensor is not ready" | Unplug the camera's USB cable for 5 seconds and plug it back in. (Resetting the USB port or restarting the computer is not enough: the camera must lose power.) |
+| Linux: "Cannot open the camera: Access denied" | The udev rule is missing. Run `sudo sh driver/install_udev_rule.sh`, then unplug and replug the camera. |
+| macOS: a UVC camera's exposure and gain sliders are greyed out | macOS provides no manual exposure control for UVC cameras, so that camera runs on its own automatic exposure. The Leica DMC6200 is not affected. |
 | "Little bare glass in this field" (IHC) | The analysis needs some empty glass to know what "white" is. Include a little background in the image. |
 | Video stopped by itself | Videos are limited to about 1.9 GB (a few minutes at full resolution); start a new recording. |
 | Colours wrong | Press Auto white balance on an empty field. |

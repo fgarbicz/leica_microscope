@@ -1,4 +1,4 @@
-#include "WinUsbDevice.h"
+#include "UsbDevice.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -15,13 +15,14 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstring>
 
 #pragma comment(lib, "winusb.lib")
 #pragma comment(lib, "cfgmgr32.lib")
 
 namespace lm::usb {
 
-std::string win32ErrorText(unsigned long code)
+std::string usbErrorText(unsigned long code)
 {
     char *msg = nullptr;
     FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr,
@@ -34,9 +35,24 @@ std::string win32ErrorText(unsigned long code)
     return s + " (" + std::to_string(code) + ")";
 }
 
-std::vector<std::string> WinUsbDevice::find(uint16_t vid, uint16_t pid)
+namespace {
+// \\?\usb#vid_1711&pid_30e0#<serial>#{guid}
+std::string serialFromPath(const std::string &path)
 {
-    std::vector<std::string> out;
+    const auto a = path.find('#');
+    if (a == std::string::npos)
+        return {};
+    const auto b = path.find('#', a + 1);
+    const auto c = b == std::string::npos ? std::string::npos : path.find('#', b + 1);
+    if (b == std::string::npos || c == std::string::npos)
+        return {};
+    return path.substr(b + 1, c - b - 1);
+}
+} // namespace
+
+std::vector<DeviceId> Device::find(uint16_t vid, uint16_t pid)
+{
+    std::vector<DeviceId> out;
     char needle[32];
     std::snprintf(needle, sizeof(needle), "vid_%04x&pid_%04x", vid, pid);
     // Every USB device exposes GUID_DEVINTERFACE_USB_DEVICE; opening it with
@@ -53,26 +69,47 @@ std::vector<std::string> WinUsbDevice::find(uint16_t vid, uint16_t pid)
         std::string s(p), lower(p);
         std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return char(std::tolower(c)); });
         if (lower.find(needle) != std::string::npos)
-            out.push_back(s);
+            out.push_back({s, serialFromPath(s)});
     }
     return out;
 }
 
-std::unique_ptr<WinUsbDevice> WinUsbDevice::open(const std::string &path, std::string &error)
+bool Device::needsDriverInstall()
 {
-    std::unique_ptr<WinUsbDevice> d(new WinUsbDevice());
+    return true;
+}
+
+std::string Device::backendDescription()
+{
+    return "WinUSB";
+}
+
+bool Device::resetDevice()
+{
+    // WinUsb_ResetPipe on every pipe is the closest WinUSB equivalent: WinUSB
+    // has no port reset. A real re-enumeration needs the UCSI power cycle
+    // (camera/usb/UsbCPower.h) or unplugging the cable.
+    bool ok = true;
+    for (const auto &e : m_endpoints)
+        ok = resetPipe(e.address) && ok;
+    return ok;
+}
+
+std::unique_ptr<Device> Device::open(const std::string &path, std::string &error)
+{
+    std::unique_ptr<Device> d(new Device());
     d->m_path = path;
     HANDLE f = CreateFileA(path.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
     if (f == INVALID_HANDLE_VALUE) {
-        error = "Cannot open device: " + win32ErrorText(GetLastError());
+        error = "Cannot open device: " + usbErrorText(GetLastError());
         return nullptr;
     }
     d->m_file = f;
     WINUSB_INTERFACE_HANDLE h = nullptr;
     if (!WinUsb_Initialize(f, &h)) {
         DWORD e = GetLastError();
-        error = "WinUSB is not bound to this device (" + win32ErrorText(e)
+        error = "WinUSB is not bound to this device (" + usbErrorText(e)
                 + "). Install driver/LeicaUsb3Cam.inf with driver/install_driver.ps1.";
         return nullptr;
     }
@@ -107,7 +144,7 @@ std::unique_ptr<WinUsbDevice> WinUsbDevice::open(const std::string &path, std::s
     return d;
 }
 
-WinUsbDevice::~WinUsbDevice()
+Device::~Device()
 {
     if (m_winusb)
         WinUsb_Free(m_winusb);
@@ -115,12 +152,12 @@ WinUsbDevice::~WinUsbDevice()
         CloseHandle(m_file);
 }
 
-std::string WinUsbDevice::lastErrorText() const
+std::string Device::lastErrorText() const
 {
-    return win32ErrorText(m_lastError);
+    return usbErrorText(m_lastError);
 }
 
-int WinUsbDevice::control(uint8_t requestType, uint8_t request, uint16_t value, uint16_t index, void *data,
+int Device::control(uint8_t requestType, uint8_t request, uint16_t value, uint16_t index, void *data,
                           uint16_t length, unsigned timeoutMs)
 {
     WINUSB_SETUP_PACKET sp{};
@@ -184,46 +221,46 @@ long long syncTransfer(void *h, uint8_t ep, void *data, size_t len, unsigned tim
 }
 } // namespace
 
-int WinUsbDevice::write(uint8_t ep, const void *data, size_t len, unsigned timeoutMs)
+int Device::write(uint8_t ep, const void *data, size_t len, unsigned timeoutMs)
 {
     return int(syncTransfer(m_winusb, ep, const_cast<void *>(data), len, timeoutMs, false, m_lastError));
 }
 
-int WinUsbDevice::read(uint8_t ep, void *data, size_t len, unsigned timeoutMs)
+int Device::read(uint8_t ep, void *data, size_t len, unsigned timeoutMs)
 {
     return int(syncTransfer(m_winusb, ep, data, len, timeoutMs, true, m_lastError));
 }
 
-bool WinUsbDevice::setPipeTimeout(uint8_t ep, unsigned timeoutMs)
+bool Device::setPipeTimeout(uint8_t ep, unsigned timeoutMs)
 {
     ULONG v = timeoutMs;
     return WinUsb_SetPipePolicy(m_winusb, ep, PIPE_TRANSFER_TIMEOUT, sizeof(v), &v);
 }
 
-bool WinUsbDevice::setRawIo(uint8_t ep, bool on)
+bool Device::setRawIo(uint8_t ep, bool on)
 {
     UCHAR v = on;
     return WinUsb_SetPipePolicy(m_winusb, ep, RAW_IO, sizeof(v), &v);
 }
 
-bool WinUsbDevice::setAutoClearStall(uint8_t ep, bool on)
+bool Device::setAutoClearStall(uint8_t ep, bool on)
 {
     UCHAR v = on;
     return WinUsb_SetPipePolicy(m_winusb, ep, AUTO_CLEAR_STALL, sizeof(v), &v);
 }
 
-bool WinUsbDevice::resetPipe(uint8_t ep) { return WinUsb_ResetPipe(m_winusb, ep); }
-bool WinUsbDevice::abortPipe(uint8_t ep) { return WinUsb_AbortPipe(m_winusb, ep); }
-bool WinUsbDevice::flushPipe(uint8_t ep) { return WinUsb_FlushPipe(m_winusb, ep); }
+bool Device::resetPipe(uint8_t ep) { return WinUsb_ResetPipe(m_winusb, ep); }
+bool Device::abortPipe(uint8_t ep) { return WinUsb_AbortPipe(m_winusb, ep); }
+bool Device::flushPipe(uint8_t ep) { return WinUsb_FlushPipe(m_winusb, ep); }
 
-uint32_t WinUsbDevice::maxTransferSize(uint8_t ep) const
+uint32_t Device::maxTransferSize(uint8_t ep) const
 {
     ULONG v = 0, len = sizeof(v);
     WinUsb_GetPipePolicy(m_winusb, ep, MAXIMUM_TRANSFER_SIZE, &len, &v);
     return v;
 }
 
-bool WinUsbDevice::selectAltSetting(uint8_t alt)
+bool Device::selectAltSetting(uint8_t alt)
 {
     if (!WinUsb_SetCurrentAlternateSetting(m_winusb, alt)) {
         m_lastError = GetLastError();
@@ -241,7 +278,7 @@ bool WinUsbDevice::selectAltSetting(uint8_t alt)
     return true;
 }
 
-std::vector<uint8_t> WinUsbDevice::getDescriptor(uint8_t type, uint8_t index, uint16_t lang, uint16_t length)
+std::vector<uint8_t> Device::getDescriptor(uint8_t type, uint8_t index, uint16_t lang, uint16_t length)
 {
     std::vector<uint8_t> buf(length);
     ULONG got = 0;
@@ -253,7 +290,7 @@ std::vector<uint8_t> WinUsbDevice::getDescriptor(uint8_t type, uint8_t index, ui
     return buf;
 }
 
-std::string WinUsbDevice::getString(uint8_t index, uint16_t lang)
+std::string Device::getString(uint8_t index, uint16_t lang)
 {
     auto d = getDescriptor(USB_STRING_DESCRIPTOR_TYPE, index, lang, 255);
     if (d.size() < 2)

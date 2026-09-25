@@ -49,14 +49,14 @@ Protocol::~Protocol()
     close();
 }
 
-std::vector<std::string> Protocol::findDevices()
+std::vector<usb::DeviceId> Protocol::findDevices()
 {
-    return usb::WinUsbDevice::find(kVendorId, kProductId);
+    return usb::Device::find(kVendorId, kProductId);
 }
 
 bool Protocol::open(const std::string &path, std::string &error)
 {
-    m_dev = usb::WinUsbDevice::open(path, error);
+    m_dev = usb::Device::open(path, error);
     if (!m_dev)
         return false;
     for (uint8_t ep : {kEpCmdOut, kEpCmdIn, kEpEvent, kEpImage})
@@ -277,7 +277,7 @@ long long Protocol::readFrame(uint8_t *buf, size_t bytes, unsigned timeoutMs)
 {
     if (!m_dev)
         return -1;
-    // read the image in large chunks (WinUSB splits into bursts internally)
+    // read the image in large chunks (the USB backend splits them into bursts)
     size_t done = 0;
     while (done < bytes) {
         const size_t chunk = std::min<size_t>(bytes - done, 4u << 20);

@@ -1,5 +1,7 @@
 #include "ImageView.h"
 
+#include "ui/Theme.h"
+
 #include "ui/Annotations.h"
 #include "ui/Overlays.h"
 
@@ -186,9 +188,12 @@ void ImageView::paintEvent(QPaintEvent *)
         }
     } report{timer, profile};
     QPainter p(this);
-    p.fillRect(rect(), palette().color(QPalette::Base).darker(160));
+    // The surround stays dark in both themes: a bright frame around a
+    // bright-field image changes how a stain looks to the eye.
+    p.fillRect(rect(), theme().canvas);
     if (m_image.isNull()) {
-        p.setPen(palette().color(QPalette::PlaceholderText));
+        // readable on that dark surround whichever theme is in use
+        p.setPen(QColor(168, 172, 180));
         QFont f = font();
         f.setPointSizeF(f.pointSizeF() * 1.3);
         p.setFont(f);

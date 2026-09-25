@@ -1,0 +1,8 @@
+# Leica DMC6200 microscope camera (Jenoptik GRYPHAX, Cypress FX3): give the
+# logged-in desktop user access so DM Imaging can talk to it without root.
+#
+#   sudo cp driver/99-leica-dmc6200.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# then unplug and replug the camera.
+SUBSYSTEM=="usb", ATTR{idVendor}=="1711", ATTR{idProduct}=="30e0", TAG+="uaccess", MODE="0660", GROUP="plugdev"

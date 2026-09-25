@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>DM Imaging</string>
+    <key>CFBundleDisplayName</key>
+    <string>DM Imaging</string>
+    <key>CFBundleExecutable</key>
+    <string>${MACOSX_BUNDLE_EXECUTABLE_NAME}</string>
+    <key>CFBundleIdentifier</key>
+    <string>${MACOSX_BUNDLE_GUI_IDENTIFIER}</string>
+    <key>CFBundleIconFile</key>
+    <string>${MACOSX_BUNDLE_ICON_FILE}</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>${MACOSX_BUNDLE_SHORT_VERSION_STRING}</string>
+    <key>CFBundleVersion</key>
+    <string>${MACOSX_BUNDLE_BUNDLE_VERSION}</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>${CMAKE_OSX_DEPLOYMENT_TARGET}</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <!-- Required: macOS terminates the process on first camera use without it.
+         Shown in the permission dialog the user sees. -->
+    <key>NSCameraUsageDescription</key>
+    <string>DM Imaging needs the camera to show and capture the microscope image.</string>
+    <!-- The default image folder is ~/Pictures/DM Imaging; macOS asks before
+         an app may write there. -->
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>DM Imaging saves captured microscope images in your Pictures folder.</string>
+    <!-- The images are written to a folder the user chooses. -->
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>DM Imaging saves captured microscope images to the image folder you choose.</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>DM Imaging saves captured microscope images to the image folder you choose.</string>
+    <!-- Images open in the app from Finder. -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Image</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.tiff</string>
+                <string>public.png</string>
+                <string>public.jpeg</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=DM Imaging
+GenericName=Microscope Imaging
+Comment=Image acquisition and analysis for the Leica DM2000 / DMC6200
+Exec=DMImaging %F
+Icon=dmimaging
+Terminal=false
+Categories=Science;Biology;MedicalSoftware;Graphics;Photography;
+Keywords=microscope;camera;imaging;histology;IHC;Leica;DMC6200;
+MimeType=image/tiff;image/png;image/jpeg;
+StartupNotify=true
+StartupWMClass=DMImaging

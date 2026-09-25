@@ -23,28 +23,15 @@ const std::vector<std::pair<int, int>> kShots36 = {
     {83, 95}, {96, 95}, {109, 95}, {35, 108}, {53, 107}, {69, 106}, {83, 106}, {96, 106}, {109, 106}};
 constexpr int kMaxShots = 36;
 
-std::string serialFromPath(const std::string &path)
-{
-    // \\?\usb#vid_1711&pid_30e0#<serial>#{guid}
-    auto a = path.find('#');
-    if (a == std::string::npos)
-        return {};
-    auto b = path.find('#', a + 1);
-    auto c = b == std::string::npos ? std::string::npos : path.find('#', b + 1);
-    if (b == std::string::npos || c == std::string::npos)
-        return {};
-    return path.substr(b + 1, c - b - 1);
-}
-
 } // namespace
 
 std::vector<CameraInfo> Dmc6200Backend::enumerate()
 {
     std::vector<CameraInfo> out;
-    for (const auto &p : dmc::Protocol::findDevices()) {
+    for (const auto &d : dmc::Protocol::findDevices()) {
         CameraInfo ci;
-        ci.id = "dmc:" + p;
-        ci.serial = serialFromPath(p);
+        ci.id = "dmc:" + d.path;
+        ci.serial = d.serial;
         ci.model = "DMC6200";
         ci.name = "Leica DMC6200" + (ci.serial.empty() ? std::string() : " (" + ci.serial + ")");
         ci.backend = name();

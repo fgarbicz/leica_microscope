@@ -1,6 +1,8 @@
 // Command line test for the native DMC6200 driver (no Leica/Jenoptik software).
 #include "camera/leica/Dmc6200Protocol.h"
-#include "camera/usb/UsbCPower.h"
+#ifdef _WIN32
+#include "camera/usb/UsbCPower.h" // USB-C power cycling exists on Windows only
+#endif
 
 #include <chrono>
 #include <cstdio>
@@ -26,6 +28,7 @@ static std::vector<dmc::SequenceEntry> liveSequence(uint32_t gainA, uint32_t gai
 
 int main(int argc, char **argv)
 {
+#ifdef _WIN32
     if (argc > 1 && std::string(argv[1]) == "--usbc-status") {
         // needs administrator rights: enables the UCSI test interface temporarily
         std::string err;
@@ -53,15 +56,26 @@ int main(int argc, char **argv)
         printf("%s%s\n", log.c_str(), ok ? "OK" : "FAILED");
         return ok ? 0 : 2;
     }
+#else
+    if (argc > 1 && (std::string(argv[1]) == "--usbc-status" || std::string(argv[1]) == "--usbc-cycle")) {
+        printf("USB-C power cycling is a Windows-only feature (it drives the UCSI connector manager).\n"
+               "Unplug the camera for 5 seconds instead.\n");
+        return 2;
+    }
+#endif
     const int frames = argc > 1 ? atoi(argv[1]) : 30;
-    auto paths = dmc::Protocol::findDevices();
-    if (paths.empty()) {
-        printf("no DMC6200 found (is the WinUSB driver installed?)\n");
+    auto devices = dmc::Protocol::findDevices();
+    if (devices.empty()) {
+        printf("no DMC6200 found (USB backend: %s)\n", usb::Device::backendDescription().c_str());
+        if (usb::Device::needsDriverInstall())
+            printf("Is the WinUSB driver installed? Run driver/install_driver.ps1.\n");
+        else
+            printf("On Linux, install driver/99-leica-dmc6200.rules (driver/install_udev_rule.sh).\n");
         return 1;
     }
     dmc::Protocol p;
     std::string err;
-    if (!p.open(paths[0], err)) {
+    if (!p.open(devices[0].path, err)) {
         printf("open failed: %s\n", err.c_str());
         return 1;
     }

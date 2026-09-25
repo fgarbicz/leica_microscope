@@ -13,6 +13,7 @@ class QDoubleSpinBox;
 namespace lm {
 
 class MicroscopeConfig;
+class CollapsibleSection;
 
 class MicroscopePanel : public QWidget {
     Q_OBJECT
@@ -41,6 +42,7 @@ private:
     QLabel *m_shadingInfo;
     QCheckBox *m_shading;
     QPushButton *m_shadingClear;
+    CollapsibleSection *m_section = nullptr; // for the collapsed summary
 };
 
 } // namespace lm
