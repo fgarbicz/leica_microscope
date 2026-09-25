@@ -11,6 +11,7 @@
 #include "imaging/Registration.h"
 #include "imaging/ShadingCorrection.h"
 #include "imaging/StainAnalysis.h"
+#include "imaging/NucleusDetection.h"
 
 #include <atomic>
 #include <chrono>
@@ -474,6 +475,102 @@ static void testSimCamera()
     CHECK(frames >= 3);
 }
 
+static void testNuclei()
+{
+    std::printf("nucleus detection\n");
+    // synthetic field: 48 nuclei (radius 12 px) on a jittered grid, every third DAB positive,
+    // two touching pairs, pale cytoplasm, shot noise
+    const int W = 640, H = 480, R = 12;
+    const double hv[3] = {0.650, 0.704, 0.286}, dv[3] = {0.268, 0.570, 0.776};
+    const double hn = std::sqrt(0.65 * 0.65 + 0.704 * 0.704 + 0.286 * 0.286);
+    const double dn = std::sqrt(0.268 * 0.268 + 0.57 * 0.57 + 0.776 * 0.776);
+    struct Disk {
+        double x, y;
+        bool pos;
+    };
+    std::vector<Disk> disks;
+    std::mt19937 rng(11);
+    std::uniform_real_distribution<double> jit(-8, 8);
+    int k = 0;
+    for (int gy = 0; gy < 6; ++gy)
+        for (int gx = 0; gx < 8; ++gx, ++k)
+            disks.push_back({50 + gx * 78 + jit(rng), 45 + gy * 78 + jit(rng), k % 3 == 0});
+    // touching pairs (centres 2R apart)
+    disks[9].x = disks[8].x + 2 * R + 1;
+    disks[9].y = disks[8].y;
+    disks[30].x = disks[29].x;
+    disks[30].y = disks[29].y + 2 * R + 1;
+    int positives = 0;
+    for (const auto &d : disks)
+        positives += d.pos;
+    Image16 img(W, H);
+    std::normal_distribution<double> noise(0, 0.01);
+    auto encode = [](double lin) {
+        const double s = lin <= 0.0031308 ? 12.92 * lin : 1.055 * std::pow(lin, 1 / 2.4) - 0.055;
+        return uint16_t(std::clamp(s, 0.0, 1.0) * 65535.0 + 0.5);
+    };
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) {
+            double ch = x > 20 ? 0.06 : 0.0, cd = 0; // pale cytoplasm, a strip of glass
+            for (const auto &d : disks) {
+                const double r2 = (x - d.x) * (x - d.x) + (y - d.y) * (y - d.y);
+                if (r2 <= R * R) {
+                    ch = d.pos ? 0.25 : 0.7;
+                    cd = d.pos ? 0.6 : 0.0;
+                }
+            }
+            for (int c = 0; c < 3; ++c) {
+                const double od = ch * hv[c] / hn + cd * dv[c] / dn + noise(rng);
+                img.row(y)[x * 3 + c] = encode(std::pow(10.0, -std::max(0.0, od)));
+            }
+        }
+    StainOptions so;
+    const StainResult st = analyzeStains(img, so);
+    NucleusOptions no;
+    no.diameterPx = 2 * R;
+    const NucleusResult nr = detectNuclei(st, no);
+    std::printf("  %zu nuclei found (%d expected), %d positive (%d expected), labelling index %.1f %%\n",
+                nr.nuclei.size(), int(disks.size()), nr.positive, positives, nr.labellingIndex * 100);
+    CHECK_NEAR(double(nr.nuclei.size()), double(disks.size()), 1.0);
+    CHECK_NEAR(double(nr.positive), double(positives), 1.0);
+    // every detection lies on a real nucleus
+    int onNucleus = 0;
+    for (const auto &n : nr.nuclei)
+        for (const auto &d : disks)
+            if (std::hypot(n.x - d.x, n.y - d.y) < R * 0.7) {
+                ++onNucleus;
+                break;
+            }
+    CHECK(onNucleus == int(nr.nuclei.size()));
+
+    // cytoplasmic marker: H nuclei, DAB only in the cytoplasm around every third nucleus
+    Image16 cyto(W, H);
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) {
+            double ch = 0.06, cd = 0;
+            for (const auto &d : disks) {
+                const double r = std::hypot(x - d.x, y - d.y);
+                if (r <= R)
+                    ch = 0.7;
+                else if (d.pos && r <= 2.2 * R && cd == 0)
+                    cd = 0.5;
+            }
+            for (int c = 0; c < 3; ++c) {
+                const double od = ch * hv[c] / hn + cd * dv[c] / dn + noise(rng);
+                cyto.row(y)[x * 3 + c] = encode(std::pow(10.0, -std::max(0.0, od)));
+            }
+        }
+    const StainResult cst = analyzeStains(cyto, so);
+    NucleusOptions co = no;
+    co.nuclearMarker = false;
+    const NucleusResult cr = detectNuclei(cst, co);
+    std::printf("  cytoplasmic marker: %zu cells (%d expected), %d positive (%d expected)\n", cr.nuclei.size(),
+                int(disks.size()), cr.positive, positives);
+    CHECK_NEAR(double(cr.nuclei.size()), double(disks.size()), 1.0);
+    // touching neighbours share DAB rings, so allow a little spill-over
+    CHECK_NEAR(double(cr.positive), double(positives), 3.0);
+}
+
 static void testFocusMeasure()
 {
     std::printf("focus measure\n");
@@ -721,6 +818,7 @@ int main(int argc, char **argv)
         testPixelShift();
         testSimCamera();
         testFocusMeasure();
+        testNuclei();
     }
     if (hw)
         testHardware();

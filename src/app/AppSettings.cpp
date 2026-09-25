@@ -1,5 +1,7 @@
 #include "AppSettings.h"
 
+#include <algorithm>
+
 #include <QDateTime>
 #include <QDir>
 #include <QRegularExpression>
@@ -120,6 +122,9 @@ void AppSettings::load()
     ihc.dabThreshold = s.value(QStringLiteral("threshold"), 0.15).toDouble();
     ihc.customVectors = s.value(QStringLiteral("custom"), false).toBool();
     ihc.vectorSource = s.value(QStringLiteral("source")).toString();
+    ihc.nucleusDiameterUm = s.value(QStringLiteral("nucleusDiameter"), 7.0).toDouble();
+    ihc.nuclearMarker = s.value(QStringLiteral("nuclearMarker"), true).toBool();
+    ihc.nucleusSensitivity = std::clamp(s.value(QStringLiteral("nucleusSensitivity"), 1).toInt(), 0, 2);
     {
         const QVariantList hv = s.value(QStringLiteral("h")).toList(), dv = s.value(QStringLiteral("dab")).toList();
         if (hv.size() == 3 && dv.size() == 3)
@@ -198,6 +203,9 @@ void AppSettings::save() const
     s.setValue(QStringLiteral("threshold"), ihc.dabThreshold);
     s.setValue(QStringLiteral("custom"), ihc.customVectors);
     s.setValue(QStringLiteral("source"), ihc.vectorSource);
+    s.setValue(QStringLiteral("nucleusDiameter"), ihc.nucleusDiameterUm);
+    s.setValue(QStringLiteral("nuclearMarker"), ihc.nuclearMarker);
+    s.setValue(QStringLiteral("nucleusSensitivity"), ihc.nucleusSensitivity);
     s.setValue(QStringLiteral("h"), QVariantList{ihc.h[0], ihc.h[1], ihc.h[2]});
     s.setValue(QStringLiteral("dab"), QVariantList{ihc.dab[0], ihc.dab[1], ihc.dab[2]});
     s.endGroup();

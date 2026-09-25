@@ -3,6 +3,7 @@
 #include "app/AppSettings.h"
 #include "imaging/FocusStacker.h"
 #include "imaging/MosaicBuilder.h"
+#include "imaging/NucleusDetection.h"
 #include "imaging/StainAnalysis.h"
 #include "app/AppSettings.h"
 #include "ui/Annotations.h"
@@ -13,6 +14,8 @@
 
 #include <QActionGroup>
 #include <QCheckBox>
+#include <QComboBox>
+#include <QFormLayout>
 #include <QApplication>
 #include <QClipboard>
 #include <QColorDialog>
@@ -264,6 +267,38 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     ihcRow->addWidget(ihcAll);
     ihcRow->addWidget(ihcSel);
     ihc->contentLayout()->addLayout(ihcRow);
+    // nucleus counting (nuclear markers such as Ki-67, p53, ER/PR)
+    m_nucleusDiameter = new SliderSpin(tr("Nucleus diameter (µm)"), 3.0, 20.0, 1, sideContent);
+    m_nucleusDiameter->setValue(AppSettings::instance().ihc.nucleusDiameterUm);
+    m_nucleusDiameter->setDefault(7.0);
+    ihc->contentLayout()->addWidget(m_nucleusDiameter);
+    connect(m_nucleusDiameter, &SliderSpin::valueChanged, this,
+            [](double v) { AppSettings::instance().ihc.nucleusDiameterUm = v; });
+    auto *nucForm = new QFormLayout;
+    auto *marker = new QComboBox(sideContent);
+    marker->addItem(tr("Nuclear (Ki-67, p53, ER/PR)"));
+    marker->addItem(tr("Cytoplasmic / membranous"));
+    marker->setToolTip(tr("Nuclear: a nucleus is positive if it is DAB stained. Cytoplasmic / membranous: nuclei are "
+                          "found from haematoxylin and a cell is positive if the DAB around its nucleus exceeds the threshold."));
+    marker->setCurrentIndex(AppSettings::instance().ihc.nuclearMarker ? 0 : 1);
+    nucForm->addRow(tr("Marker"), marker);
+    auto *sens = new QComboBox(sideContent);
+    sens->addItems({tr("Low (strongly stained nuclei)"), tr("Normal"), tr("High (also pale nuclei)")});
+    sens->setCurrentIndex(AppSettings::instance().ihc.nucleusSensitivity);
+    nucForm->addRow(tr("Sensitivity"), sens);
+    ihc->contentLayout()->addLayout(nucForm);
+    connect(marker, &QComboBox::currentIndexChanged, this, [](int i) { AppSettings::instance().ihc.nuclearMarker = i == 0; });
+    connect(sens, &QComboBox::currentIndexChanged, this, [](int i) { AppSettings::instance().ihc.nucleusSensitivity = i; });
+    auto *nucRow = new QHBoxLayout;
+    auto *nucAll = new QPushButton(tr("Count nuclei"), sideContent);
+    nucAll->setToolTip(tr("Count haematoxylin (negative) and DAB (positive) nuclei: labelling index for nuclear "
+                          "markers such as Ki-67, p53 or ER/PR"));
+    auto *nucSel = new QPushButton(tr("Count in selection"), sideContent);
+    nucRow->addWidget(nucAll);
+    nucRow->addWidget(nucSel);
+    ihc->contentLayout()->addLayout(nucRow);
+    connect(nucAll, &QPushButton::clicked, this, [this] { analyzeIhc(false, true); });
+    connect(nucSel, &QPushButton::clicked, this, [this] { analyzeIhc(true, true); });
     m_ihcOverlay = new QCheckBox(tr("Show overlay (red = DAB+, blue = negative tissue)"), sideContent);
     m_ihcOverlay->setChecked(true);
     ihc->contentLayout()->addWidget(m_ihcOverlay);
@@ -450,7 +485,7 @@ void ProcessPage::saveAnnotations()
     }
 }
 
-void ProcessPage::analyzeIhc(bool regionOnly)
+void ProcessPage::analyzeIhc(bool regionOnly, bool nuclei)
 {
     if (m_data.empty())
         return;
@@ -485,6 +520,83 @@ void ProcessPage::analyzeIhc(bool regionOnly)
     const StainResult r = region.isNull()
                               ? analyzeStains(m_data, opt)
                               : analyzeStains(m_data, opt, [&region](int x, int y) { return region.constScanLine(y)[x] != 0; });
+    if (nuclei) {
+        NucleusOptions no;
+        no.diameterUm = m_nucleusDiameter->value();
+        no.umPerPixel = m_meta.umPerPixel;
+        no.diameterPx = m_meta.umPerPixel > 0 ? 0 : m_nucleusDiameter->value() * 4; // uncalibrated: assume 0.25 µm/px
+        no.dabThreshold = opt.dabThreshold;
+        {
+            const auto &ih = AppSettings::instance().ihc;
+            no.nuclearMarker = ih.nuclearMarker;
+            static const double contrast[3] = {0.05, 0.03, 0.02}, stain[3] = {0.10, 0.06, 0.04};
+            no.minContrast = contrast[std::clamp(ih.nucleusSensitivity, 0, 2)];
+            no.minStain = stain[std::clamp(ih.nucleusSensitivity, 0, 2)];
+        }
+        const NucleusResult nr =
+            region.isNull() ? detectNuclei(r, no)
+                            : detectNuclei(r, no, [&region](int x, int y) { return region.constScanLine(y)[x] != 0; });
+        // overlay: a ring per nucleus
+        m_ihcMask = QImage(m_data.width, m_data.height, QImage::Format_ARGB32_Premultiplied);
+        m_ihcMask.fill(Qt::transparent);
+        {
+            QPainter p(&m_ihcMask);
+            p.setRenderHint(QPainter::Antialiasing);
+            const double rad = nr.radiusPx * 0.9, lw = std::max(1.5, nr.radiusPx / 6);
+            const QPen pos(QColor(230, 30, 30), lw), neg(QColor(30, 110, 255), lw);
+            p.setBrush(Qt::NoBrush);
+            for (const auto &n : nr.nuclei) {
+                p.setPen(n.positive ? pos : neg);
+                p.drawEllipse(QPointF(n.x, n.y), rad, rad);
+            }
+            if (!region.isNull()) {
+                // outline of the counted region
+                p.setPen(QPen(QColor(255, 220, 0, 200), lw));
+                for (const auto &a : m_layer->annotations())
+                    if (a.id == m_layer->selectedId() && isRegion(a)) {
+                        if (a.type == Annotation::Rectangle)
+                            p.drawRect(QRectF(a.pts[0], a.pts[1]).normalized());
+                        else if (a.type == Annotation::Ellipse)
+                            p.drawEllipse(QRectF(a.pts[0], a.pts[1]).normalized());
+                        else
+                            p.drawPolygon(QPolygonF(a.pts));
+                    }
+            }
+        }
+        QApplication::restoreOverrideCursor();
+        if (m_ihcOverlay->isChecked())
+            m_view->setOverlayImage(m_ihcMask);
+        const int total = nr.positive + nr.negative;
+        QString text = tr("<b>%1: %2</b> (%3)<br>Positive (DAB): %4 &nbsp; Negative (H): %5<br>"
+                          "<b>%6: %7 %</b>")
+                           .arg(no.nuclearMarker ? tr("Nuclei") : tr("Cells"))
+                           .arg(total)
+                           .arg(regionName)
+                           .arg(nr.positive)
+                           .arg(nr.negative)
+                           .arg(no.nuclearMarker ? tr("Labelling index") : tr("Positive cells"))
+                           .arg(nr.labellingIndex * 100, 0, 'f', 1);
+        if (nr.densityPerMm2 > 0)
+            text += tr("<br>Density: %1 nuclei/mm²").arg(nr.densityPerMm2, 0, 'f', 0);
+        if (m_meta.umPerPixel <= 0)
+            text += tr("<br><i>Image not calibrated: nucleus size assumes 0.25 µm/pixel.</i>");
+        text += tr("<br><span style='color:#e22'>red</span> = positive, <span style='color:#37f'>blue</span> = negative");
+        m_ihcResult->setText(text);
+        m_ihcText = QStringLiteral("image\tregion\tnuclei\tpositive\tnegative\tlabelling_index_%\tdensity_per_mm2\t"
+                                   "nucleus_diameter_um\tDAB_threshold_OD\n%1\t%2\t%3\t%4\t%5\t%6\t%7\t%8\t%9\n")
+                        .arg(QFileInfo(m_path).fileName(), regionName)
+                        .arg(total)
+                        .arg(nr.positive)
+                        .arg(nr.negative)
+                        .arg(nr.labellingIndex * 100, 0, 'f', 2)
+                        .arg(nr.densityPerMm2, 0, 'f', 1)
+                        .arg(no.diameterUm, 0, 'f', 1)
+                        .arg(opt.dabThreshold);
+        emit message(no.nuclearMarker ? tr("Nuclei: %1, labelling index %2 %").arg(total).arg(nr.labellingIndex * 100, 0, 'f', 1)
+                                     : tr("Cells: %1, %2 % positive").arg(total).arg(nr.labellingIndex * 100, 0, 'f', 1),
+                     6000);
+        return;
+    }
     // overlay
     m_ihcMask = QImage(m_data.width, m_data.height, QImage::Format_ARGB32); // non-premultiplied colours below
     for (int y = 0; y < m_data.height; ++y) {

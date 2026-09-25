@@ -30,6 +30,7 @@ add_library(lmcore STATIC
     src/imaging/MosaicBuilder.cpp
     src/imaging/PixelShift.cpp
     src/imaging/StainAnalysis.cpp
+    src/imaging/NucleusDetection.cpp
     src/camera/Backends.cpp
     src/camera/SimulatedCamera.cpp
     src/camera/MFCamera.cpp
@@ -90,6 +91,11 @@ add_executable(iotest tests/iotest.cpp src/io/ImageIO.cpp src/io/Metadata.cpp)
 target_include_directories(iotest PRIVATE src)
 target_link_libraries(iotest PRIVATE lmcore Qt6::Core Qt6::Gui)
 add_test(NAME iotest COMMAND iotest)
+
+# command-line IHC analysis
+add_executable(ihctool tools/ihctool/ihctool.cpp src/io/ImageIO.cpp src/io/Metadata.cpp)
+target_include_directories(ihctool PRIVATE src)
+target_link_libraries(ihctool PRIVATE lmcore Qt6::Core Qt6::Gui)
 endif()
 
 # ---------------------------------------------------------------- tools & tests

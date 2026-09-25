@@ -41,6 +41,9 @@ struct IhcSettings {
     double h[3] = {0.650, 0.704, 0.286};
     double dab[3] = {0.268, 0.570, 0.776};
     QString vectorSource;                    // e.g. image the vectors were estimated from
+    double nucleusDiameterUm = 7.0;          // nucleus counting
+    bool nuclearMarker = true;               // marker in nuclei (Ki-67...) or cytoplasm/membrane
+    int nucleusSensitivity = 1;              // 0 low, 1 normal, 2 high
 };
 
 struct OverlaySettings {

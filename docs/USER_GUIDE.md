@@ -133,6 +133,14 @@ staining, open a representative image with both stains and press **Estimate stai
 colours** (Macenko method); the measured colours are used for all IHC analyses, including
 batch quantification and the CSV (column `stain_vectors`), until you press *Standard*.
 
+**Counting nuclei / positive cells:** choose the *Marker* type and press **Count nuclei** (or
+*Count in selection*). *Nuclear* markers (Ki-67, p53, ER/PR): every nucleus is found and counted
+positive if it is DAB stained; the result is the **labelling index** (% positive nuclei).
+*Cytoplasmic / membranous* markers: nuclei are found from the haematoxylin and a cell is
+positive if the DAB around its nucleus exceeds the threshold. Set the typical *Nucleus diameter*
+(about 7 µm for most cells) and the *Sensitivity* (*High* also finds pale nuclei). Positive
+nuclei/cells are circled red, negative ones blue. `ihctool.exe` does the same from the command line.
+
 **Many images at once:** in *Browse*, select the images (or none for the whole
 folder) and press **IHC quantification…**. Each image gets one row: DAB-positive %,
 weak / moderate / strong %, H-score and areas, plus the mean ± SD over all images.

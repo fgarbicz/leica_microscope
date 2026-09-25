@@ -41,7 +41,7 @@ public slots:
     void multifocusFromFiles();
     void stitchFromFiles();
     void setCalibration();
-    void analyzeIhc(bool regionOnly);
+    void analyzeIhc(bool regionOnly, bool nuclei = false);
     void updateStainLabel();
 
 signals:
@@ -68,6 +68,7 @@ private:
     bool m_dirtyAnnotations = false;
     // IHC quantification
     SliderSpin *m_dabThreshold;
+    SliderSpin *m_nucleusDiameter;
     QLabel *m_ihcResult;
     QCheckBox *m_ihcOverlay;
     QLabel *m_stainLabel;
