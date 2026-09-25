@@ -3,7 +3,7 @@
 The main part of this document is the **Windows** rollout (the microscope PC).
 macOS and Linux are covered at the end.
 
-Installer: `dist\DMImaging-Setup-1.0.0.exe` (39 MB, git tag `v1.0.0`, build `a0d3c94`).
+Installer: `dist\DMImaging-Setup-1.1.0.exe` (39 MB, git tag `v1.1.0`, build `058928c`).
 
 ## Before you start (per PC)
 
@@ -15,11 +15,11 @@ Installer: `dist\DMImaging-Setup-1.0.0.exe` (39 MB, git tag `v1.0.0`, build `a0d
 
 ## Install
 
-1. Copy `DMImaging-Setup-1.0.0.exe` to the PC and run it. Approve the administrator prompt.
+1. Copy `DMImaging-Setup-1.1.0.exe` to the PC and run it. Approve the administrator prompt.
 2. Keep both options ticked: *desktop shortcut* and *Install the camera driver*.
 3. Finish with *Start DM Imaging now*.
 
-Silent install (IT deployment): `DMImaging-Setup-1.0.0.exe /VERYSILENT /NORESTART /TASKS="desktopicon,installdriver"`
+Silent install (IT deployment): `DMImaging-Setup-1.1.0.exe /VERYSILENT /NORESTART /TASKS="desktopicon,installdriver"`
 from an elevated prompt; add `/LOG="C:\Temp\dmimaging_setup.log"` for a log.
 
 ## Verify (2 minutes)
@@ -31,7 +31,7 @@ from an elevated prompt; add `/LOG="C:\Temp\dmimaging_setup.log"` for a log.
 | Colours | Background white, DAB brown, haematoxylin blue (press *Auto white balance* (F7) on an empty field first) |
 | Capture | F9 → dialog asks objective + name → *Save* → file appears in *Browse* |
 | Calibration | Browse → metadata shows *Pixel size* for the chosen objective |
-| Version | Help → About: *DM Imaging 1.0.0, build a0d3c94* |
+| Version | Help → About: *DM Imaging 1.1.0, build 058928c* |
 
 ## If something goes wrong
 

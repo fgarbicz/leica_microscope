@@ -12,9 +12,9 @@ param(
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
 
-# version from main.cpp (setApplicationVersion("x.y.z"))
-$main = Get-Content (Join-Path $root 'src\app\main.cpp') -Raw
-if ($main -notmatch 'setApplicationVersion\(QStringLiteral\("([0-9.]+)"\)\)') { throw 'version not found in src/app/main.cpp' }
+# version from CMakeLists.txt (project(DMImaging VERSION x.y.z ...))
+$cmakeLists = Get-Content (Join-Path $root 'CMakeLists.txt') -Raw
+if ($cmakeLists -notmatch 'project\(DMImaging VERSION ([0-9.]+)') { throw 'version not found in CMakeLists.txt' }
 $version = $Matches[1]
 Write-Host "DM Imaging $version"
 
