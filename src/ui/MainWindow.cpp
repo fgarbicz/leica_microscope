@@ -502,7 +502,7 @@ void MainWindow::buildMenus()
         QDesktopServices::openUrl(QUrl::fromLocalFile(d));
     });
     file->addSeparator();
-    file->addAction(tr("&Settings…"), QKeySequence::Preferences, this, [this] {
+    file->addAction(tr("&Settings…"), QKeySequence(tr("Ctrl+,")), this, [this] {
         SettingsDialog dlg(this);
         connect(&dlg, &SettingsDialog::themeChanged, this, [](const QString &t) { applyTheme(*qApp, t); });
         if (dlg.exec() == QDialog::Accepted) {

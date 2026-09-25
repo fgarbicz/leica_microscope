@@ -2,6 +2,7 @@
 
 #include "app/AppSettings.h"
 #include "io/ImageIO.h"
+#include "ui/BatchExportDialog.h"
 #include "ui/CompareWindow.h"
 #include "ui/GalleryWidget.h"
 #include "ui/ImageView.h"
@@ -50,6 +51,8 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
     auto *openExt = tb->addAction(tr("Open externally"));
     auto *reveal = tb->addAction(tr("Show in Explorer"));
     tb->addSeparator();
+    auto *exportAct = tb->addAction(tr("Export…"));
+    exportAct->setToolTip(tr("Export the selected images (JPEG/PNG, scale bar, annotations, resize)"));
     auto *compare = tb->addAction(tr("Compare"));
     compare->setToolTip(tr("Compare two selected images side by side"));
     auto *rename = tb->addAction(tr("Rename…"));
@@ -129,6 +132,16 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
             QProcess::startDetached(QStringLiteral("explorer.exe"), {QStringLiteral("/select,"), QDir::toNativeSeparators(sel.first())});
         else
             QDesktopServices::openUrl(QUrl::fromLocalFile(m_folder));
+    });
+    connect(exportAct, &QAction::triggered, this, [this] {
+        QStringList sel = selectedPaths();
+        if (sel.isEmpty())
+            for (int i = 0; i < m_grid->count(); ++i)
+                sel << m_grid->item(i)->data(Qt::UserRole).toString();
+        if (sel.isEmpty())
+            return;
+        BatchExportDialog dlg(sel, this);
+        dlg.exec();
     });
     connect(compare, &QAction::triggered, this, [this] {
         const auto sel = selectedPaths();
