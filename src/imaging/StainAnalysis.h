@@ -5,6 +5,7 @@
 #include "core/Frame.h"
 
 #include <functional>
+#include <string>
 #include <vector>
 
 namespace lm {
@@ -37,6 +38,14 @@ struct StainResult {
     double hScore = 0.0;          // 1*weak + 2*moderate + 3*strong, in % (0..300)
     double background[3] = {1, 1, 1}; // estimated white level per channel
 };
+
+// Estimates the haematoxylin and DAB OD vectors of this slide from the image
+// (Macenko et al. 2009: plane of the two main principal components of the
+// stained pixels' optical densities, stains at the 1st/99th angle
+// percentiles). Returns false (with a reason) if the image has too little
+// tissue or only one stain.
+bool estimateStainVectors(const Image16 &img, StainVectors &out, bool displayReferred = true,
+                          std::string *message = nullptr);
 
 // inside(x, y) restricts the analysis to a region (null = whole image).
 StainResult analyzeStains(const Image16 &img, const StainOptions &opt,

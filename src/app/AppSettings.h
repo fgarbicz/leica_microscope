@@ -33,6 +33,16 @@ struct CaptureSettings {
     bool videoScaleBar = true;
 };
 
+// IHC (DAB) quantification: threshold and stain vectors shared by the Process
+// page and batch quantification
+struct IhcSettings {
+    double dabThreshold = 0.15;
+    bool customVectors = false;              // false = standard Ruifrok H-DAB vectors
+    double h[3] = {0.650, 0.704, 0.286};
+    double dab[3] = {0.268, 0.570, 0.776};
+    QString vectorSource;                    // e.g. image the vectors were estimated from
+};
+
 struct OverlaySettings {
     bool scaleBar = true;
     bool grid = false;
@@ -53,6 +63,7 @@ public:
 
     CaptureSettings capture;
     OverlaySettings overlays;
+    IhcSettings ihc;
     ColorSettings color;
     bool autoExposure = false;
     double aeTarget = 0.85;

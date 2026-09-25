@@ -241,6 +241,64 @@ static void testStains()
     // region restriction: only the DAB block
     StainResult rr = analyzeStains(img, opt, [](int x, int) { return x >= 220; });
     CHECK_NEAR(rr.positiveFraction, 1.0, 0.01);
+
+    // stain vector estimation: a slide whose stains differ from the textbook
+    // vectors (bluer haematoxylin, redder DAB), mixtures of both plus background
+    {
+        const double th[3] = {0.55, 0.75, 0.37}, td[3] = {0.36, 0.60, 0.71};
+        auto norm = [](const double v[3], double o[3]) {
+            const double n = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+            for (int c = 0; c < 3; ++c)
+                o[c] = v[c] / n;
+        };
+        double nh[3], nd[3];
+        norm(th, nh);
+        norm(td, nd);
+        std::mt19937 rng(7);
+        std::uniform_real_distribution<double> u(0.0, 1.0);
+        Image16 slide(400, 300);
+        for (int y = 0; y < slide.height; ++y)
+            for (int x = 0; x < slide.width; ++x) {
+                double ch = 0, cd = 0;
+                const double k = u(rng);
+                if (k < 0.25) {
+                    ch = 0.2 + 0.8 * u(rng); // nuclei
+                } else if (k < 0.45) {
+                    cd = 0.2 + 0.8 * u(rng); // DAB
+                } else if (k < 0.8) {
+                    ch = 0.6 * u(rng);       // mixed
+                    cd = 0.6 * u(rng);
+                }                            // else background
+                for (int c = 0; c < 3; ++c)
+                    slide.row(y)[x * 3 + c] = encode(std::pow(10.0, -(ch * nh[c] + cd * nd[c])));
+            }
+        StainVectors est;
+        std::string msg;
+        const bool ok = estimateStainVectors(slide, est, true, &msg);
+        auto angle = [](const double a[3], const double b[3]) {
+            const double d = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2])
+                             / std::sqrt((a[0] * a[0] + a[1] * a[1] + a[2] * a[2]) * (b[0] * b[0] + b[1] * b[1] + b[2] * b[2]));
+            return std::acos(std::clamp(d, -1.0, 1.0)) * 180.0 / 3.14159265358979;
+        };
+        std::printf("  stain estimation: %s; H %.3f %.3f %.3f (%.1f deg off), DAB %.3f %.3f %.3f (%.1f deg off)\n",
+                    msg.c_str(), est.h[0], est.h[1], est.h[2], angle(est.h, nh), est.dab[0], est.dab[1], est.dab[2],
+                    angle(est.dab, nd));
+        CHECK(ok);
+        CHECK(angle(est.h, nh) < 3.0);
+        CHECK(angle(est.dab, nd) < 3.0);
+        // one stain only: must refuse
+        Image16 mono(200, 100);
+        for (int y = 0; y < mono.height; ++y)
+            for (int x = 0; x < mono.width; ++x) {
+                const double conc = x < 100 ? 0.0 : 0.3 + 0.6 * u(rng);
+                for (int c = 0; c < 3; ++c)
+                    mono.row(y)[x * 3 + c] = encode(std::pow(10.0, -conc * nh[c]));
+            }
+        const bool monoOk = estimateStainVectors(mono, est, true, &msg);
+        std::printf("  single stain: %s -> H %.3f %.3f %.3f, DAB %.3f %.3f %.3f\n", msg.c_str(), est.h[0], est.h[1], est.h[2],
+                    est.dab[0], est.dab[1], est.dab[2]);
+        CHECK(!monoOk);
+    }
 }
 
 static void testRegistration()

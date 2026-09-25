@@ -128,6 +128,11 @@ the DAB-positive percentage of the tissue, the areas, the intensity distribution
 pixels in red and negative tissue in blue. Adjust the *DAB positivity threshold*
 if needed, and use *Copy results* to paste a table row into Excel.
 
+**Stain colours:** the analysis uses standard haematoxylin/DAB colours. For your own
+staining, open a representative image with both stains and press **Estimate stain
+colours** (Macenko method); the measured colours are used for all IHC analyses, including
+batch quantification and the CSV (column `stain_vectors`), until you press *Standard*.
+
 **Many images at once:** in *Browse*, select the images (or none for the whole
 folder) and press **IHC quantification…**. Each image gets one row: DAB-positive %,
 weak / moderate / strong %, H-score and areas, plus the mean ± SD over all images.

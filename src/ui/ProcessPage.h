@@ -42,6 +42,7 @@ public slots:
     void stitchFromFiles();
     void setCalibration();
     void analyzeIhc(bool regionOnly);
+    void updateStainLabel();
 
 signals:
     void message(const QString &text, int timeoutMs);
@@ -69,6 +70,7 @@ private:
     SliderSpin *m_dabThreshold;
     QLabel *m_ihcResult;
     QCheckBox *m_ihcOverlay;
+    QLabel *m_stainLabel;
     QImage m_ihcMask;
     QString m_ihcText;
 };

@@ -1,5 +1,6 @@
 #include "BatchIhcDialog.h"
 
+#include "app/AppSettings.h"
 #include "imaging/StainAnalysis.h"
 #include "io/ImageIO.h"
 #include "ui/Annotations.h"
@@ -89,9 +90,19 @@ BatchIhcDialog::BatchIhcDialog(const QStringList &files, QWidget *parent) : QDia
     m_threshold->setRange(0.05, 1.0);
     m_threshold->setSingleStep(0.01);
     m_threshold->setDecimals(2);
-    m_threshold->setValue(0.15);
+    m_threshold->setValue(AppSettings::instance().ihc.dabThreshold);
     m_threshold->setToolTip(tr("DAB optical density above which a pixel counts as positive (same as in Process)"));
     form->addRow(tr("DAB positivity threshold (OD)"), m_threshold);
+    {
+        const auto &ih = AppSettings::instance().ihc;
+        auto *stains = new QLabel(ih.customVectors
+                                      ? tr("estimated from %1 (set in Process → IHC quantification)")
+                                            .arg(ih.vectorSource.isEmpty() ? tr("an image") : ih.vectorSource)
+                                      : tr("standard H-DAB (estimate them in Process → IHC quantification)"),
+                                  this);
+        stains->setObjectName(QStringLiteral("Hint"));
+        form->addRow(tr("Stain colours"), stains);
+    }
     m_useRegions = new QCheckBox(tr("Analyse only the rectangle / ellipse / area annotations of an image, if it has any"),
                                  this);
     m_useRegions->setChecked(true);
@@ -179,6 +190,13 @@ void BatchIhcDialog::run()
     m_progress->setValue(0);
     StainOptions opt;
     opt.dabThreshold = m_threshold->value();
+    {
+        const auto &ih = AppSettings::instance().ihc;
+        for (int c = 0; c < 3; ++c) {
+            opt.vectors.h[c] = ih.h[c];
+            opt.vectors.dab[c] = ih.dab[c];
+        }
+    }
     const bool useRegions = m_useRegions->isChecked();
 
     for (int i = 0; i < m_files.size() && !m_cancel; ++i) {
@@ -342,12 +360,22 @@ QString BatchIhcDialog::csv() const
             s = QLatin1Char('"') + s.replace(QLatin1Char('"'), QStringLiteral("\"\"")) + QLatin1Char('"');
         return s;
     };
-    QString out = QStringLiteral("image,objective,region,dab_threshold_od,tissue_area,positive_area,area_unit,"
+    const auto &ih = AppSettings::instance().ihc;
+    const QString stains = ih.customVectors
+                               ? QStringLiteral("H %1 %2 %3; DAB %4 %5 %6")
+                                     .arg(ih.h[0], 0, 'f', 4)
+                                     .arg(ih.h[1], 0, 'f', 4)
+                                     .arg(ih.h[2], 0, 'f', 4)
+                                     .arg(ih.dab[0], 0, 'f', 4)
+                                     .arg(ih.dab[1], 0, 'f', 4)
+                                     .arg(ih.dab[2], 0, 'f', 4)
+                               : QStringLiteral("standard");
+    QString out = QStringLiteral("image,objective,region,stain_vectors,dab_threshold_od,tissue_area,positive_area,area_unit,"
                                  "dab_positive_pct,weak_pct,moderate_pct,strong_pct,h_score,mean_dab_od_positive,"
                                  "note\n");
     for (const auto &r : m_rows)
         out += QStringLiteral("%1,%2,%3,%4,%5,%6,%7,%8,%9,%10,%11,%12,%13,%14\n")
-                   .arg(q(r.file), q(r.objective), q(r.region))
+                   .arg(q(r.file), q(r.objective), q(r.region) + QLatin1Char(',') + q(stains))
                    .arg(m_threshold->value(), 0, 'f', 2)
                    .arg(r.tissueArea, 0, 'f', r.umPerPixel > 0 ? 1 : 0)
                    .arg(r.positiveArea, 0, 'f', r.umPerPixel > 0 ? 1 : 0)

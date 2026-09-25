@@ -116,6 +116,22 @@ void AppSettings::load()
     capture.videoScaleBar = s.value(QStringLiteral("videoScaleBar"), true).toBool();
     s.endGroup();
 
+    s.beginGroup(QStringLiteral("ihc"));
+    ihc.dabThreshold = s.value(QStringLiteral("threshold"), 0.15).toDouble();
+    ihc.customVectors = s.value(QStringLiteral("custom"), false).toBool();
+    ihc.vectorSource = s.value(QStringLiteral("source")).toString();
+    {
+        const QVariantList hv = s.value(QStringLiteral("h")).toList(), dv = s.value(QStringLiteral("dab")).toList();
+        if (hv.size() == 3 && dv.size() == 3)
+            for (int c = 0; c < 3; ++c) {
+                ihc.h[c] = hv[c].toDouble();
+                ihc.dab[c] = dv[c].toDouble();
+            }
+        else
+            ihc.customVectors = false;
+    }
+    s.endGroup();
+
     s.beginGroup(QStringLiteral("overlays"));
     overlays.scaleBar = s.value(QStringLiteral("scaleBar"), true).toBool();
     overlays.grid = s.value(QStringLiteral("grid"), false).toBool();
@@ -176,6 +192,14 @@ void AppSettings::save() const
     s.setValue(QStringLiteral("tlCount"), capture.timelapseCount);
     s.setValue(QStringLiteral("videoFps"), capture.videoFps);
     s.setValue(QStringLiteral("videoScaleBar"), capture.videoScaleBar);
+    s.endGroup();
+
+    s.beginGroup(QStringLiteral("ihc"));
+    s.setValue(QStringLiteral("threshold"), ihc.dabThreshold);
+    s.setValue(QStringLiteral("custom"), ihc.customVectors);
+    s.setValue(QStringLiteral("source"), ihc.vectorSource);
+    s.setValue(QStringLiteral("h"), QVariantList{ihc.h[0], ihc.h[1], ihc.h[2]});
+    s.setValue(QStringLiteral("dab"), QVariantList{ihc.dab[0], ihc.dab[1], ihc.dab[2]});
     s.endGroup();
 
     s.beginGroup(QStringLiteral("overlays"));

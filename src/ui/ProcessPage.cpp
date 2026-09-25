@@ -4,6 +4,7 @@
 #include "imaging/FocusStacker.h"
 #include "imaging/MosaicBuilder.h"
 #include "imaging/StainAnalysis.h"
+#include "app/AppSettings.h"
 #include "ui/Annotations.h"
 #include "ui/CollapsibleSection.h"
 #include "ui/ImageView.h"
@@ -202,9 +203,61 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     ihcHint->setWordWrap(true);
     ihc->contentLayout()->addWidget(ihcHint);
     m_dabThreshold = new SliderSpin(tr("DAB positivity threshold (OD)"), 0.05, 1.0, 2, sideContent);
-    m_dabThreshold->setValue(0.15);
+    m_dabThreshold->setValue(AppSettings::instance().ihc.dabThreshold);
     m_dabThreshold->setDefault(0.15);
     ihc->contentLayout()->addWidget(m_dabThreshold);
+    connect(m_dabThreshold, &SliderSpin::valueChanged, this, [](double v) { AppSettings::instance().ihc.dabThreshold = v; });
+    // stain vectors: standard H-DAB, or estimated from a representative image of this staining
+    m_stainLabel = new QLabel(sideContent);
+    m_stainLabel->setObjectName(QStringLiteral("Hint"));
+    m_stainLabel->setWordWrap(true);
+    ihc->contentLayout()->addWidget(m_stainLabel);
+    auto *stainRow = new QHBoxLayout;
+    auto *stainEst = new QPushButton(tr("Estimate stain colours"), sideContent);
+    stainEst->setToolTip(tr("Measure the haematoxylin and DAB colours of this staining from the current image "
+                            "(needs both stains in view). Used for all IHC analyses until reset."));
+    auto *stainStd = new QPushButton(tr("Standard"), sideContent);
+    stainStd->setToolTip(tr("Use the standard haematoxylin-DAB colour vectors (Ruifrok & Johnston)"));
+    stainRow->addWidget(stainEst, 1);
+    stainRow->addWidget(stainStd);
+    ihc->contentLayout()->addLayout(stainRow);
+    updateStainLabel();
+    connect(stainEst, &QPushButton::clicked, this, [this] {
+        if (m_data.empty())
+            return;
+        StainVectors v;
+        std::string msg;
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        const bool ok = estimateStainVectors(m_data, v, true, &msg);
+        QApplication::restoreOverrideCursor();
+        if (!ok) {
+            QMessageBox::information(this, tr("Estimate stain colours"),
+                                     tr("The stain colours could not be estimated: %1.").arg(QString::fromStdString(msg)));
+            return;
+        }
+        auto &ih = AppSettings::instance().ihc;
+        for (int c = 0; c < 3; ++c) {
+            ih.h[c] = v.h[c];
+            ih.dab[c] = v.dab[c];
+        }
+        ih.customVectors = true;
+        ih.vectorSource = QFileInfo(m_path).fileName();
+        AppSettings::instance().save();
+        updateStainLabel();
+        emit message(tr("Stain colours estimated from %1").arg(ih.vectorSource), 5000);
+    });
+    connect(stainStd, &QPushButton::clicked, this, [this] {
+        auto &ih = AppSettings::instance().ihc;
+        const StainVectors def;
+        for (int c = 0; c < 3; ++c) {
+            ih.h[c] = def.h[c];
+            ih.dab[c] = def.dab[c];
+        }
+        ih.customVectors = false;
+        ih.vectorSource.clear();
+        AppSettings::instance().save();
+        updateStainLabel();
+    });
     auto *ihcRow = new QHBoxLayout;
     auto *ihcAll = new QPushButton(tr("Analyse image"), sideContent);
     auto *ihcSel = new QPushButton(tr("Analyse selection"), sideContent);
@@ -420,6 +473,13 @@ void ProcessPage::analyzeIhc(bool regionOnly)
     }
     StainOptions opt;
     opt.dabThreshold = m_dabThreshold->value();
+    {
+        const auto &ih = AppSettings::instance().ihc;
+        for (int c = 0; c < 3; ++c) {
+            opt.vectors.h[c] = ih.h[c];
+            opt.vectors.dab[c] = ih.dab[c];
+        }
+    }
     opt.umPerPixel = m_meta.umPerPixel;
     QApplication::setOverrideCursor(Qt::WaitCursor);
     const StainResult r = region.isNull()
@@ -464,6 +524,18 @@ void ProcessPage::analyzeIhc(bool regionOnly)
                     .arg(r.hScore, 0, 'f', 1)
                     .arg(r.meanDabPositive, 0, 'f', 4);
     emit message(tr("IHC: %1 % DAB positive (%2)").arg(r.positiveFraction * 100, 0, 'f', 1).arg(regionName), 6000);
+}
+
+void ProcessPage::updateStainLabel()
+{
+    const auto &ih = AppSettings::instance().ihc;
+    auto vec = [](const double v[3]) {
+        return QStringLiteral("%1 %2 %3").arg(v[0], 0, 'f', 2).arg(v[1], 0, 'f', 2).arg(v[2], 0, 'f', 2);
+    };
+    m_stainLabel->setText(ih.customVectors
+                              ? tr("Stain colours: estimated from %1 (H %2, DAB %3)")
+                                    .arg(ih.vectorSource.isEmpty() ? tr("an image") : ih.vectorSource, vec(ih.h), vec(ih.dab))
+                              : tr("Stain colours: standard H-DAB"));
 }
 
 void ProcessPage::setCalibration()
