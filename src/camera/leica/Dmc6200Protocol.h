@@ -12,7 +12,8 @@
 //                     Bayer GBRG), each frame followed by a 1-byte trailer
 //
 // Command request : u16 cmd, u16 payloadLen, u32 maxResponseLen, u32 0, payload
-// Command response: u16 cmd, u16 payloadLen, u16 status, u16 0x7BBB, payload
+// Command response: u16 cmd, u16 payloadLen, u16 status, u16 tag, payload
+// (tag varies per firmware boot: 0x7BBB, 0x3B3A, ...)
 
 #include "camera/usb/WinUsbDevice.h"
 

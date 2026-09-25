@@ -35,7 +35,9 @@ u16 cmd | u16 payloadLength | u32 maxResponseLength | u32 0 | payload...
 Response on 0x81 (read `maxResponseLength + 8` bytes):
 
 ```
-u16 cmd | u16 payloadLength | u16 status | u16 0x7BBB | payload...
+u16 cmd | u16 payloadLength | u16 status | u16 tag | payload...
+
+(The tag word was 0x7BBB on one firmware boot and 0x3B3A on another; do not validate it.)
 ```
 
 `status` 0 means success, and non-zero values are negative error codes
@@ -108,3 +110,25 @@ entries per register, one for each possible shot of the 6 × 6 pixel-shift mode.
    (row 0 = G B, row 1 = R G). The black level is about 8 DN.
 
 Measured throughput: 53 fps at full resolution (about 245 MB/s).
+
+## Recovery when the sensor reports "SynthSensor" or commands time out
+
+Info block 5 (`0x0011`) names the sensor. After a USB-level reset while the
+camera was powered (port reset, device removal, controller restart) the FX3
+firmware may come up with `SynthSensor` instead of `IMX174` and never deliver
+frames. Only removing power fixes this.
+
+* **Do not send `0x1010` on the bulk channel.** The vendor firmware updater
+  sends it (DijSDK ioctl `0x3010`) after writing firmware. On a running camera
+  it stops command processing entirely: EP0 standard requests still work, but
+  bulk commands time out and the class control request (bmRequestType `0x20`,
+  bRequest 0, 12-byte header; DijSDK ioctl `0x3012`) stalls.
+* Supported command codes (response of `0x0002`): `0001 0002 0003 0004 0101
+  0102 1005 0010 0011 0012 0020 F000 1010 0108 2000 1000`. `0x1000` carries
+  firmware data (120 s timeout) and `0xF000` is a debug read/write; both are
+  left alone.
+* **Power cycle in software:** `tools/camera_power_cycle.ps1` (run as admin)
+  sends a UCSI `CONNECTOR_RESET` (hard reset) to the USB-C connector that powers
+  the camera, using `UcsiControl.exe` from Microsoft's MUTT package. The PD
+  controller drops VBUS, the camera reboots cleanly and reports `IMX174` again.
+  The script enables the UCSI test interface only for the duration of the reset.

@@ -3,6 +3,8 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
+#include <string>
 #include <vector>
 
 using namespace lm;
@@ -37,6 +39,44 @@ int main(int argc, char **argv)
     auto &d = p.device()->descriptor();
     printf("device: %s / %s / %s  speed=%d\n", d.manufacturer.c_str(), d.product.c_str(), d.serial.c_str(), d.speed);
     std::vector<uint8_t> r;
+    if (argc > 2 && std::string(argv[1]) == "--raw") {
+        // send one command without payload: dmctest --raw 0x1010
+        const uint16_t cmd = uint16_t(strtoul(argv[2], nullptr, 0));
+        uint16_t status = 0;
+        const bool ok = p.command(cmd, {}, 0x40, &r, &status, 2000);
+        printf("cmd 0x%04x: %s status=0x%04x resp=%zu bytes (%s)\n", cmd, ok ? "ok" : "failed", status, r.size(),
+               p.lastError().c_str());
+        return ok ? 0 : 2;
+    }
+    if (argc > 2 && std::string(argv[1]) == "--dump") {
+        // raw exchange with hex dump: dmctest --dump 0x0003
+        const uint16_t cmd = uint16_t(strtoul(argv[2], nullptr, 0));
+        uint8_t hdr[12] = {uint8_t(cmd), uint8_t(cmd >> 8), 0, 0, 0x40};
+        printf("write: %d\n", p.device()->write(0x01, hdr, sizeof hdr, 1000));
+        for (int k = 0; k < 4; ++k) {
+            uint8_t buf[1024];
+            const int n = p.device()->read(0x81, buf, sizeof buf, 1000);
+            printf("read %d:", n);
+            for (int i = 0; i < n && i < 64; ++i)
+                printf(" %02x", buf[i]);
+            printf("\n");
+            if (n < 0)
+                break;
+        }
+        return 0;
+    }
+    if (argc > 2 && std::string(argv[1]) == "--ctrl") {
+        // send one command through the control pipe (class request, no response):
+        // dmctest --ctrl 0x1010
+        const uint16_t cmd = uint16_t(strtoul(argv[2], nullptr, 0));
+        uint8_t hdr[12] = {uint8_t(cmd), uint8_t(cmd >> 8)};
+        const uint8_t rt = argc > 3 ? uint8_t(strtoul(argv[3], nullptr, 0)) : 0x20;
+        uint8_t st[2] = {};
+        printf("GET_STATUS: %d\n", p.device()->control(0x80, 0, 0, 0, st, 2, 1000));
+        const int n = p.device()->control(rt, 0, 0, 0, hdr, sizeof hdr, 1000);
+        printf("ctrl cmd 0x%04x: %d (%s)\n", cmd, n, n < 0 ? p.device()->lastErrorText().c_str() : "ok");
+        return n < 0 ? 2 : 0;
+    }
     p.command(dmc::Cmd::MaxPacket, {}, 4, &r);
     printf("serial: %s  sensor: %s\n", p.serial().c_str(), p.sensorName().c_str());
     std::vector<uint32_t> v;

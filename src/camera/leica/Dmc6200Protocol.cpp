@@ -11,7 +11,6 @@ constexpr uint8_t kEpCmdOut = 0x01;
 constexpr uint8_t kEpCmdIn = 0x81;
 constexpr uint8_t kEpEvent = 0x82;
 constexpr uint8_t kEpImage = 0x83;
-constexpr uint16_t kMagic = 0x7BBB;
 
 void put16(std::vector<uint8_t> &v, uint16_t x)
 {
@@ -99,11 +98,11 @@ bool Protocol::command(uint16_t cmd, const std::vector<uint8_t> &payload, uint32
         setError("command response failed: " + (n < 0 ? m_dev->lastErrorText() : std::string("short response")));
         return false;
     }
-    const uint16_t rcmd = get16(resp.data()), plen = get16(resp.data() + 2), st = get16(resp.data() + 4),
-                   magic = get16(resp.data() + 6);
+    // the 4th word (0x7BBB on one boot, 0x3B3A on another) varies per firmware boot, so it is not checked
+    const uint16_t rcmd = get16(resp.data()), plen = get16(resp.data() + 2), st = get16(resp.data() + 4);
     if (status)
         *status = st;
-    if (rcmd != cmd || magic != kMagic) {
+    if (rcmd != cmd) {
         setError("unexpected response header");
         return false;
     }
@@ -190,7 +189,7 @@ bool Protocol::uploadSequence(const std::vector<SequenceEntry> &entries)
     }
     uint8_t resp[64];
     int n = m_dev->read(kEpCmdIn, resp, sizeof(resp), 1000);
-    if (n < 8 || get16(resp) != Cmd::SequenceTable || get16(resp + 6) != kMagic || get16(resp + 4) != 0) {
+    if (n < 8 || get16(resp) != Cmd::SequenceTable || get16(resp + 4) != 0) {
         setError("sequence upload not acknowledged");
         return false;
     }
