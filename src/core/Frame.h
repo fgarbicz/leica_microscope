@@ -35,6 +35,12 @@ bool isBayer(PixelFormat f);
 bool is16Bit(PixelFormat f);
 bool isMono(PixelFormat f);
 
+// Rounds a float sample to uint16, saturating to 0..65535.
+inline uint16_t saturate16(float v)
+{
+    return v <= 0.f ? 0 : v >= 65535.f ? 65535 : uint16_t(v + 0.5f);
+}
+
 // A frame as delivered by a camera. Data is owned by the frame.
 struct RawFrame {
     int width = 0;

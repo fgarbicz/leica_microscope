@@ -28,11 +28,6 @@ double srgbEncode(double x)
     return x <= 0.0031308 ? 12.92 * x : 1.055 * std::pow(x, 1.0 / 2.4) - 0.055;
 }
 
-inline uint16_t sat16(float v)
-{
-    return v <= 0.f ? 0 : v >= 65535.f ? 65535 : uint16_t(v + 0.5f);
-}
-
 std::vector<float> gaussianKernel(double sigma)
 {
     sigma = std::max(0.3, sigma);
@@ -241,9 +236,9 @@ void ColorPipeline::applyLinear(Image16 &img) const
                     gg *= g[x * 3 + 1];
                     b *= g[x * 3 + 2];
                 }
-                p[0] = sat16(m[0] * r + m[1] * gg + m[2] * b);
-                p[1] = sat16(m[3] * r + m[4] * gg + m[5] * b);
-                p[2] = sat16(m[6] * r + m[7] * gg + m[8] * b);
+                p[0] = saturate16(m[0] * r + m[1] * gg + m[2] * b);
+                p[1] = saturate16(m[3] * r + m[4] * gg + m[5] * b);
+                p[2] = saturate16(m[6] * r + m[7] * gg + m[8] * b);
             }
         }
     });
@@ -364,7 +359,7 @@ void ColorPipeline::renderPreviewHalf32(const RawFrame &raw, uint32_t *out, int 
                 else if (showClipping && R < 200.f && G < 200.f && B < 200.f)
                     px = 0xFF0040FFu;
                 else
-                    px = 0xFF000000u | uint32_t(lut[sat16(R)]) << 16 | uint32_t(lut[sat16(G)]) << 8 | lut[sat16(B)];
+                    px = 0xFF000000u | uint32_t(lut[saturate16(R)]) << 16 | uint32_t(lut[saturate16(G)]) << 8 | lut[saturate16(B)];
                 const int sx = flipH ? W - 1 - x : x, sy = flipV ? H - 1 - y : y;
                 int ox, oy;
                 switch (rot) {
@@ -410,6 +405,9 @@ void ColorPipeline::renderPreview32(const RawFrame &raw, uint32_t *out, int stri
     auto sample = [&](int x, int y) -> float {
         x = x < 0 ? -x : (x >= W ? 2 * W - 2 - x : x);
         y = y < 0 ? -y : (y >= H ? 2 * H - 2 - y : y);
+        // 1-pixel wide/high frames: the mirror lands outside, clamp
+        x = std::clamp(x, 0, W - 1);
+        y = std::clamp(y, 0, H - 1);
         const uint8_t *row = raw.data.data() + size_t(y) * raw.stride;
         return wide ? float(reinterpret_cast<const uint16_t *>(row)[x]) : float(row[x]);
     };
@@ -506,7 +504,7 @@ void ColorPipeline::renderPreview32(const RawFrame &raw, uint32_t *out, int stri
                 } else if (clip && R < 200.f && G < 200.f && B < 200.f) {
                     px = 0xFF0040FFu;
                 } else {
-                    const uint32_t lr = lt[sat16(R)], lg = lt[sat16(G)], lb = lt[sat16(B)];
+                    const uint32_t lr = lt[saturate16(R)], lg = lt[saturate16(G)], lb = lt[saturate16(B)];
                     px = 0xFF000000u | (lr << 16) | (lg << 8) | lb;
                 }
                 rb[x] = px;
@@ -545,40 +543,53 @@ void unsharpMask32(uint32_t *px, int w, int h, int stride, double amount, double
     if (amount <= 0 || w < 4 || h < 4)
         return;
     if (radius <= 1.5) {
-        // single pass 3x3 unsharp mask; each chunk keeps copies of the
-        // original rows it needs (the image is modified in place)
+        // single pass 3x3 unsharp mask, in place. Each chunk keeps copies of
+        // the original rows it needs; the rows just outside a chunk belong to
+        // its neighbours (which sharpen them concurrently), so they are copied
+        // for every chunk before any processing starts.
         const int amt = int(amount * 256);
-        parallelRows(h, [&](int y0, int y1) {
-            const size_t n = static_cast<size_t>(w);
+        const size_t n = static_cast<size_t>(w);
+        const int wantChunks = std::clamp(workerCount() * 2, 1, std::max(1, h / 16));
+        const int chunkRows = (h + wantChunks - 1) / wantChunks;
+        const int chunks = (h + chunkRows - 1) / chunkRows;
+        std::vector<uint32_t> edges(size_t(chunks) * 2 * n); // per chunk: row above, row below
+        for (int c = 0; c < chunks; ++c) {
+            const int b = c * chunkRows, e = std::min(h, b + chunkRows);
+            std::copy_n(px + size_t(std::max(b - 1, 0)) * stride, w, edges.data() + size_t(2 * c) * n);
+            std::copy_n(px + size_t(std::min(e, h - 1)) * stride, w, edges.data() + size_t(2 * c + 1) * n);
+        }
+        parallelRows(chunks, [&](int chunkBegin, int chunkEnd) {
             std::vector<uint32_t> prev(n), cur(n), next(n);
-            auto load = [&](std::vector<uint32_t> &dst, int y) {
-                std::copy_n(px + size_t(std::clamp(y, 0, h - 1)) * stride, w, dst.data());
-            };
-            load(prev, y0 - 1);
-            load(cur, y0);
-            for (int y = y0; y < y1; ++y) {
-                load(next, y + 1);
-                uint32_t *const out = px + size_t(y) * stride;
-                const uint32_t *const P = prev.data(), *const Cr = cur.data(), *const N = next.data();
-                const int a = amt, ww = w;
-                for (int x = 0; x < ww; ++x) {
-                    const int xl = x > 0 ? x - 1 : 0, xr = x < ww - 1 ? x + 1 : ww - 1;
-                    const uint32_t c0 = Cr[x];
-                    uint32_t res = c0 & 0xFF000000u;
-                    for (int sh = 0; sh <= 16; sh += 8) {
-                        const int sum = int((P[xl] >> sh) & 0xFF) + int((P[x] >> sh) & 0xFF) + int((P[xr] >> sh) & 0xFF)
-                                        + int((Cr[xl] >> sh) & 0xFF) + int((c0 >> sh) & 0xFF) + int((Cr[xr] >> sh) & 0xFF)
-                                        + int((N[xl] >> sh) & 0xFF) + int((N[x] >> sh) & 0xFF) + int((N[xr] >> sh) & 0xFF);
-                        const int o = int((c0 >> sh) & 0xFF) * 9;
-                        const int v = std::clamp((o + ((o - sum) * a >> 8)) / 9, 0, 255);
-                        res |= uint32_t(v) << sh;
+            for (int chunk = chunkBegin; chunk < chunkEnd; ++chunk) {
+                const int y0 = chunk * chunkRows, y1 = std::min(h, y0 + chunkRows);
+                const uint32_t *const below = edges.data() + size_t(2 * chunk + 1) * n;
+                std::copy_n(edges.data() + size_t(2 * chunk) * n, w, prev.data());
+                std::copy_n(px + size_t(y0) * stride, w, cur.data());
+                for (int y = y0; y < y1; ++y) {
+                    // rows inside the chunk are still original until written below
+                    std::copy_n(y + 1 < y1 ? px + size_t(y + 1) * stride : below, w, next.data());
+                    uint32_t *const out = px + size_t(y) * stride;
+                    const uint32_t *const P = prev.data(), *const Cr = cur.data(), *const N = next.data();
+                    const int a = amt, ww = w;
+                    for (int x = 0; x < ww; ++x) {
+                        const int xl = x > 0 ? x - 1 : 0, xr = x < ww - 1 ? x + 1 : ww - 1;
+                        const uint32_t c0 = Cr[x];
+                        uint32_t res = c0 & 0xFF000000u;
+                        for (int sh = 0; sh <= 16; sh += 8) {
+                            const int sum = int((P[xl] >> sh) & 0xFF) + int((P[x] >> sh) & 0xFF) + int((P[xr] >> sh) & 0xFF)
+                                            + int((Cr[xl] >> sh) & 0xFF) + int((c0 >> sh) & 0xFF) + int((Cr[xr] >> sh) & 0xFF)
+                                            + int((N[xl] >> sh) & 0xFF) + int((N[x] >> sh) & 0xFF) + int((N[xr] >> sh) & 0xFF);
+                            const int o = int((c0 >> sh) & 0xFF) * 9;
+                            const int v = std::clamp((o + ((o - sum) * a >> 8)) / 9, 0, 255);
+                            res |= uint32_t(v) << sh;
+                        }
+                        out[x] = res;
                     }
-                    out[x] = res;
+                    std::swap(prev, cur);
+                    std::swap(cur, next);
                 }
-                std::swap(prev, cur);
-                std::swap(cur, next);
             }
-        });
+        }, 1);
         return;
     }
     const int r = std::clamp(int(std::lround(radius * 1.3)), 1, 10); // box ~ gaussian sigma

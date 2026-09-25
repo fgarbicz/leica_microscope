@@ -128,9 +128,14 @@ std::shared_ptr<const ShadingCorrection::GainMap> ShadingCorrection::gainsFor(in
     const bool up = width % m_srcW == 0 && height % m_srcH == 0 && width / m_srcW == height / m_srcH;
     if (!same && !down && !up)
         return nullptr;
-    std::lock_guard<std::mutex> lock(m_cacheMutex);
-    if (m_cache && m_cache->width == width && m_cache->height == height)
-        return m_cache;
+    {
+        std::lock_guard<std::mutex> lock(m_cacheMutex);
+        if (m_cache && m_cache->width == width && m_cache->height == height)
+            return m_cache;
+    }
+    // Build outside the lock (m_grid is immutable after construction) so other
+    // callers are not blocked behind a parallel job. If two threads race, both
+    // maps are identical; the first one stored wins.
     auto map = std::make_shared<GainMap>();
     map->width = width;
     map->height = height;
@@ -157,6 +162,9 @@ std::shared_ptr<const ShadingCorrection::GainMap> ShadingCorrection::gainsFor(in
             }
         }
     });
+    std::lock_guard<std::mutex> lock(m_cacheMutex);
+    if (m_cache && m_cache->width == width && m_cache->height == height)
+        return m_cache;
     m_cache = map;
     return map;
 }
