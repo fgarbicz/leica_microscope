@@ -242,6 +242,27 @@ static void testStains()
     StainResult rr = analyzeStains(img, opt, [](int x, int) { return x >= 220; });
     CHECK_NEAR(rr.positiveFraction, 1.0, 0.01);
 
+    // blank glass with isolated noisy pixels: not tissue when denoising
+    {
+        Image16 glass(200, 150);
+        std::mt19937 grng(3);
+        std::uniform_real_distribution<double> gu(0.0, 1.0);
+        for (int y = 0; y < glass.height; ++y)
+            for (int x = 0; x < glass.width; ++x) {
+                const double od = gu(grng) < 0.02 ? 0.25 : 0.0; // 2 % hot/dark single pixels
+                for (int c = 0; c < 3; ++c)
+                    glass.row(y)[x * 3 + c] = encode(std::pow(10.0, -od * dv[c]));
+            }
+        StainOptions gopt;
+        const StainResult clean = analyzeStains(glass, gopt);
+        gopt.denoise = false;
+        const StainResult noisy = analyzeStains(glass, gopt);
+        std::printf("  blank glass with 2%% noisy pixels: %llu tissue pixels (raw classification %llu)\n",
+                    (unsigned long long)clean.tissuePixels, (unsigned long long)noisy.tissuePixels);
+        CHECK(clean.tissuePixels < 30);
+        CHECK(noisy.tissuePixels > 300);
+    }
+
     // stain vector estimation: a slide whose stains differ from the textbook
     // vectors (bluer haematoxylin, redder DAB), mixtures of both plus background
     {

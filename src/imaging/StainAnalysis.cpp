@@ -236,16 +236,13 @@ StainResult analyzeStains(const Image16 &img, const StainOptions &opt, const std
         uint64_t region = 0, tissue = 0, pos = 0, weak = 0, mod = 0, strong = 0;
         double dabPos = 0, dabTissue = 0;
     };
-    std::vector<Acc> rows(static_cast<size_t>(H));
+    // pass 1: concentrations and total optical density of every pixel
+    std::vector<float> total(size_t(W) * size_t(H));
     parallelRows(H, [&](int y0, int y1) {
         for (int y = y0; y < y1; ++y) {
-            Acc a;
             const uint16_t *p = img.row(y);
             for (int x = 0; x < W; ++x) {
-                const size_t i = size_t(y) * W + x;
-                if (inside && !inside(x, y))
-                    continue;
-                ++a.region;
+                const size_t i = size_t(y) * size_t(W) + size_t(x);
                 double od[3];
                 for (int c = 0; c < 3; ++c) {
                     const double t = std::clamp(lin[p[x * 3 + c]] / r.background[c], 1e-3, 1.0);
@@ -256,12 +253,40 @@ StainResult analyzeStains(const Image16 &img, const StainOptions &opt, const std
                 const double cd = od[0] * inv[0][1] + od[1] * inv[1][1] + od[2] * inv[2][1];
                 r.h[i] = float(std::max(0.0, ch));
                 r.dab[i] = float(std::max(0.0, cd));
-                const double total = od[0] + od[1] + od[2];
-                if (total < opt.tissueThreshold)
+                total[i] = float(od[0] + od[1] + od[2]);
+            }
+        }
+    });
+    // pass 2: classification. With denoising, a pixel is judged by the 3x3
+    // median of its neighbourhood: single noisy pixels on blank glass are
+    // ignored, while edges stay where they are (unlike a blur).
+    auto median9 = [&](const std::vector<float> &v, int x, int y) {
+        float n[9];
+        int k = 0;
+        for (int dy = -1; dy <= 1; ++dy) {
+            const int yy = std::clamp(y + dy, 0, H - 1);
+            for (int dx = -1; dx <= 1; ++dx)
+                n[k++] = v[size_t(yy) * size_t(W) + size_t(std::clamp(x + dx, 0, W - 1))];
+        }
+        std::nth_element(n, n + 4, n + 9);
+        return double(n[4]);
+    };
+    std::vector<Acc> rows(static_cast<size_t>(H));
+    parallelRows(H, [&](int y0, int y1) {
+        for (int y = y0; y < y1; ++y) {
+            Acc a;
+            for (int x = 0; x < W; ++x) {
+                const size_t i = size_t(y) * size_t(W) + size_t(x);
+                if (inside && !inside(x, y))
                     continue;
+                ++a.region;
+                const double tot = opt.denoise ? median9(total, x, y) : double(total[i]);
+                if (tot < opt.tissueThreshold)
+                    continue;
+                const double cd = opt.denoise ? median9(r.dab, x, y) : double(r.dab[i]);
                 ++a.tissue;
                 r.mask[i] = 1;
-                a.dabTissue += std::max(0.0, cd);
+                a.dabTissue += cd;
                 if (cd >= tWeak) {
                     r.mask[i] = 2;
                     ++a.pos;

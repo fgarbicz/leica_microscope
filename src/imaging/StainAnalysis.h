@@ -21,6 +21,7 @@ struct StainOptions {
     double dabThreshold = 0.15;   // DAB optical density for a "positive" pixel
     double tissueThreshold = 0.10;// total OD separating tissue from background
     bool displayReferred = true;  // input is sRGB encoded (saved images)
+    bool denoise = true;          // classify on 3x3 medians (ignores single noisy pixels)
     double umPerPixel = 0.0;
 };
 
