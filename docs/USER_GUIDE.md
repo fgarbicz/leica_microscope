@@ -2,6 +2,10 @@
 
 ## 1. Start up
 
+**Installation:** run `DMImaging-Setup-<version>.exe` once on the microscope PC (Windows asks
+for administrator permission). Keep *Install the camera driver* ticked. Afterwards DM Imaging
+is in the Start menu and on the desktop.
+
 1. Switch on the microscope lamp and connect the camera (USB 3.0 port, blue connector).
 2. Start **DM Imaging** from the desktop or Start menu. The camera connects and
    the live image starts automatically.
@@ -182,7 +186,9 @@ using the marker type, nucleus size and sensitivity set in Process.
 |---|---|
 | "No Leica camera found" | Check the USB cable (use a USB 3.0 port). Use *Tools → Install / repair camera driver*. |
 | Camera disconnected | The application reconnects automatically when the camera is back. |
-| "Sensor is not ready" | Unplug the camera's USB cable for 5 seconds and plug it back in. |
+| "Sensor is not ready" | Unplug the camera's USB cable for 5 seconds and plug it back in. (Resetting the USB port or restarting Windows is not enough: the camera must lose power.) |
+| "Little bare glass in this field" (IHC) | The analysis needs some empty glass to know what "white" is. Include a little background in the image. |
+| Video stopped by itself | Videos are limited to about 1.9 GB (a few minutes at full resolution); start a new recording. |
 | Colours wrong | Press Auto white balance on an empty field. |
 | Dark corners | Acquire a shading reference for this objective. |
 | Measurements wrong | Check the selected objective and calibrate with a stage micrometer. |

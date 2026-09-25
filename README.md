@@ -62,12 +62,32 @@ daily imaging and includes its own native camera driver.
 
 ## Install
 
-1. **Camera driver (once per PC):** run `driver\install_driver.ps1`, or use
-   *Tools → Install / repair camera driver* in the app. Windows asks for
-   administrator rights once. It binds Microsoft's WinUSB driver to the camera;
-   no kernel code is installed.
-2. **Application:** run `install.ps1`. It builds the app, installs it to
-   `%LOCALAPPDATA%\Programs\DM Imaging` and creates Start-menu and desktop shortcuts.
+Run **`DMImaging-Setup-<version>.exe`** (from `dist\`) on the microscope PC and follow the
+wizard. Windows asks for administrator permission once. Setup:
+
+- installs DM Imaging for all users to `C:\Program Files\DM Imaging`, with Start-menu
+  entries (app and user guide) and an optional desktop shortcut;
+- installs the Microsoft Visual C++ runtime if it is missing;
+- optionally installs the **camera driver** (ticked by default). This binds Microsoft's
+  WinUSB driver to the Leica DMC6200; no kernel code is installed. If the camera already
+  uses the driver, nothing is changed. Connect the camera before or after installing.
+
+Upgrading: run a newer Setup; settings and images are kept. Uninstall from *Windows
+Settings → Apps*; this also removes the driver package (settings and images are kept).
+
+Requirements: Windows 10/11 64-bit, a USB 3.0 port for the camera.
+
+The driver can also be installed or repaired later with *Tools → Install / repair camera
+driver* in the app.
+
+### Making the installer
+
+```powershell
+.\tools\make_installer.ps1     # build, run all tests, package -> dist\DMImaging-Setup-<version>.exe
+```
+
+Needs the build requirements below plus Inno Setup 6 (`ISCC.exe`), and Python with the
+`markdown` package for the HTML user guide (optional).
 
 ## Build from source
 

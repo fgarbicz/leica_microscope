@@ -51,7 +51,7 @@ Remove-Item (Join-Path $stage 'vc_redist.x64.exe') -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force (Join-Path $stage 'driver') | Out-Null
 Copy-Item (Join-Path $root 'driver\LeicaUsb3Cam.inf'), (Join-Path $root 'driver\install_driver.ps1') (Join-Path $stage 'driver')
 Copy-Item (Join-Path $root 'docs') (Join-Path $stage 'docs') -Recurse
-Copy-Item (Join-Path $root 'README.md') $stage
+Copy-Item (Join-Path $root 'README.md'), (Join-Path $root 'RELEASE_NOTES.md') $stage
 
 # user guide as HTML for the Start menu (needs Python with the 'markdown' package; else the .md is used)
 # (the 'python' on PATH may be the Microsoft Store stub, so prefer a real install that has 'markdown')
