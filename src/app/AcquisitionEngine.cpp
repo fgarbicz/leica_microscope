@@ -404,6 +404,14 @@ void AcquisitionEngine::runAutoExposure(const RawFrame &raw, Camera *cam)
     const bool once = m_aeOnce;
     if ((!ae.enabled && !once) || !cam || !cam->isOpen())
         return;
+    // never change the exposure while a capture collects frames (averaging) or shots
+    if (m_busy)
+        return;
+    {
+        QMutexLocker l(&m_mutex);
+        if (m_captureWanted > 0)
+            return;
+    }
     // wait until frames reflect the last change
     if (secondsSince(m_lastAeChange) < 0.15)
         return;

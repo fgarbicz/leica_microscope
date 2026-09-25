@@ -212,6 +212,12 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     ihcHint->setObjectName(QStringLiteral("Hint"));
     ihcHint->setWordWrap(true);
     ihc->contentLayout()->addWidget(ihcHint);
+    auto subHeading = [&](const QString &text) {
+        auto *l = new QLabel(QStringLiteral("<b>%1</b>").arg(text.toHtmlEscaped()), sideContent);
+        l->setContentsMargins(0, 6, 0, 0);
+        ihc->contentLayout()->addWidget(l);
+    };
+    subHeading(tr("Stained area and H-score"));
     m_dabThreshold = new SliderSpin(tr("DAB threshold (optical density)"), 0.05, 1.0, 2, sideContent);
     m_dabThreshold->setToolTip(tr("How brown a pixel must be to count as DAB-positive (optical density). Lower = more pixels positive. Default 0.15. Use the same value for all slides of a study."));
     m_dabThreshold->setValue(AppSettings::instance().ihc.dabThreshold);
@@ -276,6 +282,7 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     ihcRow->addWidget(ihcSel);
     ihc->contentLayout()->addLayout(ihcRow);
     // nucleus counting (nuclear markers such as Ki-67, p53, ER/PR)
+    subHeading(tr("Cell counting (labelling index)"));
     m_nucleusDiameter = new SliderSpin(tr("Nucleus diameter (µm)"), 3.0, 20.0, 1, sideContent);
     m_nucleusDiameter->setToolTip(tr("Typical nucleus size: about 7 µm for lymphocytes, larger for tumour cells"));
     m_nucleusDiameter->setValue(AppSettings::instance().ihc.nucleusDiameterUm);
@@ -518,6 +525,24 @@ void ProcessPage::analyzeIhcImpl(bool regionOnly, bool nuclei)
 {
     if (m_data.empty())
         return;
+    if (nuclei && m_meta.umPerPixel <= 0) {
+        QMessageBox box(QMessageBox::Question, tr("Count nuclei"),
+                        tr("This image has no pixel size, so the nucleus size can only be guessed "
+                           "(0.25 µm/pixel) and the counts may be wrong."),
+                        QMessageBox::NoButton, this);
+        auto *setSize = box.addButton(tr("Set pixel size…"), QMessageBox::AcceptRole);
+        auto *anyway = box.addButton(tr("Count anyway"), QMessageBox::DestructiveRole);
+        box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(setSize);
+        box.exec();
+        if (box.clickedButton() == setSize) {
+            setCalibration();
+            if (m_meta.umPerPixel <= 0)
+                return;
+        } else if (box.clickedButton() != anyway) {
+            return;
+        }
+    }
     // region mask from the selected annotation
     QImage region;
     QString regionName = tr("whole image");
