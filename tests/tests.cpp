@@ -395,6 +395,47 @@ static void testSimCamera()
     CHECK(frames >= 3);
 }
 
+static void testFocusMeasure()
+{
+    std::printf("focus measure\n");
+    // Bayer frame of the texture, optionally blurred (defocus), at a given exposure
+    // with shot noise (1 electron per DN)
+    const int W = 480, H = 320;
+    auto frame = [&](int blur, double exposure, unsigned seed) {
+        auto f = std::make_shared<RawFrame>();
+        f->width = W;
+        f->height = H;
+        f->format = PixelFormat::BayerGB16;
+        f->bitDepth = 12;
+        f->stride = W * 2;
+        f->data.resize(size_t(W) * H * 2);
+        auto *p = reinterpret_cast<uint16_t *>(f->data.data());
+        std::mt19937 rng(seed);
+        std::normal_distribution<double> gauss(0.0, 1.0);
+        for (int y = 0; y < H; ++y)
+            for (int x = 0; x < W; ++x) {
+                double v = 0;
+                int n = 0;
+                for (int j = -blur; j <= blur; ++j)
+                    for (int i = -blur; i <= blur; ++i, ++n)
+                        v += scene(x + i, y + j);
+                const double dn = v / n * exposure * 4095.0;
+                p[size_t(y) * W + x] = uint16_t(std::clamp(dn + std::sqrt(dn) * gauss(rng), 0.0, 4095.0));
+            }
+        return f;
+    };
+    const double sharpBright = focusMeasureRaw(*frame(0, 0.7, 1));
+    const double sharpDark = focusMeasureRaw(*frame(0, 0.05, 2));
+    const double blurBright = focusMeasureRaw(*frame(3, 0.7, 3));
+    const double blurDark = focusMeasureRaw(*frame(3, 0.05, 4));
+    std::printf("  sharp %.2f (dark %.2f), defocused %.2f (dark %.2f)\n", sharpBright, sharpDark, blurBright, blurDark);
+    // independent of exposure: a dark frame must not read as sharper because of noise
+    CHECK_NEAR(sharpDark / sharpBright, 1.0, 0.15);
+    CHECK_NEAR(blurDark / blurBright, 1.0, 0.2);
+    CHECK(sharpBright > 2.0 * blurBright);
+    CHECK(sharpDark > 2.0 * blurDark);
+}
+
 static void testHardware()
 {
     std::printf("hardware: Leica DMC6200\n");
@@ -513,6 +554,34 @@ static void testHardware()
         }
         std::printf("  saved pixelshift4.ppm / single.ppm / shot4_*.raw\n");
     }
+    // 16- and 36-shot modes: every shot present, same brightness, sensor actually moved
+    for (int mi = 1; mi < int(cam->shotModes().size()); ++mi) {
+        const auto mode = cam->shotModes()[size_t(mi)];
+        std::vector<RawFramePtr> ms;
+        const auto tc = std::chrono::steady_clock::now();
+        const bool okm = cam->captureShots(mi, ms, err);
+        const double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - tc).count();
+        std::printf("  %s: %s (%zu shots, %.1f s) %s\n", mode.name.c_str(), okm ? "ok" : "FAILED", ms.size(), sec,
+                    err.c_str());
+        CHECK(okm && int(ms.size()) == mode.shots);
+        if (!okm || int(ms.size()) != mode.shots)
+            continue;
+        double mn = 1e9, mx = 0;
+        int moved = 0;
+        for (size_t k = 0; k < ms.size(); ++k) {
+            const double m = exposureStats(*ms[k], 16).meanLevel;
+            mn = std::min(mn, m);
+            mx = std::max(mx, m);
+            if (k > 0 && ms[k]->data != ms[k - 1]->data)
+                ++moved;
+        }
+        std::printf("    shot mean level %.3f..%.3f, %d/%zu consecutive shots differ\n", mn, mx, moved, ms.size() - 1);
+        CHECK(mn > 0.02 && mx / mn < 1.1);
+        CHECK(moved == int(ms.size()) - 1);
+        Image16 rec = reconstructPixelShift(ms, mode.offsets, {mode.upscale, -1, -1});
+        std::printf("    reconstruction %dx%d\n", rec.width, rec.height);
+        CHECK(rec.width == ms[0]->width * mode.upscale && rec.height == ms[0]->height * mode.upscale);
+    }
     cam->close();
 }
 
@@ -572,6 +641,7 @@ int main(int argc, char **argv)
         testMosaic();
         testPixelShift();
         testSimCamera();
+        testFocusMeasure();
     }
     if (hw)
         testHardware();

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace lm {
 
@@ -105,14 +106,18 @@ Histogram computeHistogram32(const uint32_t *px, int width, int height, int stri
 
 double focusMeasureRaw(const RawFrame &raw, Rect r)
 {
-    if (raw.width < 16 || raw.height < 16)
+    // Works on 2x2 cells (the two green sites of a Bayer cell, or a 2x2 block
+    // of a mono/colour image), because microscope optics rarely resolve single
+    // pixels. Detail at the single-pixel scale is mostly noise; its variance is
+    // measured and subtracted, so the value does not depend on exposure.
+    if (raw.width < 32 || raw.height < 32)
         return 0.0;
     if (r.empty())
         r = {raw.width / 4, raw.height / 4, raw.width / 2, raw.height / 2};
-    r.x = std::clamp(r.x, 2, raw.width - 3);
-    r.y = std::clamp(r.y, 2, raw.height - 3);
-    r.w = std::clamp(r.w, 1, raw.width - 2 - r.x);
-    r.h = std::clamp(r.h, 1, raw.height - 2 - r.y);
+    constexpr int kSpan = 2; // band-pass spacing in cells (4 pixels)
+    const int cw = raw.width / 2, ch = raw.height / 2;
+    int cx0 = std::clamp(r.x / 2, kSpan, cw - kSpan - 1), cy0 = std::clamp(r.y / 2, kSpan, ch - kSpan - 1);
+    int cx1 = std::clamp((r.x + r.w) / 2, cx0 + 1, cw - kSpan), cy1 = std::clamp((r.y + r.h) / 2, cy0 + 1, ch - kSpan);
     const bool wide = is16Bit(raw.format);
     const int bpp = bytesPerPixel(raw.format);
     auto at = [&](int x, int y) -> double {
@@ -124,37 +129,64 @@ double focusMeasureRaw(const RawFrame &raw, Rect r)
             return reinterpret_cast<const uint16_t *>(row)[x * 3 + 1];
         return row[x * bpp + 1];
     };
-    // green sites of a Bayer mosaic form a quincunx; use diagonal neighbours
-    int gPhase = 0; // (x + y) parity of green sites
+    const bool bayer = isBayer(raw.format);
+    int gPhase = 0; // x offset of the green site in the first row of a cell
     if (raw.format == PixelFormat::BayerRG8 || raw.format == PixelFormat::BayerRG16 || raw.format == PixelFormat::BayerBG8
         || raw.format == PixelFormat::BayerBG16)
         gPhase = 1;
-    const bool bayer = isBayer(raw.format);
+    // cell value and the diagonal difference used for the noise estimate
+    auto cell = [&](int cx, int cy, double *diff) {
+        const int x = 2 * cx, y = 2 * cy;
+        if (bayer) {
+            const double a = at(x + gPhase, y), b = at(x + 1 - gPhase, y + 1);
+            if (diff)
+                *diff = a - b;
+            return 0.5 * (a + b);
+        }
+        const double a = at(x, y), b = at(x + 1, y + 1), c = at(x + 1, y), d = at(x, y + 1);
+        if (diff)
+            *diff = a - b;
+        return 0.25 * (a + b + c + d);
+    };
+    const int samplesPerCell = bayer ? 2 : 4;
+    const int stepY = std::max(1, (cy1 - cy0) / 200), stepX = std::max(1, (cx1 - cx0) / 300);
     double sum = 0, sum2 = 0, mean = 0;
-    uint64_t n = 0;
-    const int stepY = std::max(2, r.h / 240), stepX = std::max(2, r.w / 360);
-    for (int y = r.y; y < r.y + r.h; y += stepY) {
-        for (int x = r.x; x < r.x + r.w; x += stepX) {
-            int xx = x;
-            if (bayer && ((xx + y) & 1) != gPhase)
-                ++xx;
-            const double c = at(xx, y);
-            double lap;
-            if (bayer)
-                lap = 4.0 * c - at(xx - 1, y - 1) - at(xx + 1, y - 1) - at(xx - 1, y + 1) - at(xx + 1, y + 1);
-            else
-                lap = 4.0 * c - at(xx - 1, y) - at(xx + 1, y) - at(xx, y - 1) - at(xx, y + 1);
+    std::vector<float> diffs;
+    diffs.reserve(size_t((cy1 - cy0) / stepY + 1) * size_t((cx1 - cx0) / stepX + 1));
+    for (int cy = cy0; cy < cy1; cy += stepY) {
+        for (int cx = cx0; cx < cx1; cx += stepX) {
+            double d;
+            const double c = cell(cx, cy, &d);
+            const double lap = 4.0 * c - cell(cx - kSpan, cy, nullptr) - cell(cx + kSpan, cy, nullptr)
+                               - cell(cx, cy - kSpan, nullptr) - cell(cx, cy + kSpan, nullptr);
             sum += lap;
             sum2 += lap * lap;
             mean += c;
-            ++n;
+            diffs.push_back(float(std::abs(d)));
         }
     }
+    const size_t n = diffs.size();
     if (!n)
         return 0.0;
-    mean /= n;
-    const double var = sum2 / n - (sum / n) * (sum / n);
-    return mean > 1.0 ? var / (mean * mean) * 1000.0 : 0.0;
+    mean /= double(n);
+    if (mean <= 1.0)
+        return 0.0;
+    const double var = sum2 / double(n) - (sum / double(n)) * (sum / double(n));
+    // Pixel noise from the diagonal differences: mean square, ignoring edges
+    // beyond 4x the robust (median based) spread. The median alone is biased
+    // at low signal because the differences are small integers.
+    std::nth_element(diffs.begin(), diffs.begin() + n / 2, diffs.end());
+    const double limit = 4.0 * 1.4826 * std::max(0.5f, diffs[n / 2]);
+    double sq = 0;
+    size_t kept = 0;
+    for (float d : diffs)
+        if (d <= limit) {
+            sq += double(d) * d;
+            ++kept;
+        }
+    const double pixelVar = kept ? 0.5 * sq / double(kept) : 0.0;
+    const double noiseVar = 20.0 * pixelVar / samplesPerCell; // 4^2 + 4 cells in the Laplacian
+    return std::max(0.0, var - noiseVar) / (mean * mean) * 1000.0;
 }
 
 double focusMeasure(const Image16 &img, Rect r)
