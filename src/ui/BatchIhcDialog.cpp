@@ -182,13 +182,8 @@ BatchIhcDialog::BatchIhcDialog(const QStringList &files, QWidget *parent) : QDia
     connect(m_pdf, &QPushButton::clicked, this, &BatchIhcDialog::exportPdf);
     connect(m_status, &QLabel::linkActivated, this, [](const QString &url) { QDesktopServices::openUrl(QUrl(url)); });
     // tab separated for pasting into Excel
-    connect(m_copy, &QPushButton::clicked, this, [this] { QApplication::clipboard()->setText(QString(csv()).replace(QLatin1Char(','), QLatin1Char('\t'))); });
-    connect(bb, &QDialogButtonBox::rejected, this, [this] {
-        if (m_running)
-            m_cancel = true;
-        else
-            reject();
-    });
+    connect(m_copy, &QPushButton::clicked, this, [this] { QApplication::clipboard()->setText(csv(QLatin1Char('\t'))); });
+    connect(bb, &QDialogButtonBox::rejected, this, &BatchIhcDialog::reject);
 }
 
 void BatchIhcDialog::run()
@@ -220,6 +215,8 @@ void BatchIhcDialog::run()
         }
     }
     const bool useRegions = m_useRegions->isChecked();
+    m_runThreshold = opt.dabThreshold;
+    m_runUseRegions = useRegions;
     const bool countCells = m_countCells->isChecked();
 
     for (int i = 0; i < m_files.size() && !m_cancel; ++i) {
@@ -308,11 +305,13 @@ void BatchIhcDialog::run()
                     layer.setImageSize(QSize(img.width, img.height));
                     if (layer.loadSidecar(src))
                         for (const auto &a : layer.annotations()) {
+                            if (!isRegion(a))
+                                continue;
                             if (a.type == Annotation::Rectangle)
                                 p.drawRect(QRectF(a.pts[0], a.pts[1]).normalized());
                             else if (a.type == Annotation::Ellipse)
                                 p.drawEllipse(QRectF(a.pts[0], a.pts[1]).normalized());
-                            else if (a.type == Annotation::Polygon && a.pts.size() >= 3)
+                            else
                                 p.drawPolygon(QPolygonF(a.pts));
                         }
                 }
@@ -412,13 +411,23 @@ void BatchIhcDialog::addRow(const Row &r)
     m_table->scrollToBottom();
 }
 
-QString BatchIhcDialog::csv() const
+void BatchIhcDialog::reject()
 {
-    auto q = [](QString s) {
-        if (s.contains(QLatin1Char(',')) || s.contains(QLatin1Char('"')))
+    // Esc / window close during a run cancels it instead of hiding a running dialog
+    if (m_running)
+        m_cancel = true;
+    else
+        QDialog::reject();
+}
+
+QString BatchIhcDialog::csv(QChar sep) const
+{
+    auto q = [sep](QString s) {
+        if (s.contains(sep) || s.contains(QLatin1Char('"')) || s.contains(QLatin1Char('\n')))
             s = QLatin1Char('"') + s.replace(QLatin1Char('"'), QStringLiteral("\"\"")) + QLatin1Char('"');
         return s;
     };
+    auto num = [](double v, int decimals) { return QString::number(v, 'f', decimals); };
     const auto &ih = AppSettings::instance().ihc;
     const QString stains = ih.customVectors
                                ? QStringLiteral("H %1 %2 %3; DAB %4 %5 %6")
@@ -429,29 +438,27 @@ QString BatchIhcDialog::csv() const
                                      .arg(ih.dab[1], 0, 'f', 4)
                                      .arg(ih.dab[2], 0, 'f', 4)
                                : QStringLiteral("standard");
-    QString out = QStringLiteral("image,objective,region,stain_vectors,dab_threshold_od,tissue_area,positive_area,area_unit,"
-                                 "dab_positive_pct,weak_pct,moderate_pct,strong_pct,h_score,mean_dab_od_positive,"
-                                 "cells,positive_cells,positive_cells_pct,cell_density_per_mm2,note\n");
-    for (const auto &r : m_rows)
-        out += QStringLiteral("%1,%2,%3,%4,%5,%6,%7,%8,%9,%10,%11,%12,%13,%14,%15\n")
-                   .arg(q(r.file), q(r.objective), q(r.region) + QLatin1Char(',') + q(stains))
-                   .arg(m_threshold->value(), 0, 'f', 2)
-                   .arg(r.tissueArea, 0, 'f', r.umPerPixel > 0 ? 1 : 0)
-                   .arg(r.positiveArea, 0, 'f', r.umPerPixel > 0 ? 1 : 0)
-                   .arg(r.umPerPixel > 0 ? QStringLiteral("um2") : QStringLiteral("px"))
-                   .arg(r.positivePct, 0, 'f', 2)
-                   .arg(r.weakPct, 0, 'f', 2)
-                   .arg(r.moderatePct, 0, 'f', 2)
-                   .arg(r.strongPct, 0, 'f', 2)
-                   .arg(r.hScore, 0, 'f', 1)
-                   .arg(r.meanDabPositive, 0, 'f', 4)
-                   .arg(r.cells < 0 ? QStringLiteral(",,,")
-                                    : QStringLiteral("%1,%2,%3,%4")
-                                          .arg(r.cells)
-                                          .arg(r.positiveCells)
-                                          .arg(r.positiveCellPct, 0, 'f', 2)
-                                          .arg(r.cellDensity, 0, 'f', 1),
-                        q(r.error));
+    const QStringList header = {QStringLiteral("image"), QStringLiteral("objective"), QStringLiteral("region"),
+                                QStringLiteral("stain_vectors"), QStringLiteral("dab_threshold_od"),
+                                QStringLiteral("tissue_area"), QStringLiteral("positive_area"), QStringLiteral("area_unit"),
+                                QStringLiteral("dab_positive_pct"), QStringLiteral("weak_pct"), QStringLiteral("moderate_pct"),
+                                QStringLiteral("strong_pct"), QStringLiteral("h_score"), QStringLiteral("mean_dab_od_positive"),
+                                QStringLiteral("cells"), QStringLiteral("positive_cells"), QStringLiteral("positive_cells_pct"),
+                                QStringLiteral("cell_density_per_mm2"), QStringLiteral("note")};
+    QString out = header.join(sep) + QLatin1Char('\n');
+    for (const auto &r : m_rows) {
+        const int areaDecimals = r.umPerPixel > 0 ? 1 : 0;
+        const bool counted = r.cells >= 0;
+        const QStringList f = {q(r.file), q(r.objective), q(r.region), q(stains), num(m_runThreshold, 2),
+                               num(r.tissueArea, areaDecimals), num(r.positiveArea, areaDecimals),
+                               r.umPerPixel > 0 ? QStringLiteral("um2") : QStringLiteral("px"), num(r.positivePct, 2),
+                               num(r.weakPct, 2), num(r.moderatePct, 2), num(r.strongPct, 2), num(r.hScore, 1),
+                               num(r.meanDabPositive, 4), counted ? QString::number(r.cells) : QString(),
+                               counted ? QString::number(r.positiveCells) : QString(),
+                               counted ? num(r.positiveCellPct, 2) : QString(), counted ? num(r.cellDensity, 1) : QString(),
+                               q(r.error)};
+        out += f.join(sep) + QLatin1Char('\n');
+    }
     return out;
 }
 
@@ -517,9 +524,9 @@ void BatchIhcDialog::exportPdf()
     };
     kv(tr("Colour deconvolution"), stainDescription());
     kv(tr("DAB positivity threshold"), tr("%1 OD; intensity classes: weak &lt; 0.35 &le; moderate &lt; 0.6 &le; strong")
-                                           .arg(m_threshold->value(), 0, 'f', 2));
+                                           .arg(m_runThreshold, 0, 'f', 2));
     kv(tr("H-score"), tr("1 &times; %weak + 2 &times; %moderate + 3 &times; %strong, of the tissue area (0–300)"));
-    kv(tr("Region"), m_useRegions->isChecked() ? tr("rectangle / ellipse / area annotations where present, else whole image")
+    kv(tr("Region"), m_runUseRegions ? tr("rectangle / ellipse / area annotations where present, else whole image")
                                                : tr("whole image"));
     const bool anyCells = std::any_of(m_rows.begin(), m_rows.end(), [](const Row &r) { return r.cells >= 0; });
     if (anyCells) {
@@ -584,22 +591,23 @@ void BatchIhcDialog::exportPdf()
                       + (anyNote ? QStringLiteral("<th>%1</th>").arg(tr("Note")) : QString()));
     for (const auto &r : m_rows) {
         const QString tissue = r.umPerPixel > 0 ? formatArea(r.tissueArea) : tr("%1 px").arg(qint64(r.tissueArea));
-        h += QStringLiteral("<tr><td style='white-space:nowrap'>%1</td><td style='white-space:nowrap'>%2</td><td style='white-space:nowrap'>%3</td><td class='num' style='white-space:nowrap'>%4</td><td class='num'><b>%5</b></td>"
-                            "<td class='num' style='white-space:nowrap'>%6 / %7 / %8</td><td class='num'><b>%9</b></td><td class='num'>%10</td>%11</tr>")
-                 .arg(r.file.toHtmlEscaped(), shortObjective(r.objective).toHtmlEscaped(), r.region.toHtmlEscaped(),
-                      tissue.toHtmlEscaped())
-                 .arg(r.positivePct, 0, 'f', 1)
-                 .arg(r.weakPct, 0, 'f', 1)
-                 .arg(r.moderatePct, 0, 'f', 1)
-                 .arg(r.strongPct, 0, 'f', 1)
-                 .arg(r.hScore, 0, 'f', 0)
-                 .arg(r.meanDabPositive, 0, 'f', 3)
-                 .arg((anyCells ? (r.cells < 0 ? QStringLiteral("<td class='num'>–</td><td class='num'>–</td>")
-                                               : QStringLiteral("<td class='num'>%1</td><td class='num'><b>%2</b></td>")
-                                                     .arg(r.cells)
-                                                     .arg(r.positiveCellPct, 0, 'f', 1))
-                                : QString())
-                      + (anyNote ? QStringLiteral("<td>%1</td>").arg(r.error.toHtmlEscaped()) : QString()));
+        auto td = [](const QString &text, bool num, bool bold = false) {
+            return QStringLiteral("<td style='white-space:nowrap'") + (num ? QStringLiteral(" class='num'>") : QStringLiteral(">"))
+                   + (bold ? QStringLiteral("<b>") + text + QStringLiteral("</b>") : text) + QStringLiteral("</td>");
+        };
+        QString row = QStringLiteral("<tr>") + td(r.file.toHtmlEscaped(), false)
+                      + td(shortObjective(r.objective).toHtmlEscaped(), false) + td(r.region.toHtmlEscaped(), false)
+                      + td(tissue.toHtmlEscaped(), true) + td(QString::number(r.positivePct, 'f', 1), true, true)
+                      + td(QString::number(r.weakPct, 'f', 1) + QStringLiteral(" / ") + QString::number(r.moderatePct, 'f', 1)
+                               + QStringLiteral(" / ") + QString::number(r.strongPct, 'f', 1),
+                           true)
+                      + td(QString::number(r.hScore, 'f', 0), true, true) + td(QString::number(r.meanDabPositive, 'f', 3), true);
+        if (anyCells)
+            row += r.cells < 0 ? td(QStringLiteral("–"), true) + td(QStringLiteral("–"), true)
+                               : td(QString::number(r.cells), true) + td(QString::number(r.positiveCellPct, 'f', 1), true, true);
+        if (anyNote)
+            row += QStringLiteral("<td>") + r.error.toHtmlEscaped() + QStringLiteral("</td>");
+        h += row + QStringLiteral("</tr>");
     }
     h += QStringLiteral("</table>");
 
@@ -687,13 +695,10 @@ void BatchIhcDialog::exportPdf()
         p.setFont(infoFont);
         p.setPen(QColor(110, 110, 110));
         p.drawText(QRectF(tw + 3 * mm, y, content.width() - tw - 3 * mm, titleH), Qt::AlignLeft | Qt::AlignVCenter,
-                   tr("%1 · DAB+ %2 % · H-score %3%4%5")
-                       .arg(r.objective)
-                       .arg(r.positivePct, 0, 'f', 1)
-                       .arg(r.hScore, 0, 'f', 0)
-                       .arg(r.cells >= 0 ? tr(" · %1 cells, %2 % positive").arg(r.cells).arg(r.positiveCellPct, 0, 'f', 1)
-                                         : QString())
-                       .arg(r.region.isEmpty() ? QString() : QStringLiteral(" · ") + r.region));
+                   r.objective + tr(" · DAB+ %1 % · H-score %2").arg(r.positivePct, 0, 'f', 1).arg(r.hScore, 0, 'f', 0)
+                       + (r.cells >= 0 ? tr(" · %1 cells, %2 % positive").arg(r.cells).arg(r.positiveCellPct, 0, 'f', 1)
+                                       : QString())
+                       + (r.region.isEmpty() ? QString() : QStringLiteral(" · ") + r.region));
         y += titleH;
         p.setRenderHint(QPainter::SmoothPixmapTransform);
         p.drawImage(QRectF(0, y, imgW, imgH), thumb);

@@ -37,6 +37,12 @@ bool queryConnectors(std::vector<ConnectorStatus> &out, std::string &error);
 // more than one (then it cannot tell which one the camera is on).
 int findPoweredUsbDeviceConnector(const std::vector<ConnectorStatus> &connectors, std::string &error);
 
+// Safety check before a reset: the camera (VID 0x1711) must be attached to the
+// USB-C (Type-C subsystem) controller and be the only USB device on it, so the one
+// connector powering a USB device can only be the camera's. False (with a reason)
+// otherwise, e.g. the camera is on a USB-A port or a USB-C drive is also attached.
+bool cameraIsOnlyUsbCDevice(std::string &error);
+
 // Hard-resets one connector (VBUS off/on). The test interface must be enabled.
 bool resetConnector(int number, std::string &error);
 

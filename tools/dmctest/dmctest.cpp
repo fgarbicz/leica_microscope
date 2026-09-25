@@ -41,6 +41,8 @@ int main(int argc, char **argv)
                    c.providingPower, c.usbPartner, c.altModePartner, c.powerOperationMode, c.partnerType);
         err.clear();
         printf("camera connector: %d %s\n", usbc::findPoweredUsbDeviceConnector(conns, err), err.c_str());
+        err.clear();
+        printf("camera is the only USB-C device: %s %s\n", usbc::cameraIsOnlyUsbCDevice(err) ? "yes" : "no", err.c_str());
         if (!usbc::setTestInterface(false, err))
             printf("disable: %s\n", err.c_str());
         return 0;

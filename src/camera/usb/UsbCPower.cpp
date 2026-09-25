@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <initguid.h>
+#include <devpkey.h>
 #include <setupapi.h>
 
 #include <chrono>
@@ -191,6 +192,60 @@ int findPoweredUsbDeviceConnector(const std::vector<ConnectorStatus> &connectors
     return found;
 }
 
+bool cameraIsOnlyUsbCDevice(std::string &error)
+{
+    // location paths look like ACPI(_SB_)#ACPI(PC00)#ACPI(TXHC)#ACPI(RHUB)#ACPI(SS02)[#USB(..)...];
+    // TXHC is the xHCI controller of the Type-C subsystem
+    HDEVINFO set = SetupDiGetClassDevsW(nullptr, L"USB", nullptr, DIGCF_ALLCLASSES | DIGCF_PRESENT);
+    if (set == INVALID_HANDLE_VALUE) {
+        error = lastErrorText("cannot enumerate USB devices");
+        return false;
+    }
+    bool cameraOnTypeC = false, cameraFound = false;
+    std::wstring other;
+    SP_DEVINFO_DATA dev{sizeof(dev)};
+    for (DWORD i = 0; SetupDiEnumDeviceInfo(set, i, &dev); ++i) {
+        wchar_t id[512] = {};
+        if (!SetupDiGetDeviceInstanceIdW(set, &dev, id, 512, nullptr))
+            continue;
+        std::wstring sid(id);
+        if (sid.rfind(L"USB\\ROOT_HUB", 0) == 0)
+            continue;
+        DEVPROPTYPE type = 0;
+        DWORD need = 0;
+        std::vector<wchar_t> buf(2048);
+        if (!SetupDiGetDevicePropertyW(set, &dev, &DEVPKEY_Device_LocationPaths, &type,
+                                       reinterpret_cast<PBYTE>(buf.data()), DWORD(buf.size() * sizeof(wchar_t)), &need, 0))
+            continue;
+        bool onTypeC = false;
+        for (const wchar_t *p = buf.data(); *p; p += wcslen(p) + 1)
+            if (wcsstr(p, L"#ACPI(TXHC)#"))
+                onTypeC = true;
+        const bool isCamera = sid.find(L"VID_1711&PID_30E0") != std::wstring::npos;
+        if (isCamera) {
+            cameraFound = true;
+            cameraOnTypeC = onTypeC;
+        } else if (onTypeC && other.empty()) {
+            other = sid;
+        }
+    }
+    SetupDiDestroyDeviceInfoList(set);
+    if (!cameraFound) {
+        error = "the camera is not connected";
+        return false;
+    }
+    if (!cameraOnTypeC) {
+        error = "the camera is not attached to a USB-C port of this computer (power cycling needs USB-C)";
+        return false;
+    }
+    if (!other.empty()) {
+        error = "another USB device is attached to the USB-C ports (" + std::string(other.begin(), other.end())
+                + "), so the camera's port cannot be identified safely; unplug it or power-cycle the camera by hand";
+        return false;
+    }
+    return true;
+}
+
 bool resetConnector(int number, std::string &error)
 {
     Handle h;
@@ -251,16 +306,21 @@ bool powerCycleCameraPort(std::string &log)
     }
     line("UCSI test interface enabled");
     bool ok = false;
-    // the interface appears once the restarted driver is running
+    // the interface appears once the restarted driver is running; only a complete
+    // status of every connector is used (a partial list could hide the camera's)
     std::vector<ConnectorStatus> conns;
-    for (int i = 0; i < 50; ++i) {
+    bool complete = false;
+    for (int i = 0; i < 50 && !complete; ++i) {
         err.clear();
-        if (queryConnectors(conns, err))
-            break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        complete = queryConnectors(conns, err);
+        if (!complete)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-    if (conns.empty()) {
+    std::string safety;
+    if (!complete) {
         line(err);
+    } else if (!cameraIsOnlyUsbCDevice(safety)) {
+        line("not resetting: " + safety);
     } else {
         for (const auto &c : conns)
             line("connector " + std::to_string(c.number) + ": " + (c.connected ? "connected" : "empty")

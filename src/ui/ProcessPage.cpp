@@ -573,15 +573,13 @@ void ProcessPage::analyzeIhc(bool regionOnly, bool nuclei)
         text += tr("<br><span style='color:#e22'>red</span> = positive, <span style='color:#37f'>blue</span> = negative");
         m_ihcResult->setText(text);
         m_ihcText = QStringLiteral("image\tregion\tnuclei\tpositive\tnegative\tlabelling_index_%\tdensity_per_mm2\t"
-                                   "nucleus_diameter_um\tDAB_threshold_OD\n%1\t%2\t%3\t%4\t%5\t%6\t%7\t%8\t%9\n")
-                        .arg(QFileInfo(m_path).fileName(), regionName)
-                        .arg(total)
-                        .arg(nr.positive)
-                        .arg(nr.negative)
-                        .arg(nr.labellingIndex * 100, 0, 'f', 2)
-                        .arg(nr.densityPerMm2, 0, 'f', 1)
-                        .arg(no.diameterUm, 0, 'f', 1)
-                        .arg(opt.dabThreshold);
+                                   "nucleus_diameter_um\tDAB_threshold_OD\n")
+                    + QStringList{QFileInfo(m_path).fileName(), regionName, QString::number(total),
+                                  QString::number(nr.positive), QString::number(nr.negative),
+                                  QString::number(nr.labellingIndex * 100, 'f', 2), QString::number(nr.densityPerMm2, 'f', 1),
+                                  QString::number(no.diameterUm, 'f', 1), QString::number(opt.dabThreshold)}
+                          .join(QLatin1Char('\t'))
+                    + QLatin1Char('\n');
         emit message(no.nuclearMarker ? tr("Nuclei: %1, labelling index %2 %").arg(total).arg(nr.labellingIndex * 100, 0, 'f', 1)
                                      : tr("Cells: %1, %2 % positive").arg(total).arg(nr.labellingIndex * 100, 0, 'f', 1),
                      6000);
@@ -614,17 +612,14 @@ void ProcessPage::analyzeIhc(bool regionOnly, bool nuclei)
                              .arg(r.strong * 100, 0, 'f', 1)
                              .arg(r.hScore, 0, 'f', 0)
                              .arg(r.meanDabPositive, 0, 'f', 3));
-    m_ihcText = QStringLiteral("image\tregion\tDAB_threshold_OD\tDAB_positive_%\ttissue_area\tpositive_area\tweak_%\tmoderate_%\tstrong_%\tH_score\tmean_DAB_OD_pos\n"
-                               "%1\t%2\t%3\t%4\t%5\t%6\t%7\t%8\t%9\t%10\t%11\n")
-                    .arg(QFileInfo(m_path).fileName(), regionName)
-                    .arg(opt.dabThreshold)
-                    .arg(r.positiveFraction * 100, 0, 'f', 2)
-                    .arg(area(r.tissueAreaUm2, r.tissuePixels), area(r.positiveAreaUm2, r.positivePixels))
-                    .arg(r.weak * 100, 0, 'f', 2)
-                    .arg(r.moderate * 100, 0, 'f', 2)
-                    .arg(r.strong * 100, 0, 'f', 2)
-                    .arg(r.hScore, 0, 'f', 1)
-                    .arg(r.meanDabPositive, 0, 'f', 4);
+    m_ihcText = QStringLiteral("image\tregion\tDAB_threshold_OD\tDAB_positive_%\ttissue_area\tpositive_area\tweak_%\tmoderate_%\tstrong_%\tH_score\tmean_DAB_OD_pos\n")
+                + QStringList{QFileInfo(m_path).fileName(), regionName, QString::number(opt.dabThreshold),
+                              QString::number(r.positiveFraction * 100, 'f', 2), area(r.tissueAreaUm2, r.tissuePixels),
+                              area(r.positiveAreaUm2, r.positivePixels), QString::number(r.weak * 100, 'f', 2),
+                              QString::number(r.moderate * 100, 'f', 2), QString::number(r.strong * 100, 'f', 2),
+                              QString::number(r.hScore, 'f', 1), QString::number(r.meanDabPositive, 'f', 4)}
+                      .join(QLatin1Char('\t'))
+                + QLatin1Char('\n');
     emit message(tr("IHC: %1 % DAB positive (%2)").arg(r.positiveFraction * 100, 0, 'f', 1).arg(regionName), 6000);
 }
 

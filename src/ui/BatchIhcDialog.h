@@ -39,7 +39,8 @@ public:
 private:
     void run();
     void addRow(const Row &r);
-    QString csv() const;
+    QString csv(QChar sep = QLatin1Char(',')) const;
+    void reject() override;
     void exportCsv();
     void exportPdf();
     QString stainDescription() const;
@@ -60,6 +61,9 @@ private:
     std::vector<Row> m_rows;
     bool m_cancel = false;
     bool m_running = false;
+    // settings of the last run (exports report these, not the current widget values)
+    double m_runThreshold = 0.15;
+    bool m_runUseRegions = true;
 };
 
 } // namespace lm
