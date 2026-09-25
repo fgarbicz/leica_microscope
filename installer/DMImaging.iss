@@ -7,6 +7,9 @@
 #ifndef StageDir
   #define StageDir "..\build\package\app"
 #endif
+#ifndef RedistDir
+  #define RedistDir "..\build\package\redist"
+#endif
 #ifndef OutDir
   #define OutDir "..\dist"
 #endif
@@ -59,13 +62,16 @@ Type: files; Name: "{app}\driver\*.cat"
 
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#RedistDir}\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; Comment: "Leica DM2000 microscope camera"
-Name: "{autoprograms}\{#AppName} User Guide"; Filename: "{app}\docs\USER_GUIDE.md"
+Name: "{autoprograms}\{#AppName} User Guide"; Filename: "{app}\docs\USER_GUIDE.html"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon; Comment: "Leica DM2000 microscope camera"
 
 [Run]
+; Microsoft Visual C++ runtime (no-op when a current version is installed; 1638 = newer present)
+Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "Installing the Microsoft Visual C++ runtime..."; Flags: waituntilterminated
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\driver\install_driver.ps1"""; \
   StatusMsg: "Installing the camera driver..."; Flags: runhidden waituntilterminated; Tasks: installdriver
 Filename: "{app}\{#AppExe}"; Description: "Start {#AppName} now"; Flags: postinstall nowait skipifsilent

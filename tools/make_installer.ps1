@@ -37,14 +37,15 @@ robocopy $bin $stage /E /NFL /NDL /NJH /NJS /XF lmtests.exe enginetest.exe iotes
 if ($LASTEXITCODE -ge 8) { throw 'copying the build failed' }
 $global:LASTEXITCODE = 0
 
-# Visual C++ runtime next to the executable (lab PCs may not have it)
-$redist = Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\*\VC\Redist\MSVC" -Directory -ErrorAction SilentlyContinue |
-    Where-Object Name -match '^\d' | Sort-Object Name -Descending | Select-Object -First 1
-if (-not $redist) { throw 'Visual C++ redistributable files not found' }
-$crt = Get-ChildItem (Join-Path $redist.FullName 'x64') -Recurse -Include msvcp140*.dll, vcruntime140*.dll, concrt140.dll, vcomp140.dll |
-    Where-Object { $_.FullName -notmatch 'debug' }
-if (-not $crt) { throw 'Visual C++ runtime DLLs not found' }
-$crt | Copy-Item -Destination $stage -Force
+# Visual C++ runtime: Microsoft's redistributable installer (placed next to the
+# executable by windeployqt), run silently by Setup; it does nothing if a current
+# runtime is already installed
+$vcredist = Join-Path $bin 'vc_redist.x64.exe'
+if (-not (Test-Path $vcredist)) { throw 'vc_redist.x64.exe not found in the build (windeployqt should place it there)' }
+$redistStage = Join-Path $root 'build\package\redist'
+New-Item -ItemType Directory -Force $redistStage | Out-Null
+Copy-Item $vcredist $redistStage -Force
+Remove-Item (Join-Path $stage 'vc_redist.x64.exe') -ErrorAction SilentlyContinue
 
 # driver (the catalog is generated and signed on each PC by install_driver.ps1), documentation
 New-Item -ItemType Directory -Force (Join-Path $stage 'driver') | Out-Null
@@ -52,9 +53,25 @@ Copy-Item (Join-Path $root 'driver\LeicaUsb3Cam.inf'), (Join-Path $root 'driver\
 Copy-Item (Join-Path $root 'docs') (Join-Path $stage 'docs') -Recurse
 Copy-Item (Join-Path $root 'README.md') $stage
 
+# user guide as HTML for the Start menu (needs Python with the 'markdown' package; else the .md is used)
+# (the 'python' on PATH may be the Microsoft Store stub, so prefer a real install that has 'markdown')
+$python = $null
+foreach ($c in @("$env:USERPROFILE\devtools\python\python.exe", (Get-Command python -ErrorAction SilentlyContinue).Source)) {
+    if ($c -and (Test-Path $c)) {
+        & $c -c 'import markdown' 2>$null
+        if ($LASTEXITCODE -eq 0) { $python = $c; break }
+    }
+}
+$guideHtml = Join-Path $stage 'docs\USER_GUIDE.html'
+if ($python) { & $python (Join-Path $root 'tools\make_guide.py') (Join-Path $root 'docs\USER_GUIDE.md') $guideHtml }
+if (-not (Test-Path $guideHtml)) {
+    Write-Warning 'HTML user guide not generated; the Start menu entry opens the Markdown file'
+    Copy-Item (Join-Path $root 'docs\USER_GUIDE.md') $guideHtml
+}
+
 # sanity checks: files the application cannot start without
 foreach ($f in 'DMImaging.exe', 'Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'platforms\qwindows.dll',
-               'imageformats\qjpeg.dll', 'vcruntime140.dll', 'msvcp140.dll', 'driver\LeicaUsb3Cam.inf') {
+               'imageformats\qjpeg.dll', 'driver\LeicaUsb3Cam.inf') {
     if (-not (Test-Path (Join-Path $stage $f))) { throw "missing in package: $f" }
 }
 
@@ -67,7 +84,7 @@ if (-not $Iscc) {
 if (-not $Iscc) { throw 'Inno Setup 6 (ISCC.exe) not found - install it or pass -Iscc' }
 $dist = Join-Path $root 'dist'
 New-Item -ItemType Directory -Force $dist | Out-Null
-& $Iscc "/DAppVersion=$version" "/DStageDir=$stage" "/DOutDir=$dist" (Join-Path $root 'installer\DMImaging.iss')
+& $Iscc "/DAppVersion=$version" "/DStageDir=$stage" "/DRedistDir=$redistStage" "/DOutDir=$dist" (Join-Path $root 'installer\DMImaging.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed' }
 $setup = Join-Path $dist "DMImaging-Setup-$version.exe"
 Write-Host ("Installer: {0} ({1:N1} MB)" -f $setup, ((Get-Item $setup).Length / 1MB))
