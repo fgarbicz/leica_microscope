@@ -32,6 +32,9 @@ struct Annotation {
 bool isRegion(const Annotation &a);
 // Grayscale8 mask (255 inside) of the union of the given region annotations.
 QImage regionMask(const QVector<const Annotation *> &regions, QSize size);
+// Draws the shape of a region annotation with the painter's current pen/brush
+// (image coordinates); does nothing for other annotation types.
+void drawRegionShape(QPainter &p, const Annotation &a);
 
 struct Measurement {
     double lengthUm = 0;     // line/polyline length or perimeter

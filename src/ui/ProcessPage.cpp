@@ -565,14 +565,8 @@ void ProcessPage::analyzeIhcImpl(bool regionOnly, bool nuclei)
                 // outline of the counted region
                 p.setPen(QPen(QColor(255, 220, 0, 200), lw));
                 for (const auto &a : m_layer->annotations())
-                    if (a.id == m_layer->selectedId() && isRegion(a)) {
-                        if (a.type == Annotation::Rectangle)
-                            p.drawRect(QRectF(a.pts[0], a.pts[1]).normalized());
-                        else if (a.type == Annotation::Ellipse)
-                            p.drawEllipse(QRectF(a.pts[0], a.pts[1]).normalized());
-                        else
-                            p.drawPolygon(QPolygonF(a.pts));
-                    }
+                    if (a.id == m_layer->selectedId())
+                        drawRegionShape(p, a);
             }
         }
         QApplication::restoreOverrideCursor();

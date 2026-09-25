@@ -308,16 +308,8 @@ void BatchIhcDialog::run()
                     AnnotationLayer layer;
                     layer.setImageSize(QSize(img.width, img.height));
                     if (layer.loadSidecar(src))
-                        for (const auto &a : layer.annotations()) {
-                            if (!isRegion(a))
-                                continue;
-                            if (a.type == Annotation::Rectangle)
-                                p.drawRect(QRectF(a.pts[0], a.pts[1]).normalized());
-                            else if (a.type == Annotation::Ellipse)
-                                p.drawEllipse(QRectF(a.pts[0], a.pts[1]).normalized());
-                            else
-                                p.drawPolygon(QPolygonF(a.pts));
-                        }
+                        for (const auto &a : layer.annotations())
+                            drawRegionShape(p, a);
                 }
                 // thumbnails for the PDF report
                 auto jpeg = [](const QImage &im) {

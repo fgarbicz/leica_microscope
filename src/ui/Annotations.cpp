@@ -83,17 +83,22 @@ QImage regionMask(const QVector<const Annotation *> &regions, QSize size)
     QPainter p(&m);
     p.setPen(Qt::NoPen);
     p.setBrush(Qt::white);
-    for (const Annotation *a : regions) {
-        if (!a || !isRegion(*a))
-            continue;
-        if (a->type == Annotation::Rectangle)
-            p.drawRect(QRectF(a->pts[0], a->pts[1]).normalized());
-        else if (a->type == Annotation::Ellipse)
-            p.drawEllipse(QRectF(a->pts[0], a->pts[1]).normalized());
-        else
-            p.drawPolygon(QPolygonF(a->pts));
-    }
+    for (const Annotation *a : regions)
+        if (a)
+            drawRegionShape(p, *a);
     return m;
+}
+
+void drawRegionShape(QPainter &p, const Annotation &a)
+{
+    if (!isRegion(a))
+        return;
+    if (a.type == Annotation::Rectangle)
+        p.drawRect(QRectF(a.pts[0], a.pts[1]).normalized());
+    else if (a.type == Annotation::Ellipse)
+        p.drawEllipse(QRectF(a.pts[0], a.pts[1]).normalized());
+    else
+        p.drawPolygon(QPolygonF(a.pts));
 }
 
 void AnnotationLayer::setTool(Tool t)
