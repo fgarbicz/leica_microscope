@@ -4,6 +4,7 @@
 #include "imaging/FocusStacker.h"
 #include "imaging/MosaicBuilder.h"
 #include "imaging/NucleusDetection.h"
+#include "ui/IhcOptions.h"
 #include "imaging/StainAnalysis.h"
 #include "app/AppSettings.h"
 #include "ui/Annotations.h"
@@ -521,18 +522,7 @@ void ProcessPage::analyzeIhc(bool regionOnly, bool nuclei)
                               ? analyzeStains(m_data, opt)
                               : analyzeStains(m_data, opt, [&region](int x, int y) { return region.constScanLine(y)[x] != 0; });
     if (nuclei) {
-        NucleusOptions no;
-        no.diameterUm = m_nucleusDiameter->value();
-        no.umPerPixel = m_meta.umPerPixel;
-        no.diameterPx = m_meta.umPerPixel > 0 ? 0 : m_nucleusDiameter->value() * 4; // uncalibrated: assume 0.25 µm/px
-        no.dabThreshold = opt.dabThreshold;
-        {
-            const auto &ih = AppSettings::instance().ihc;
-            no.nuclearMarker = ih.nuclearMarker;
-            static const double contrast[3] = {0.05, 0.03, 0.02}, stain[3] = {0.10, 0.06, 0.04};
-            no.minContrast = contrast[std::clamp(ih.nucleusSensitivity, 0, 2)];
-            no.minStain = stain[std::clamp(ih.nucleusSensitivity, 0, 2)];
-        }
+        const NucleusOptions no = nucleusOptionsFromSettings(m_meta.umPerPixel, opt.dabThreshold);
         const NucleusResult nr =
             region.isNull() ? detectNuclei(r, no)
                             : detectNuclei(r, no, [&region](int x, int y) { return region.constScanLine(y)[x] != 0; });

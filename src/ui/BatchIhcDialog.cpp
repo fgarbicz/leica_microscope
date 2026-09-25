@@ -2,6 +2,7 @@
 
 #include "app/AppSettings.h"
 #include "imaging/StainAnalysis.h"
+#include "ui/IhcOptions.h"
 #include "io/ImageIO.h"
 #include "ui/Annotations.h"
 #include "ui/Overlays.h"
@@ -43,7 +44,7 @@ namespace lm {
 namespace {
 
 enum Col { ColImage, ColObjective, ColRegion, ColTissue, ColPositive, ColWeak, ColModerate, ColStrong, ColHScore,
-           ColMeanOd, ColCount };
+           ColMeanOd, ColCells, ColCellPct, ColCount };
 
 // image with DAB-positive pixels tinted red and negative tissue blue
 QImage overlayImage(const Image16 &img, const StainResult &r)
@@ -112,6 +113,15 @@ BatchIhcDialog::BatchIhcDialog(const QStringList &files, QWidget *parent) : QDia
                                  this);
     m_useRegions->setChecked(true);
     form->addRow(QString(), m_useRegions);
+    {
+        const auto &ih = AppSettings::instance().ihc;
+        m_countCells = new QCheckBox(tr("Also count nuclei / cells (%1 marker, %2 µm nuclei; set in Process)")
+                                         .arg(ih.nuclearMarker ? tr("nuclear") : tr("cytoplasmic / membranous"))
+                                         .arg(ih.nucleusDiameterUm, 0, 'f', 1),
+                                     this);
+        m_countCells->setToolTip(tr("Labelling index (nuclear markers) or % positive cells (cytoplasmic / membranous)"));
+        form->addRow(QString(), m_countCells);
+    }
     m_saveOverlays = new QCheckBox(tr("Save overlay images (red = DAB positive, blue = negative tissue)"), this);
     form->addRow(QString(), m_saveOverlays);
     auto *fr = new QHBoxLayout;
@@ -126,7 +136,7 @@ BatchIhcDialog::BatchIhcDialog(const QStringList &files, QWidget *parent) : QDia
     m_table = new QTableWidget(0, ColCount, this);
     m_table->setHorizontalHeaderLabels({tr("Image"), tr("Objective"), tr("Region"), tr("Tissue area"),
                                         tr("DAB+ %"), tr("Weak %"), tr("Moderate %"), tr("Strong %"), tr("H-score"),
-                                        tr("Mean DAB OD")});
+                                        tr("Mean DAB OD"), tr("Cells"), tr("Positive cells %")});
     m_table->horizontalHeader()->setSectionResizeMode(ColImage, QHeaderView::Stretch);
     for (int c = 1; c < ColCount; ++c)
         m_table->horizontalHeader()->setSectionResizeMode(c, QHeaderView::ResizeToContents);
@@ -209,6 +219,7 @@ void BatchIhcDialog::run()
         }
     }
     const bool useRegions = m_useRegions->isChecked();
+    const bool countCells = m_countCells->isChecked();
 
     for (int i = 0; i < m_files.size() && !m_cancel; ++i) {
         const QString src = m_files[i];
@@ -258,10 +269,33 @@ void BatchIhcDialog::run()
             row.strongPct = r.strong * 100;
             row.hScore = r.hScore;
             row.meanDabPositive = r.meanDabPositive;
+            NucleusResult nr;
+            if (countCells) {
+                const NucleusOptions no = nucleusOptionsFromSettings(li.meta.umPerPixel, o.dabThreshold);
+                nr = region.isNull()
+                         ? detectNuclei(r, no)
+                         : detectNuclei(r, no, [&region](int x, int y) { return region.constScanLine(y)[x] != 0; });
+                row.cells = nr.positive + nr.negative;
+                row.positiveCells = nr.positive;
+                row.positiveCellPct = nr.labellingIndex * 100;
+                row.cellDensity = nr.densityPerMm2;
+            }
             if (r.tissuePixels == 0)
                 row.error = tr("no tissue found");
             {
                 QImage ov = overlayImage(img, r);
+                if (countCells && !nr.nuclei.empty()) {
+                    // rings on the counted nuclei (white outline keeps them visible on the tint)
+                    QPainter p(&ov);
+                    p.setRenderHint(QPainter::Antialiasing);
+                    const double rad = nr.radiusPx * 0.9, lw = std::max(1.5, nr.radiusPx / 6);
+                    for (const auto &n : nr.nuclei) {
+                        p.setPen(QPen(Qt::white, lw * 2));
+                        p.drawEllipse(QPointF(n.x, n.y), rad, rad);
+                        p.setPen(QPen(n.positive ? QColor(170, 0, 0) : QColor(0, 50, 190), lw));
+                        p.drawEllipse(QPointF(n.x, n.y), rad, rad);
+                    }
+                }
                 if (!region.isNull()) {
                     // outline the analysed regions
                     QPainter p(&ov);
@@ -365,6 +399,8 @@ void BatchIhcDialog::addRow(const Row &r)
     set(ColStrong, QString::number(r.strongPct, 'f', 1));
     set(ColHScore, QString::number(r.hScore, 'f', 0));
     set(ColMeanOd, QString::number(r.meanDabPositive, 'f', 3));
+    set(ColCells, r.cells < 0 ? QStringLiteral("–") : QString::number(r.cells));
+    set(ColCellPct, r.cells < 0 ? QStringLiteral("–") : QString::number(r.positiveCellPct, 'f', 1));
     m_table->scrollToBottom();
 }
 
@@ -387,9 +423,9 @@ QString BatchIhcDialog::csv() const
                                : QStringLiteral("standard");
     QString out = QStringLiteral("image,objective,region,stain_vectors,dab_threshold_od,tissue_area,positive_area,area_unit,"
                                  "dab_positive_pct,weak_pct,moderate_pct,strong_pct,h_score,mean_dab_od_positive,"
-                                 "note\n");
+                                 "cells,positive_cells,positive_cells_pct,cell_density_per_mm2,note\n");
     for (const auto &r : m_rows)
-        out += QStringLiteral("%1,%2,%3,%4,%5,%6,%7,%8,%9,%10,%11,%12,%13,%14\n")
+        out += QStringLiteral("%1,%2,%3,%4,%5,%6,%7,%8,%9,%10,%11,%12,%13,%14,%15\n")
                    .arg(q(r.file), q(r.objective), q(r.region) + QLatin1Char(',') + q(stains))
                    .arg(m_threshold->value(), 0, 'f', 2)
                    .arg(r.tissueArea, 0, 'f', r.umPerPixel > 0 ? 1 : 0)
@@ -401,7 +437,13 @@ QString BatchIhcDialog::csv() const
                    .arg(r.strongPct, 0, 'f', 2)
                    .arg(r.hScore, 0, 'f', 1)
                    .arg(r.meanDabPositive, 0, 'f', 4)
-                   .arg(q(r.error));
+                   .arg(r.cells < 0 ? QStringLiteral(",,,")
+                                    : QStringLiteral("%1,%2,%3,%4")
+                                          .arg(r.cells)
+                                          .arg(r.positiveCells)
+                                          .arg(r.positiveCellPct, 0, 'f', 2)
+                                          .arg(r.cellDensity, 0, 'f', 1),
+                        q(r.error));
     return out;
 }
 
@@ -431,7 +473,7 @@ void BatchIhcDialog::exportPdf()
         "h1 { font-size: 16pt; color: #1b4f8a; margin-bottom: 2px; }"
         "h2 { font-size: 12pt; color: #1b4f8a; margin-top: 14px; }"
         "h3 { font-size: 10pt; margin-top: 12px; margin-bottom: 2px; }"
-        "td, th { padding: 3px 5px; }"
+        "td, th { padding: 3px 5px; font-size: 8pt; }"
         "th { background-color: #e4ebf3; text-align: left; }"
         ".num { text-align: right; }"
         ".muted { color: #707070; }"));
@@ -471,8 +513,24 @@ void BatchIhcDialog::exportPdf()
     kv(tr("H-score"), tr("1 &times; %weak + 2 &times; %moderate + 3 &times; %strong, of the tissue area (0–300)"));
     kv(tr("Region"), m_useRegions->isChecked() ? tr("rectangle / ellipse / area annotations where present, else whole image")
                                                : tr("whole image"));
+    const bool anyCells = std::any_of(m_rows.begin(), m_rows.end(), [](const Row &r) { return r.cells >= 0; });
+    if (anyCells) {
+        const auto &ihs = AppSettings::instance().ihc;
+        kv(tr("Cell counting"),
+           ihs.nuclearMarker
+               ? tr("nuclear marker: nuclei (H or DAB) of ~%1 µm found by band-pass blob detection; a nucleus is positive "
+                    "if its mean DAB exceeds the threshold (labelling index)")
+                     .arg(ihs.nucleusDiameterUm, 0, 'f', 1)
+               : tr("cytoplasmic / membranous marker: nuclei of ~%1 µm found from haematoxylin; a cell is positive if the "
+                    "mean DAB in a ring around its nucleus exceeds the threshold")
+                     .arg(ihs.nucleusDiameterUm, 0, 'f', 1));
+    }
     h += QStringLiteral("</table>");
 
+    std::vector<double> cellPct;
+    for (const auto &r : m_rows)
+        if (r.cells > 0)
+            cellPct.push_back(r.positiveCellPct);
     const auto pm = minmax(pos), hm = minmax(hs);
     h += QStringLiteral("<h2>%1</h2><table>").arg(tr("Summary"));
     kv(tr("Images analysed"), QString::number(pos.size()) + (pos.size() != m_rows.size()
@@ -490,6 +548,16 @@ void BatchIhcDialog::exportPdf()
                          .arg(median(hs), 0, 'f', 0)
                          .arg(hm.first, 0, 'f', 0)
                          .arg(hm.second, 0, 'f', 0));
+    if (!cellPct.empty()) {
+        const auto cm = minmax(cellPct);
+        kv(AppSettings::instance().ihc.nuclearMarker ? tr("Labelling index") : tr("Positive cells"),
+           tr("mean %1 % &plusmn; %2 (SD), median %3 %, range %4–%5 %")
+               .arg(mean(cellPct), 0, 'f', 1)
+               .arg(stddev(cellPct), 0, 'f', 1)
+               .arg(median(cellPct), 0, 'f', 1)
+               .arg(cm.first, 0, 'f', 1)
+               .arg(cm.second, 0, 'f', 1));
+    }
     h += QStringLiteral("</table>");
 
     const bool anyNote = std::any_of(m_rows.begin(), m_rows.end(), [](const Row &r) { return !r.error.isEmpty(); });
@@ -501,8 +569,11 @@ void BatchIhcDialog::exportPdf()
     h += QStringLiteral("<h2>%1</h2><table cellspacing='0' border='0.5' width='100%'>").arg(tr("Results"));
     h += QStringLiteral("<tr><th>%1</th><th>%2</th><th>%3</th><th class='num'>%4</th><th class='num'>%5</th>"
                         "<th class='num'>%6</th><th class='num'>%7</th><th class='num'>%8</th>%9</tr>")
-             .arg(tr("Image"), tr("Objective"), tr("Region"), tr("Tissue"), tr("DAB+ %"), tr("Weak / mod. / strong %"),
-                  tr("H-score"), tr("Mean DAB OD"), anyNote ? QStringLiteral("<th>%1</th>").arg(tr("Note")) : QString());
+             .arg(tr("Image"), tr("Objective"), tr("Region"), tr("Tissue"), tr("DAB+ %"), tr("W / M / S %"),
+                  tr("H-score"), tr("DAB OD"),
+                  (anyCells ? QStringLiteral("<th class='num'>%1</th><th class='num'>%2</th>").arg(tr("Cells"), tr("Pos. cells %"))
+                            : QString())
+                      + (anyNote ? QStringLiteral("<th>%1</th>").arg(tr("Note")) : QString()));
     for (const auto &r : m_rows) {
         const QString tissue = r.umPerPixel > 0 ? formatArea(r.tissueArea) : tr("%1 px").arg(qint64(r.tissueArea));
         h += QStringLiteral("<tr><td style='white-space:nowrap'>%1</td><td style='white-space:nowrap'>%2</td><td style='white-space:nowrap'>%3</td><td class='num' style='white-space:nowrap'>%4</td><td class='num'><b>%5</b></td>"
@@ -515,7 +586,12 @@ void BatchIhcDialog::exportPdf()
                  .arg(r.strongPct, 0, 'f', 1)
                  .arg(r.hScore, 0, 'f', 0)
                  .arg(r.meanDabPositive, 0, 'f', 3)
-                 .arg(anyNote ? QStringLiteral("<td>%1</td>").arg(r.error.toHtmlEscaped()) : QString());
+                 .arg((anyCells ? (r.cells < 0 ? QStringLiteral("<td class='num'>–</td><td class='num'>–</td>")
+                                               : QStringLiteral("<td class='num'>%1</td><td class='num'><b>%2</b></td>")
+                                                     .arg(r.cells)
+                                                     .arg(r.positiveCellPct, 0, 'f', 1))
+                                : QString())
+                      + (anyNote ? QStringLiteral("<td>%1</td>").arg(r.error.toHtmlEscaped()) : QString()));
     }
     h += QStringLiteral("</table>");
 
@@ -602,10 +678,12 @@ void BatchIhcDialog::exportPdf()
         p.setFont(infoFont);
         p.setPen(QColor(110, 110, 110));
         p.drawText(QRectF(tw + 3 * mm, y, content.width() - tw - 3 * mm, titleH), Qt::AlignLeft | Qt::AlignVCenter,
-                   tr("%1 · DAB+ %2 % · H-score %3%4")
+                   tr("%1 · DAB+ %2 % · H-score %3%4%5")
                        .arg(r.objective)
                        .arg(r.positivePct, 0, 'f', 1)
                        .arg(r.hScore, 0, 'f', 0)
+                       .arg(r.cells >= 0 ? tr(" · %1 cells, %2 % positive").arg(r.cells).arg(r.positiveCellPct, 0, 'f', 1)
+                                         : QString())
                        .arg(r.region.isEmpty() ? QString() : QStringLiteral(" · ") + r.region));
         y += titleH;
         p.setRenderHint(QPainter::SmoothPixmapTransform);

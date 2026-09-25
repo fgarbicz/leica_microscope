@@ -148,7 +148,9 @@ If an image has rectangle, ellipse or area annotations, only those regions are
 analysed (untick the option to use the whole image). *Export CSV…* writes the table
 for Excel, R or Prism; *Save overlay images* writes a red/blue check image per
 file into an `ihc` folder. *PDF report…* writes a report with the method (stain colours,
-threshold), summary statistics, the results table and every image next to its overlay.
+threshold), summary statistics, the results table and every image next to its overlay. Tick *Also count
+nuclei / cells* to add cell counts and the labelling index (or % positive cells) per image,
+using the marker type, nucleus size and sensitivity set in Process.
 
 ## 10. Keyboard shortcuts
 

@@ -29,6 +29,8 @@ public:
         double tissueArea = 0, positiveArea = 0; // µm² when calibrated, else pixels
         double positivePct = 0, weakPct = 0, moderatePct = 0, strongPct = 0;
         double hScore = 0, meanDabPositive = 0;
+        int cells = -1, positiveCells = 0;  // -1 = not counted
+        double positiveCellPct = 0, cellDensity = 0;
         QImage thumb, overlayThumb; // for the PDF report
     };
 
@@ -43,6 +45,7 @@ private:
     QStringList m_files;
     QDoubleSpinBox *m_threshold;
     QCheckBox *m_useRegions;
+    QCheckBox *m_countCells;
     QCheckBox *m_saveOverlays;
     QLineEdit *m_overlayFolder;
     QTableWidget *m_table;
