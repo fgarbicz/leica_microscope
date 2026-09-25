@@ -345,6 +345,25 @@ bool Dmc6200Camera::setProperty(const std::string &key, double value)
     return true;
 }
 
+std::array<double, 9> Dmc6200Camera::colorMatrix() const
+{
+    // IMX174 -> CIE XYZ (D50 white) under 3200 K halogen microscope illumination,
+    // from the Jenoptik DijSDK colour calibration
+    // "XYZ_SP-XYZ-10nm_Axioskop40_3200K4_RGB_C2p4_imx174_Axioskop40_3200K4_Homogen_KLB_P1_G"
+    // (rows sum to the D50 white point, so white balanced white stays neutral).
+    static const double camToXyz[9] = {0.604850, 0.476785, -0.117435, 0.166162, 1.028150,
+                                       -0.194315, 0.038239, -0.390328, 1.176990};
+    // XYZ (D50) -> linear sRGB, Bradford adapted (Lindbloom)
+    static const double xyzToSrgb[9] = {3.1338561, -1.6168667, -0.4906146, -0.9787684, 1.9161415,
+                                        0.0334540, 0.0719453, -0.2289914, 1.4052427};
+    std::array<double, 9> m{};
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j)
+            for (int k = 0; k < 3; ++k)
+                m[size_t(i * 3 + j)] += xyzToSrgb[i * 3 + k] * camToXyz[k * 3 + j];
+    return m;
+}
+
 std::vector<Camera::ShotMode> Dmc6200Camera::shotModes() const
 {
     auto grid = [](int n, int f) {

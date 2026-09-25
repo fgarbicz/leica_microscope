@@ -168,7 +168,12 @@ void ColorPipeline::update(const ColorSettings &s)
     };
     if (s.hue == 0.0)
         hm = {1, 0, 0, 0, 1, 0, 0, 0, 1};
-    m_matrix = mul(hm, mul(sm, wb));
+    // camera colour correction after white balance (it expects white = 1,1,1)
+    std::array<float, 9> ccm{1, 0, 0, 0, 1, 0, 0, 0, 1};
+    if (s.colorCorrection)
+        for (int i = 0; i < 9; ++i)
+            ccm[size_t(i)] = float(s.cameraMatrix[size_t(i)]);
+    m_matrix = mul(hm, mul(sm, mul(ccm, wb)));
     if (s.grayscale) {
         // collapse to luma after white balance
         std::array<float, 9> g{};

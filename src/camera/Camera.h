@@ -4,6 +4,7 @@
 
 #include "core/Frame.h"
 
+#include <array>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -97,6 +98,10 @@ public:
         std::vector<std::pair<double, double>> offsets; // nominal sensor offsets (pixels)
     };
     virtual std::vector<ShotMode> shotModes() const { return {}; }
+
+    // Colour correction matrix (row major) from white balanced camera RGB to
+    // linear sRGB; identity if the camera has no calibration.
+    virtual std::array<double, 9> colorMatrix() const { return {1, 0, 0, 0, 1, 0, 0, 0, 1}; }
     // Captures all shots of a mode. Blocks; live streaming is paused and
     // resumed internally. `progress` is called with (done, total).
     virtual bool captureShots(int modeIndex, std::vector<RawFramePtr> &shots, std::string &error,

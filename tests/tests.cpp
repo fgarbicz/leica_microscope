@@ -163,6 +163,35 @@ static void testPipeline()
     CHECK(r.row(0)[0] == 3 && r.row(0)[3] == 0); // top row after 90deg cw: (0,1),(0,0)
     Image16 fh = applyGeometry(g, true, false, 0);
     CHECK(fh.row(0)[0] == 2);
+
+    // camera colour correction (DMC6200 / IMX174): neutral stays neutral, colours change
+    {
+        const auto ccm = Dmc6200Camera(CameraInfo{}).colorMatrix();
+        for (int i = 0; i < 3; ++i)
+            CHECK_NEAR(ccm[size_t(i * 3)] + ccm[size_t(i * 3 + 1)] + ccm[size_t(i * 3 + 2)], 1.0, 1e-3);
+        ColorSettings cs;
+        cs.srgbEncode = false;
+        cs.cameraMatrix = ccm;
+        ColorPipeline cp;
+        cp.update(cs);
+        Image16 patch(2, 1);
+        const uint16_t grey[3] = {30000, 30000, 30000}, tint[3] = {40000, 30000, 20000};
+        for (int c = 0; c < 3; ++c) {
+            patch.row(0)[c] = grey[c];
+            patch.row(0)[3 + c] = tint[c];
+        }
+        Image16 corrected = patch;
+        cp.applyLinear(corrected);
+        CHECK_NEAR(corrected.row(0)[0], 30000, 40);
+        CHECK_NEAR(corrected.row(0)[1], 30000, 40);
+        CHECK_NEAR(corrected.row(0)[2], 30000, 40);
+        CHECK(std::abs(int(corrected.row(0)[3]) - 40000) > 1000); // colour saturation raised
+        cs.colorCorrection = false;
+        cp.update(cs);
+        Image16 plain = patch;
+        cp.applyLinear(plain);
+        CHECK(plain.row(0)[3] == 40000 && plain.row(0)[5] == 20000);
+    }
 }
 
 static void testFastPreview()

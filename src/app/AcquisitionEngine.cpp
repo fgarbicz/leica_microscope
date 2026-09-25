@@ -130,8 +130,12 @@ bool AcquisitionEngine::openCamera(const CameraInfo &info, QString &error)
         }
         cam->setFrameCallback([this](RawFramePtr f) { onRawFrame(std::move(f)); });
         cam->setErrorCallback([this](const std::string &e) { emit cameraError(QString::fromStdString(e)); });
-        QMutexLocker l(&m_mutex);
-        m_camera = std::shared_ptr<Camera>(std::move(cam));
+        {
+            QMutexLocker l(&m_mutex);
+            m_cameraMatrix = cam->colorMatrix();
+            m_camera = std::shared_ptr<Camera>(std::move(cam));
+        }
+        setColorSettings(colorSettings()); // rebuild the pipeline with this camera's colour matrix
         return true;
     }
     error = tr("No backend for camera %1").arg(QString::fromStdString(info.name));
@@ -211,8 +215,13 @@ void AcquisitionEngine::stopLive()
     emit liveStateChanged(false);
 }
 
-void AcquisitionEngine::setColorSettings(const ColorSettings &s)
+void AcquisitionEngine::setColorSettings(const ColorSettings &settings)
 {
+    ColorSettings s = settings;
+    {
+        QMutexLocker l(&m_mutex);
+        s.cameraMatrix = m_cameraMatrix; // the camera's calibration, not user editable
+    }
     auto p = std::make_shared<ColorPipeline>();
     p->update(s);
     QMutexLocker l(&m_mutex);

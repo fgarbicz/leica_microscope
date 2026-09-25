@@ -93,10 +93,13 @@ ColorPanel::ColorPanel(QWidget *parent) : QWidget(parent)
     m_sharpenRadius->setDefault(1.0);
     for (auto *s : {m_saturation, m_hue, m_sharpen, m_sharpenRadius})
         col->contentLayout()->addWidget(s);
+    m_ccm = new QCheckBox(tr("Camera colour correction"), this);
+    m_ccm->setToolTip(tr("Calibrated colour matrix of the camera sensor (IMX174, halogen illumination): "
+                         "accurate stain colours. Switch off only to compare with uncorrected sensor colours."));
     m_gray = new QCheckBox(tr("Monochrome"), this);
     m_invert = new QCheckBox(tr("Invert (negative)"), this);
     m_srgb = new QCheckBox(tr("sRGB tone curve (recommended)"), this);
-    for (auto *c : {m_gray, m_invert, m_srgb})
+    for (auto *c : {m_ccm, m_gray, m_invert, m_srgb})
         col->contentLayout()->addWidget(c);
     auto *reset = new QPushButton(tr("Reset all colour settings"), this);
     col->contentLayout()->addWidget(reset);
@@ -134,6 +137,7 @@ ColorPanel::ColorPanel(QWidget *parent) : QWidget(parent)
         });
     };
     hookB(m_gray, &ColorSettings::grayscale);
+    hookB(m_ccm, &ColorSettings::colorCorrection);
     hookB(m_invert, &ColorSettings::invert);
     hookB(m_srgb, &ColorSettings::srgbEncode);
 
@@ -221,6 +225,7 @@ void ColorPanel::setSettings(const ColorSettings &s)
     m_sharpen->setValue(s.sharpenAmount);
     m_sharpenRadius->setValue(s.sharpenRadius);
     m_gray->setChecked(s.grayscale);
+    m_ccm->setChecked(s.colorCorrection);
     m_invert->setChecked(s.invert);
     m_srgb->setChecked(s.srgbEncode);
     m_updating = false;

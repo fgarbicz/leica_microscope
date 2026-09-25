@@ -43,7 +43,7 @@ private:
     SliderSpin *m_blackPoint, *m_whitePoint;
     SliderSpin *m_gamma, *m_brightness, *m_contrast, *m_saturation, *m_hue;
     SliderSpin *m_sharpen, *m_sharpenRadius;
-    QCheckBox *m_gray, *m_invert, *m_srgb;
+    QCheckBox *m_gray, *m_invert, *m_srgb, *m_ccm;
 };
 
 } // namespace lm

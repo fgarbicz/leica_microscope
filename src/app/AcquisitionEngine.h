@@ -156,6 +156,7 @@ private:
     std::vector<std::unique_ptr<CameraBackend>> m_backends;
     // shared: worker threads keep a reference while they use the camera
     std::shared_ptr<Camera> m_camera;
+    std::array<double, 9> m_cameraMatrix{1, 0, 0, 0, 1, 0, 0, 0, 1}; // guarded by m_mutex
     std::shared_ptr<Camera> cameraRef() const;
     void cancelPendingCapture(const QString &reason);
     QThreadPool m_jobs; // capture / reconstruction jobs (joined on shutdown)

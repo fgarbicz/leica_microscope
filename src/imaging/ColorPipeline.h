@@ -44,6 +44,11 @@ struct ColorSettings {
     bool grayscale = false;
     // negative / invert (useful for some contrast methods)
     bool invert = false;
+    // camera colour correction: white balanced camera RGB -> linear sRGB. The
+    // matrix comes from the camera (identity if it has none); the flag lets the
+    // user switch it off.
+    bool colorCorrection = true;
+    std::array<double, 9> cameraMatrix{1, 0, 0, 0, 1, 0, 0, 0, 1};
 
     bool operator==(const ColorSettings &) const = default;
 };

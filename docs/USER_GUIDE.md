@@ -25,6 +25,9 @@ The window has three workspaces (tabs at the top):
    the gain at 1× unless the specimen is very dark: higher gain means more noise.
 3. **White balance:** press *Auto white balance* on an empty field (background), or
    use *Pick area…* and drag a rectangle over background.
+   *Camera colour correction* (Colour panel, on by default) applies the sensor's calibrated
+   colour matrix (IMX174 under halogen light), so DAB, haematoxylin and eosin look as in the
+   eyepieces. Extra *Saturation* is rarely needed.
 4. **Shading correction** (*Microscope* panel): with an empty field in view, press
    *Acquire reference* and tick *Apply shading correction*. This removes darker
    corners and uneven illumination. The reference is stored per objective.

@@ -29,7 +29,8 @@ QVariantMap colorToVariant(const ColorSettings &c)
             {"contrast", c.contrast},     {"gamma", c.gamma},           {"srgb", c.srgbEncode},
             {"sharpen", c.sharpenAmount}, {"sharpenRadius", c.sharpenRadius},
             {"flipH", c.flipHorizontal},  {"flipV", c.flipVertical},    {"rotation", c.rotation},
-            {"grayscale", c.grayscale},   {"invert", c.invert}};
+            {"grayscale", c.grayscale},   {"invert", c.invert},
+            {"colorCorrection", c.colorCorrection}};
 }
 
 ColorSettings colorFromVariant(const QVariantMap &m)
@@ -56,6 +57,7 @@ ColorSettings colorFromVariant(const QVariantMap &m)
     c.rotation = m.value(QStringLiteral("rotation"), 0).toInt();
     c.grayscale = b("grayscale", false);
     c.invert = b("invert", false);
+    c.colorCorrection = b("colorCorrection", true);
     return c;
 }
 
@@ -66,8 +68,9 @@ QMap<QString, ColorSettings> AppSettings::builtinPresets()
     neutral.blackLevel = 0.002;
     p.insert(QObject::tr("Neutral (linear sRGB)"), neutral);
 
-    ColorSettings ihc = neutral; // DAB/haematoxylin: slightly more contrast and saturation
-    ihc.saturation = 1.25;
+    // saturation: the camera colour matrix already gives calibrated colours
+    ColorSettings ihc = neutral; // DAB/haematoxylin: slightly more contrast
+    ihc.saturation = 1.0;
     ihc.contrast = 1.08;
     ihc.gamma = 1.0;
     ihc.sharpenAmount = 0.35;
@@ -75,7 +78,7 @@ QMap<QString, ColorSettings> AppSettings::builtinPresets()
     p.insert(QObject::tr("Bright field - IHC (DAB)"), ihc);
 
     ColorSettings he = neutral;
-    he.saturation = 1.35;
+    he.saturation = 1.1;
     he.contrast = 1.1;
     he.sharpenAmount = 0.35;
     p.insert(QObject::tr("Bright field - H&E"), he);
@@ -86,7 +89,7 @@ QMap<QString, ColorSettings> AppSettings::builtinPresets()
     p.insert(QObject::tr("Monochrome"), gray);
 
     ColorSettings pub = neutral; // publication: gentle, no sharpening artefacts
-    pub.saturation = 1.1;
+    pub.saturation = 1.0;
     pub.contrast = 1.03;
     p.insert(QObject::tr("Publication (natural)"), pub);
     return p;

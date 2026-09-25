@@ -49,6 +49,7 @@ public:
     bool setProperty(const std::string &key, double value) override;
 
     std::vector<ShotMode> shotModes() const override;
+    std::array<double, 9> colorMatrix() const override;
     bool captureShots(int modeIndex, std::vector<RawFramePtr> &shots, std::string &error,
                       const std::function<void(int, int)> &progress = {}) override;
 
