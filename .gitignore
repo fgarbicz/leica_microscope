@@ -1,0 +1,29 @@
+# build output
+build/
+out/
+*.obj
+*.exe
+*.pdb
+*.ilk
+*.lib
+*.exp
+*.dll
+!third_party/**/*.dll
+
+# driver build artifacts (catalog is generated and signed per machine)
+driver/*.cat
+
+# logs / captures
+tools/elevated_job.log
+*.raw
+*.bin
+usbspy*.log
+
+# editors
+.vs/
+.vscode/
+*.user
+
+# python
+__pycache__/
+*.pyc

@@ -1,0 +1,43 @@
+; LeicaUsb3Cam.inf
+; Binds the Microsoft WinUSB driver to Leica Microsystems USB 3.0 microscope
+; cameras so they can be operated by the DM Imaging application (user-mode
+; driver in src/camera/LeicaCamera.*). No kernel code is installed.
+
+[Version]
+Signature   = "$Windows NT$"
+Class       = USBDevice
+ClassGuid   = {88BAE032-5A81-49f0-BC3D-A4FF138216D6}
+Provider    = %ProviderName%
+CatalogFile = LeicaUsb3Cam.cat
+DriverVer   = 09/24/2026,1.0.0.0
+
+[Manufacturer]
+%ProviderName% = LeicaCam, NTamd64, NTarm64
+
+[LeicaCam.NTamd64]
+%DeviceName% = USB_Install, USB\VID_1711&PID_30E0
+
+[LeicaCam.NTarm64]
+%DeviceName% = USB_Install, USB\VID_1711&PID_30E0
+
+[USB_Install]
+Include = winusb.inf
+Needs   = WINUSB.NT
+
+[USB_Install.Services]
+Include = winusb.inf
+Needs   = WINUSB.NT.Services
+
+[USB_Install.HW]
+AddReg = Dev_AddReg
+
+[Dev_AddReg]
+; Interface GUID used by the application to find the camera
+HKR,,DeviceInterfaceGUIDs,0x10000,"{6B1C2F4E-4C8A-4E0B-9F0D-1711030E0001}"
+; keep the device powered while streaming
+HKR,,SystemWakeEnabled,0x00010001,0
+HKR,,DeviceIdleEnabled,0x00010001,0
+
+[Strings]
+ProviderName = "DM Imaging"
+DeviceName   = "Leica USB 3.0 Microscope Camera (WinUSB)"

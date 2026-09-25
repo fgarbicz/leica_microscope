@@ -1,0 +1,175 @@
+#pragma once
+// Central acquisition engine: owns the active camera, runs the live processing
+// thread (demosaic -> colour pipeline -> display image + statistics), the auto
+// exposure loop, captures, focus stacking and live stitching.
+
+#include "camera/Camera.h"
+#include "imaging/Analysis.h"
+#include "imaging/ColorPipeline.h"
+#include "imaging/FocusStacker.h"
+#include "imaging/MosaicBuilder.h"
+#include "imaging/ShadingCorrection.h"
+
+#include <QImage>
+#include <QMutex>
+#include <QObject>
+#include <QThread>
+#include <QWaitCondition>
+
+#include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <functional>
+#include <memory>
+
+namespace lm {
+
+struct LiveStats {
+    Histogram histogram;       // of the displayed image
+    double focus = 0.0;        // focus measure (higher = sharper)
+    double fps = 0.0;
+    double displayFps = 0.0;
+    double meanLevel = 0.0;    // raw exposure level 0..1
+    double saturated = 0.0;    // fraction of saturated raw pixels
+    int width = 0, height = 0;
+    uint64_t frames = 0;
+    uint64_t dropped = 0;
+};
+
+enum class LiveMode { Normal, Multifocus, Mosaic };
+
+struct AutoExposureSettings {
+    bool enabled = false;
+    double target = 0.85;      // target 99th percentile level (linear 0..1): bright field background just below white
+    double maxExposureMs = 500;
+    bool allowGain = false;
+};
+
+// A captured result delivered to the UI
+struct CaptureResult {
+    Image16 linear;            // linear, after shading/WB/colour (pre tone curve)
+    Image16 rendered16;        // tone mapped 16-bit
+    Image8 rendered8;          // tone mapped 8-bit
+    double exposureMs = 0;
+    double gain = 1;
+    int averagedFrames = 1;
+    std::string kind;          // "single", "multifocus", "mosaic", "timelapse"
+};
+
+class AcquisitionEngine : public QObject {
+    Q_OBJECT
+public:
+    explicit AcquisitionEngine(QObject *parent = nullptr);
+    ~AcquisitionEngine() override;
+
+    // camera management
+    std::vector<CameraInfo> enumerateCameras();
+    bool openCamera(const CameraInfo &info, QString &error);
+    void closeCamera();
+    Camera *camera() const { return m_camera.get(); }
+    bool isLive() const;
+    bool startLive(QString &error);
+    void stopLive();
+    void setFrozen(bool frozen) { m_frozen = frozen; }
+    bool isFrozen() const { return m_frozen; }
+
+    // processing
+    void setColorSettings(const ColorSettings &s);
+    ColorSettings colorSettings() const;
+    void setShading(std::shared_ptr<const ShadingCorrection> sc);
+    std::shared_ptr<const ShadingCorrection> shading() const;
+    void setShadingEnabled(bool on);
+    bool shadingEnabled() const { return m_shadingEnabled; }
+    void setAutoExposure(const AutoExposureSettings &s);
+    AutoExposureSettings autoExposure() const;
+    void setShowClipping(bool on) { m_showClipping = on; }
+    void setPreviewQuality(bool high) { m_previewHighQuality = high; }
+    void setFocusRegion(Rect r) { QMutexLocker l(&m_mutex); m_focusRegion = r; }
+
+    // one-shot operations executed on the next live frame
+    void requestWhiteBalance(Rect region = {});
+    void requestBlackBalance();
+    void requestShadingReference(int frames = 8);
+    void requestAutoExposureOnce();
+
+    // capture: averages `frames` raw frames, full quality demosaic
+    void capture(int averageFrames = 1);
+
+    // multifocus / live image builder
+    void setLiveMode(LiveMode m);
+    LiveMode liveMode() const { return m_mode; }
+    FocusStacker &focusStacker() { return m_stacker; }
+    MosaicBuilder &mosaic() { return m_mosaic; }
+    void mosaicAddTile() { m_mosaicForceAdd = true; }
+    void finishMultifocus();
+    void finishMosaic();
+
+    // Last raw frame (for pixel readout etc.)
+    RawFramePtr lastRaw() const;
+
+signals:
+    void frameReady(const QImage &display, const lm::LiveStats &stats);
+    void cameraError(const QString &message);
+    void whiteBalanceComputed(double r, double g, double b);
+    void blackLevelComputed(double level);
+    void shadingReferenceReady(std::shared_ptr<lm::ShadingCorrection> sc);
+    void exposureChanged(double ms, double gain);
+    void captureFinished(std::shared_ptr<lm::CaptureResult> result);
+    void captureFailed(const QString &message);
+    void multifocusProgress(int frames, double improvedFraction);
+    void mosaicStatus(const lm::MosaicBuilder::Status &status);
+    void liveStateChanged(bool live);
+
+private:
+    void onRawFrame(RawFramePtr f);
+    void processingLoop();
+    void runAutoExposure(const RawFrame &raw);
+    QImage toQImage(const Image8 &img, bool clipping, const Image16 *linear);
+
+    std::vector<std::unique_ptr<CameraBackend>> m_backends;
+    std::unique_ptr<Camera> m_camera;
+
+    mutable QMutex m_mutex;
+    QWaitCondition m_frameCond;
+    RawFramePtr m_pending;      // latest unprocessed frame (older ones dropped)
+    RawFramePtr m_last;         // last processed raw frame
+    std::deque<RawFramePtr> m_captureQueue;
+    int m_captureWanted = 0;    // frames still needed for a capture
+    int m_captureAverage = 1;
+
+    ColorSettings m_color;
+    std::shared_ptr<const ColorPipeline> m_pipeline; // immutable, swapped on change
+    std::shared_ptr<const ShadingCorrection> m_shading;
+    std::atomic<bool> m_shadingEnabled{false};
+    AutoExposureSettings m_ae;
+    std::atomic<bool> m_aeOnce{false};
+    std::atomic<bool> m_showClipping{false};
+    std::atomic<bool> m_previewHighQuality{false};
+    std::atomic<bool> m_frozen{false};
+    Rect m_focusRegion;
+
+    std::atomic<bool> m_wbRequest{false};
+    Rect m_wbRegion;
+    std::atomic<bool> m_blackRequest{false};
+    std::atomic<int> m_shadingFramesWanted{0};
+    std::vector<Image16> m_shadingFrames;
+
+    std::atomic<LiveMode> m_mode{LiveMode::Normal};
+    FocusStacker m_stacker;
+    MosaicBuilder m_mosaic;
+    std::atomic<bool> m_mosaicForceAdd{false};
+
+    std::thread m_worker;
+    std::atomic<bool> m_running{false};
+    std::atomic<uint64_t> m_received{0}, m_dropped{0};
+    double m_fps = 0, m_displayFps = 0;
+    std::chrono::steady_clock::time_point m_lastFrameTime{}, m_lastDisplayTime{};
+    std::chrono::steady_clock::time_point m_lastAeChange{};
+};
+
+} // namespace lm
+
+Q_DECLARE_METATYPE(lm::LiveStats)
+Q_DECLARE_METATYPE(lm::MosaicBuilder::Status)
+Q_DECLARE_METATYPE(std::shared_ptr<lm::CaptureResult>)
+Q_DECLARE_METATYPE(std::shared_ptr<lm::ShadingCorrection>)
