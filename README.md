@@ -48,6 +48,8 @@ daily imaging and includes its own native camera driver.
 - Measurements: length, path, rectangle, ellipse, polygon area, angle, cell counting, arrows and text.
   - Undo/redo; annotations are stored next to the image.
   - CSV export of measurements.
+- IHC quantification: colour deconvolution (haematoxylin/DAB), DAB-positive area %, intensity classes and H-score, for the whole image or a region, with overlay.
+- Side-by-side comparison with synchronised zoom; batch export for presentations.
 - Non-destructive adjustments.
 - Export with burned-in scale bar and annotations; copy to clipboard; print.
 - Multifocus and stitching from existing image files.

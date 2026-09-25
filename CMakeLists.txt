@@ -29,6 +29,7 @@ add_library(lmcore STATIC
     src/imaging/FocusStacker.cpp
     src/imaging/MosaicBuilder.cpp
     src/imaging/PixelShift.cpp
+    src/imaging/StainAnalysis.cpp
     src/camera/Backends.cpp
     src/camera/SimulatedCamera.cpp
     src/camera/MFCamera.cpp

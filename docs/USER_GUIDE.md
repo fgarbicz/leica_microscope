@@ -118,6 +118,16 @@ CSV file). Annotations are saved automatically next to the image. *Export with
 overlays* writes an image with the scale bar and annotations burned in, ready
 for presentations.
 
+### IHC quantification (DAB)
+
+In the *IHC quantification* panel, press **Analyse image**, or draw a rectangle, ellipse
+or area around the region of interest, select it, and press **Analyse selection**. The
+image is separated into haematoxylin and DAB (colour deconvolution). You get
+the DAB-positive percentage of the tissue, the areas, the intensity distribution
+(weak / moderate / strong) and an H-score. The overlay shows DAB-positive
+pixels in red and negative tissue in blue. Adjust the *DAB positivity threshold*
+if needed, and use *Copy results* to paste a table row into Excel.
+
 ## 10. Keyboard shortcuts
 
 | Key | Action |

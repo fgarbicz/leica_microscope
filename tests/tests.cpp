@@ -10,6 +10,7 @@
 #include "imaging/PixelShift.h"
 #include "imaging/Registration.h"
 #include "imaging/ShadingCorrection.h"
+#include "imaging/StainAnalysis.h"
 
 #include <atomic>
 #include <chrono>
@@ -201,6 +202,45 @@ static void testFastPreview()
         if (maxDiff > 2)
             std::printf("  variant %d max diff %d\n", variant, maxDiff);
     }
+}
+
+static void testStains()
+{
+    std::printf("IHC colour deconvolution\n");
+    // synthetic slide: white background, haematoxylin block, DAB block (Beer-Lambert, sRGB encoded)
+    const int w = 300, h = 100;
+    Image16 img(w, h);
+    const double hv[3] = {0.650, 0.704, 0.286}, dv[3] = {0.268, 0.570, 0.776};
+    auto encode = [](double lin) {
+        const double s = lin <= 0.0031308 ? 12.92 * lin : 1.055 * std::pow(lin, 1 / 2.4) - 0.055;
+        return uint16_t(std::clamp(s, 0.0, 1.0) * 65535.0 + 0.5);
+    };
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            double ch = 0, cd = 0;
+            if (x >= 100 && x < 200) ch = 0.8; // haematoxylin only
+            if (x >= 200) cd = 0.7;            // DAB only (strong)
+            for (int c = 0; c < 3; ++c) {
+                const double od = ch * hv[c] / std::sqrt(0.65 * 0.65 + 0.704 * 0.704 + 0.286 * 0.286)
+                                  + cd * dv[c] / std::sqrt(0.268 * 0.268 + 0.57 * 0.57 + 0.776 * 0.776);
+                img.row(y)[x * 3 + c] = encode(std::pow(10.0, -od));
+            }
+        }
+    StainOptions opt;
+    opt.umPerPixel = 0.5;
+    StainResult r = analyzeStains(img, opt);
+    // tissue = the two stained blocks, DAB positive = the DAB block only
+    CHECK_NEAR(double(r.tissuePixels), 200.0 * h, 200);
+    CHECK_NEAR(r.positiveFraction, 0.5, 0.02);
+    CHECK_NEAR(r.dab[size_t(50) * w + 150], 0.0, 0.05);  // no DAB in the haematoxylin block
+    CHECK_NEAR(r.dab[size_t(50) * w + 250], 0.7, 0.05);  // recovered DAB concentration
+    CHECK_NEAR(r.h[size_t(50) * w + 150], 0.8, 0.06);
+    CHECK_NEAR(r.strong, 0.5, 0.02);
+    CHECK_NEAR(r.hScore, 150.0, 3.0);
+    CHECK_NEAR(r.positiveAreaUm2, 100.0 * h * 0.25, 60);
+    // region restriction: only the DAB block
+    StainResult rr = analyzeStains(img, opt, [](int x, int) { return x >= 220; });
+    CHECK_NEAR(rr.positiveFraction, 1.0, 0.01);
 }
 
 static void testRegistration()
@@ -525,6 +565,7 @@ int main(int argc, char **argv)
         testDemosaic();
         testPipeline();
         testFastPreview();
+        testStains();
         testRegistration();
         testShading();
         testFocusStack();

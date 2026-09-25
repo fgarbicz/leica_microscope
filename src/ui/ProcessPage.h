@@ -5,6 +5,8 @@
 #include "imaging/ColorPipeline.h"
 #include "io/ImageIO.h"
 
+#include <QImage>
+
 #include <QWidget>
 
 class QTableWidget;
@@ -12,6 +14,7 @@ class QLabel;
 class QActionGroup;
 class QToolButton;
 class QDoubleSpinBox;
+class QCheckBox;
 
 namespace lm {
 
@@ -38,6 +41,7 @@ public slots:
     void multifocusFromFiles();
     void stitchFromFiles();
     void setCalibration();
+    void analyzeIhc(bool regionOnly);
 
 signals:
     void message(const QString &text, int timeoutMs);
@@ -61,6 +65,12 @@ private:
     QString m_path;
     ColorSettings m_adjust;
     bool m_dirtyAnnotations = false;
+    // IHC quantification
+    SliderSpin *m_dabThreshold;
+    QLabel *m_ihcResult;
+    QCheckBox *m_ihcOverlay;
+    QImage m_ihcMask;
+    QString m_ihcText;
 };
 
 } // namespace lm

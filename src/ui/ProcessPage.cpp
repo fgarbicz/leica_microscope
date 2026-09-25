@@ -3,6 +3,7 @@
 #include "app/AppSettings.h"
 #include "imaging/FocusStacker.h"
 #include "imaging/MosaicBuilder.h"
+#include "imaging/StainAnalysis.h"
 #include "ui/Annotations.h"
 #include "ui/CollapsibleSection.h"
 #include "ui/ImageView.h"
@@ -10,6 +11,7 @@
 #include "ui/SliderSpin.h"
 
 #include <QActionGroup>
+#include <QCheckBox>
 #include <QApplication>
 #include <QClipboard>
 #include <QColorDialog>
@@ -193,6 +195,40 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     adj->contentLayout()->addWidget(resetAdj);
     sl->addWidget(adj);
 
+    auto *ihc = new CollapsibleSection(tr("IHC quantification (DAB)"), sideContent);
+    auto *ihcHint = new QLabel(tr("Colour deconvolution into haematoxylin and DAB. Analyses the whole image, or the "
+                                  "selected rectangle / ellipse / area annotation."), sideContent);
+    ihcHint->setObjectName(QStringLiteral("Hint"));
+    ihcHint->setWordWrap(true);
+    ihc->contentLayout()->addWidget(ihcHint);
+    m_dabThreshold = new SliderSpin(tr("DAB positivity threshold (OD)"), 0.05, 1.0, 2, sideContent);
+    m_dabThreshold->setValue(0.15);
+    m_dabThreshold->setDefault(0.15);
+    ihc->contentLayout()->addWidget(m_dabThreshold);
+    auto *ihcRow = new QHBoxLayout;
+    auto *ihcAll = new QPushButton(tr("Analyse image"), sideContent);
+    auto *ihcSel = new QPushButton(tr("Analyse selection"), sideContent);
+    ihcRow->addWidget(ihcAll);
+    ihcRow->addWidget(ihcSel);
+    ihc->contentLayout()->addLayout(ihcRow);
+    m_ihcOverlay = new QCheckBox(tr("Show overlay (red = DAB+, blue = negative tissue)"), sideContent);
+    m_ihcOverlay->setChecked(true);
+    ihc->contentLayout()->addWidget(m_ihcOverlay);
+    m_ihcResult = new QLabel(sideContent);
+    m_ihcResult->setWordWrap(true);
+    m_ihcResult->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    ihc->contentLayout()->addWidget(m_ihcResult);
+    auto *ihcCopy = new QPushButton(tr("Copy results"), sideContent);
+    ihc->contentLayout()->addWidget(ihcCopy);
+    sl->addWidget(ihc);
+    connect(ihcAll, &QPushButton::clicked, this, [this] { analyzeIhc(false); });
+    connect(ihcSel, &QPushButton::clicked, this, [this] { analyzeIhc(true); });
+    connect(m_ihcOverlay, &QCheckBox::toggled, this, [this](bool on) { m_view->setOverlayImage(on ? m_ihcMask : QImage()); });
+    connect(ihcCopy, &QPushButton::clicked, this, [this] {
+        if (!m_ihcText.isEmpty())
+            QApplication::clipboard()->setText(m_ihcText);
+    });
+
     auto *inf = new CollapsibleSection(tr("Image information"), sideContent);
     m_info = new QLabel(sideContent);
     m_info->setObjectName(QStringLiteral("Hint"));
@@ -297,6 +333,10 @@ void ProcessPage::openImage(const Image16 &img, const ImageMetadata &meta, const
     m_data = img;
     m_meta = meta;
     m_path = path;
+    m_ihcMask = QImage();
+    m_ihcText.clear();
+    m_ihcResult->clear();
+    m_view->setOverlayImage(QImage());
     m_layer->blockSignals(true);
     if (!path.isEmpty())
         m_layer->loadSidecar(path);
@@ -355,6 +395,86 @@ void ProcessPage::saveAnnotations()
         m_layer->saveSidecar(m_path);
         m_dirtyAnnotations = false;
     }
+}
+
+void ProcessPage::analyzeIhc(bool regionOnly)
+{
+    if (m_data.empty())
+        return;
+    // region mask from the selected annotation
+    QImage region;
+    QString regionName = tr("whole image");
+    if (regionOnly) {
+        const Annotation *sel = nullptr;
+        for (const auto &a : m_layer->annotations())
+            if (a.id == m_layer->selectedId())
+                sel = &a;
+        if (!sel || (sel->type != Annotation::Rectangle && sel->type != Annotation::Ellipse && sel->type != Annotation::Polygon)) {
+            QMessageBox::information(this, tr("IHC quantification"),
+                                     tr("Select a rectangle, ellipse or area annotation first (Select tool), "
+                                        "or use \"Analyse image\"."));
+            return;
+        }
+        region = QImage(m_data.width, m_data.height, QImage::Format_Grayscale8);
+        region.fill(0);
+        QPainter p(&region);
+        p.setPen(Qt::NoPen);
+        p.setBrush(Qt::white);
+        if (sel->type == Annotation::Rectangle)
+            p.drawRect(QRectF(sel->pts[0], sel->pts[1]).normalized());
+        else if (sel->type == Annotation::Ellipse)
+            p.drawEllipse(QRectF(sel->pts[0], sel->pts[1]).normalized());
+        else
+            p.drawPolygon(QPolygonF(sel->pts));
+        p.end();
+        regionName = tr("selected region");
+    }
+    StainOptions opt;
+    opt.dabThreshold = m_dabThreshold->value();
+    opt.umPerPixel = m_meta.umPerPixel;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const StainResult r = region.isNull()
+                              ? analyzeStains(m_data, opt)
+                              : analyzeStains(m_data, opt, [&region](int x, int y) { return region.constScanLine(y)[x] != 0; });
+    // overlay
+    m_ihcMask = QImage(m_data.width, m_data.height, QImage::Format_ARGB32); // non-premultiplied colours below
+    for (int y = 0; y < m_data.height; ++y) {
+        QRgb *d = reinterpret_cast<QRgb *>(m_ihcMask.scanLine(y));
+        const uint8_t *mk = r.mask.data() + size_t(y) * m_data.width;
+        for (int x = 0; x < m_data.width; ++x)
+            d[x] = mk[x] == 2 ? qRgba(150, 20, 20, 150) : mk[x] == 1 ? qRgba(20, 60, 170, 90) : 0;
+    }
+    QApplication::restoreOverrideCursor();
+    if (m_ihcOverlay->isChecked())
+        m_view->setOverlayImage(m_ihcMask);
+
+    const bool cal = m_meta.umPerPixel > 0;
+    auto area = [&](double um2, uint64_t px) { return cal ? formatArea(um2) : tr("%1 px").arg(px); };
+    m_ihcResult->setText(tr("<b>DAB positive: %1 %</b> of tissue (%2)<br>"
+                            "Tissue area: %3<br>Positive area: %4<br>"
+                            "Intensity: weak %5 %, moderate %6 %, strong %7 %<br>"
+                            "H-score: <b>%8</b><br>Mean DAB OD (positive): %9")
+                             .arg(r.positiveFraction * 100, 0, 'f', 1)
+                             .arg(regionName)
+                             .arg(area(r.tissueAreaUm2, r.tissuePixels))
+                             .arg(area(r.positiveAreaUm2, r.positivePixels))
+                             .arg(r.weak * 100, 0, 'f', 1)
+                             .arg(r.moderate * 100, 0, 'f', 1)
+                             .arg(r.strong * 100, 0, 'f', 1)
+                             .arg(r.hScore, 0, 'f', 0)
+                             .arg(r.meanDabPositive, 0, 'f', 3));
+    m_ihcText = QStringLiteral("image\tregion\tDAB_threshold_OD\tDAB_positive_%\ttissue_area\tpositive_area\tweak_%\tmoderate_%\tstrong_%\tH_score\tmean_DAB_OD_pos\n"
+                               "%1\t%2\t%3\t%4\t%5\t%6\t%7\t%8\t%9\t%10\t%11\n")
+                    .arg(QFileInfo(m_path).fileName(), regionName)
+                    .arg(opt.dabThreshold)
+                    .arg(r.positiveFraction * 100, 0, 'f', 2)
+                    .arg(area(r.tissueAreaUm2, r.tissuePixels), area(r.positiveAreaUm2, r.positivePixels))
+                    .arg(r.weak * 100, 0, 'f', 2)
+                    .arg(r.moderate * 100, 0, 'f', 2)
+                    .arg(r.strong * 100, 0, 'f', 2)
+                    .arg(r.hScore, 0, 'f', 1)
+                    .arg(r.meanDabPositive, 0, 'f', 4);
+    emit message(tr("IHC: %1 % DAB positive (%2)").arg(r.positiveFraction * 100, 0, 'f', 1).arg(regionName), 6000);
 }
 
 void ProcessPage::setCalibration()

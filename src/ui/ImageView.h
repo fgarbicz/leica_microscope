@@ -45,6 +45,8 @@ public:
     void setFocusValue(double v, double peak) { m_focus = v; m_focusPeak = peak; update(); }
     void setShowOverlays(bool on) { m_showOverlays = on; update(); }
     void setPlaceholder(const QString &t) { m_placeholder = t; update(); }
+    // semi-transparent analysis overlay (ARGB32, same size as the image); null = none
+    void setOverlayImage(const QImage &img) { m_overlayImage = img; update(); }
 
     double zoom() const { return m_zoom; }
     bool isFit() const { return m_fit; }
@@ -112,6 +114,7 @@ private:
     QColor m_highlightColor;
     QVector<QRectF> m_tiles;
     QString m_statusText, m_placeholder;
+    QImage m_overlayImage;
     double m_focus = -1, m_focusPeak = 0;
     bool m_showOverlays = true;
     QPointF m_cursor{-1, -1};

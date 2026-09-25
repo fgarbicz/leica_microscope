@@ -206,6 +206,11 @@ void ImageView::paintEvent(QPaintEvent *)
         p.setRenderHint(QPainter::SmoothPixmapTransform, m_zoom < 2.0);
         p.drawImage(T.mapRect(srcR), m_image, srcR);
     }
+    if (!m_overlayImage.isNull() && m_overlayImage.size() == m_image.size() && !visibleImg.isEmpty()) {
+        QRectF srcR(QPointF(std::floor(visibleImg.left()), std::floor(visibleImg.top())),
+                    QPointF(std::ceil(visibleImg.right()), std::ceil(visibleImg.bottom())));
+        p.drawImage(T.mapRect(srcR), m_overlayImage, srcR);
+    }
     // pixel grid at high zoom
     if (m_zoom >= 16) {
         p.setPen(QColor(0, 0, 0, 60));
