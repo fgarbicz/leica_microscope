@@ -1,0 +1,129 @@
+// User interface behaviour that is easy to break and hard to notice.
+//
+// Above all: the mouse wheel must never change a value. Scrolling a side panel
+// used to alter whichever slider, spin box, combo box or tab sat under the
+// pointer, silently changing the exposure or the objective.
+#include "ui/Icons.h"
+#include "ui/Theme.h"
+#include "ui/WheelGuard.h"
+
+#include <QApplication>
+#include <QComboBox>
+#include <QDoubleSpinBox>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QSlider>
+#include <QSpinBox>
+#include <QTabBar>
+#include <QVBoxLayout>
+#include <QWheelEvent>
+
+#include <cstdio>
+
+using namespace lm;
+
+static int g_failed = 0;
+#define CHECK(c)                                                                      \
+    do {                                                                              \
+        if (!(c)) {                                                                   \
+            ++g_failed;                                                               \
+            std::printf("  FAILED line %d: %s\n", __LINE__, #c);                      \
+        }                                                                             \
+    } while (0)
+
+// Sends a wheel notch to the widget the way a real scroll does.
+static void sendWheel(QWidget *w, int degrees = -120)
+{
+    const QPointF pos(w->width() / 2.0, w->height() / 2.0);
+    QWheelEvent e(pos, w->mapToGlobal(pos.toPoint()), QPoint(0, 0), QPoint(0, degrees), Qt::NoButton, Qt::NoModifier,
+                  Qt::NoScrollPhase, false);
+    QApplication::sendEvent(w, &e);
+}
+
+int main(int argc, char **argv)
+{
+    QApplication app(argc, argv);
+    applyTheme(app, QStringLiteral("dark"));
+    WheelGuard::install(app);
+
+    // A panel like the ones in Acquire: a tall column of controls in a scroll area.
+    QScrollArea scroll;
+    scroll.setWidgetResizable(true);
+    auto *content = new QWidget;
+    auto *lay = new QVBoxLayout(content);
+    auto *spin = new QDoubleSpinBox(content);
+    spin->setRange(0, 1000);
+    spin->setValue(20);
+    auto *intSpin = new QSpinBox(content);
+    intSpin->setRange(0, 1000);
+    intSpin->setValue(5);
+    auto *slider = new QSlider(Qt::Horizontal, content);
+    slider->setRange(0, 100);
+    slider->setValue(50);
+    auto *combo = new QComboBox(content);
+    combo->addItems({QStringLiteral("2.5x"), QStringLiteral("10x"), QStringLiteral("40x")});
+    combo->setCurrentIndex(1);
+    auto *tabs = new QTabBar(content);
+    tabs->addTab(QStringLiteral("Acquire"));
+    tabs->addTab(QStringLiteral("Browse"));
+    tabs->setCurrentIndex(0);
+    for (QWidget *w : {static_cast<QWidget *>(spin), static_cast<QWidget *>(intSpin),
+                       static_cast<QWidget *>(slider), static_cast<QWidget *>(combo),
+                       static_cast<QWidget *>(tabs)})
+        lay->addWidget(w);
+    // make the content taller than the viewport so there is something to scroll
+    auto *filler = new QWidget(content);
+    filler->setMinimumHeight(2000);
+    lay->addWidget(filler);
+    scroll.setWidget(content);
+    scroll.resize(300, 400);
+    scroll.show();
+    QApplication::processEvents();
+
+    std::printf("wheel over the controls of a scrollable panel\n");
+    const int scrollBefore = scroll.verticalScrollBar()->value();
+    sendWheel(spin);
+    sendWheel(intSpin);
+    sendWheel(slider);
+    sendWheel(combo);
+    sendWheel(tabs);
+    QApplication::processEvents();
+
+    CHECK(spin->value() == 20.0);
+    CHECK(intSpin->value() == 5);
+    CHECK(slider->value() == 50);
+    CHECK(combo->currentIndex() == 1);
+    CHECK(tabs->currentIndex() == 0);
+    // and the wheel did what the user meant: it scrolled the panel
+    CHECK(scroll.verticalScrollBar()->value() > scrollBefore);
+
+    std::printf("the wheel still scrolls a scroll bar itself\n");
+    QScrollBar *bar = scroll.verticalScrollBar();
+    const int barBefore = bar->value();
+    sendWheel(bar);
+    QApplication::processEvents();
+    CHECK(bar->value() > barBefore);
+
+    std::printf("values still change by other means\n");
+    spin->setValue(33);
+    CHECK(spin->value() == 33.0);
+    slider->setValue(70);
+    CHECK(slider->value() == 70);
+
+    std::printf("every icon renders\n");
+    // A missing or malformed SVG body would give a null pixmap and an invisible
+    // button; check the whole set rather than the few used here.
+    for (int i = 0; i <= int(Icon::ScaleBar); ++i) {
+        const Icon ic = Icon(i);
+        if (ic == Icon::None)
+            continue;
+        const QPixmap pm = iconPixmap(ic, theme().text, 16);
+        if (pm.isNull()) {
+            ++g_failed;
+            std::printf("  FAILED: icon %d does not render\n", i);
+        }
+    }
+
+    std::printf(g_failed ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", g_failed);
+    return g_failed ? 1 : 0;
+}

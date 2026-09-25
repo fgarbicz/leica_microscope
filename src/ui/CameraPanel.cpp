@@ -3,7 +3,10 @@
 #include "app/AcquisitionEngine.h"
 #include "app/AppSettings.h"
 #include "ui/CollapsibleSection.h"
+#include "ui/Icons.h"
+#include "ui/PanelGroup.h"
 #include "ui/SliderSpin.h"
+#include "ui/Theme.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -12,6 +15,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
+#include <QStyle>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -24,20 +28,29 @@ CameraPanel::CameraPanel(AcquisitionEngine *engine, QWidget *parent) : QWidget(p
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(0);
 
+    // The camera group: the device itself, then what it is set to.
+    auto *group = new PanelGroup(tr("Camera"), Icon::Camera, theme().groupCamera, this);
+    root->addWidget(group);
+
     // --- device
-    auto *dev = new CollapsibleSection(tr("Camera"), this);
+    auto *dev = group->addSection(tr("Device"), Icon::Plug);
     auto *row = new QHBoxLayout;
     m_cameraCombo = new QComboBox(this);
     m_cameraCombo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
     m_cameraCombo->setMinimumContentsLength(18);
     auto *refresh = new QToolButton(this);
-    refresh->setText(QStringLiteral("⟳"));
+    refresh->setIcon(icon(Icon::Refresh, theme().subText, 15));
     refresh->setToolTip(tr("Search for cameras"));
     row->addWidget(m_cameraCombo, 1);
     row->addWidget(refresh);
     dev->contentLayout()->addLayout(row);
     m_connect = new QPushButton(tr("Connect"), this);
+    m_connect->setIcon(icon(Icon::Plug, theme().text, 15));
     dev->contentLayout()->addWidget(m_connect);
+    m_status = new QLabel(this);
+    m_status->setWordWrap(true);
+    m_status->hide();
+    dev->contentLayout()->addWidget(m_status);
     m_info = new QLabel(this);
     m_info->setObjectName(QStringLiteral("Hint"));
     m_info->setWordWrap(true);
@@ -45,18 +58,19 @@ CameraPanel::CameraPanel(AcquisitionEngine *engine, QWidget *parent) : QWidget(p
     auto *liveRow = new QHBoxLayout;
     m_live = new QPushButton(tr("Live"), this);
     m_live->setObjectName(QStringLiteral("LiveButton"));
+    m_live->setIcon(icon(Icon::Play, theme().text, 15));
     m_live->setCheckable(true);
     m_live->setToolTip(tr("Start/stop live image (F5)"));
     m_freeze = new QPushButton(tr("Freeze"), this);
+    m_freeze->setIcon(icon(Icon::Freeze, theme().text, 15));
     m_freeze->setCheckable(true);
     m_freeze->setToolTip(tr("Freeze the displayed image while the camera keeps running (F6)"));
     liveRow->addWidget(m_live);
     liveRow->addWidget(m_freeze);
     dev->contentLayout()->addLayout(liveRow);
-    root->addWidget(dev);
 
     // --- acquisition
-    auto *acq = new CollapsibleSection(tr("Exposure"), this);
+    auto *acq = group->addSection(tr("Exposure"), Icon::Exposure);
     m_resolution = new QComboBox(this);
     auto *resLabel = new QLabel(tr("Image format"), this);
     resLabel->setObjectName(QStringLiteral("ControlLabel"));
@@ -68,8 +82,9 @@ CameraPanel::CameraPanel(AcquisitionEngine *engine, QWidget *parent) : QWidget(p
     acq->contentLayout()->addWidget(m_exposure);
     m_autoExposure = new QCheckBox(tr("Auto exposure"), this);
     m_autoExposure->setChecked(S.autoExposure);
-    m_aeOnce = new QPushButton(tr("Auto exposure once"), this);
-    m_aeOnce->setToolTip(tr("Adjust the exposure once, then keep it fixed"));
+    m_aeOnce = new QPushButton(tr("Once"), this);
+    m_aeOnce->setIcon(icon(Icon::Wand, theme().text, 15));
+    m_aeOnce->setToolTip(tr("Adjust the exposure once now, then keep it fixed (F8)"));
     auto *aeRow = new QHBoxLayout;
     aeRow->addWidget(m_autoExposure, 1);
     aeRow->addWidget(m_aeOnce);
@@ -85,19 +100,22 @@ CameraPanel::CameraPanel(AcquisitionEngine *engine, QWidget *parent) : QWidget(p
     m_gain->setDefault(1.0);
     acq->contentLayout()->addWidget(m_gain);
     m_aeGain = new QCheckBox(tr("Auto exposure may raise gain"), this);
+    m_aeGain->setToolTip(tr("Let automatic exposure increase the gain when a longer exposure is not enough"));
     acq->contentLayout()->addWidget(m_aeGain);
-    m_hqPreview = new QCheckBox(tr("Sharper live image (uses more CPU)"), this);
+    m_hqPreview = new QCheckBox(tr("Sharper live image"), this);
     m_hqPreview->setToolTip(tr("Uses the same colour reconstruction as captured images. Turn off if the live image is slow."));
     m_hqPreview->setToolTip(tr("Uses the capture-quality demosaicing for the live image (more CPU)"));
     acq->contentLayout()->addWidget(m_hqPreview);
-    root->addWidget(acq);
 
     // --- orientation
-    auto *orient = new CollapsibleSection(tr("Orientation"), this, false);
+    auto *orient = group->addSection(tr("Orientation"), Icon::Orientation, false);
     auto *orow = new QHBoxLayout;
     auto *flipH = new QPushButton(tr("Flip ↔"), this);
+    flipH->setToolTip(tr("Mirror the image left/right"));
     auto *flipV = new QPushButton(tr("Flip ↕"), this);
+    flipV->setToolTip(tr("Mirror the image top/bottom"));
     auto *rot = new QPushButton(tr("Rotate 90°"), this);
+    rot->setIcon(icon(Icon::Reset, theme().text, 15));
     flipH->setCheckable(true);
     flipV->setCheckable(true);
     flipH->setChecked(S.color.flipHorizontal);
@@ -106,10 +124,8 @@ CameraPanel::CameraPanel(AcquisitionEngine *engine, QWidget *parent) : QWidget(p
     orow->addWidget(flipV);
     orow->addWidget(rot);
     orient->contentLayout()->addLayout(orow);
-    root->addWidget(orient);
 
-    m_advanced = new CollapsibleSection(tr("Camera details"), this, false);
-    root->addWidget(m_advanced);
+    m_advanced = group->addSection(tr("Camera details"), Icon::Chip, false);
 
     connect(refresh, &QToolButton::clicked, this, &CameraPanel::refreshCameras);
     connect(m_connect, &QPushButton::clicked, this, &CameraPanel::onConnectClicked);
@@ -135,8 +151,8 @@ CameraPanel::CameraPanel(AcquisitionEngine *engine, QWidget *parent) : QWidget(p
         auto &S2 = AppSettings::instance();
         S2.autoExposure = ae.enabled;
         S2.aeTarget = ae.target;
-        m_exposure->setEnabledControls(!ae.enabled);
-        m_gain->setEnabledControls(!(ae.enabled && ae.allowGain));
+        m_exposure->setEnabledControls(m_canSetExposure && !ae.enabled);
+        m_gain->setEnabledControls(m_canSetGain && !(ae.enabled && ae.allowGain));
     };
     connect(m_autoExposure, &QCheckBox::toggled, this, updateAe);
     connect(m_aeGain, &QCheckBox::toggled, this, updateAe);
@@ -178,10 +194,21 @@ CameraPanel::CameraPanel(AcquisitionEngine *engine, QWidget *parent) : QWidget(p
         QSignalBlocker b(m_live);
         m_live->setChecked(live);
         m_live->setText(live ? tr("Stop") : tr("Live"));
+        m_live->setIcon(icon(live ? Icon::Stop : Icon::Play, live ? QColor(Qt::white) : theme().text, 15));
         updateEnabled();
     });
     updateAe();
     updateEnabled();
+}
+
+void CameraPanel::setStatus(const QString &text, const char *role)
+{
+    m_status->setText(text);
+    m_status->setObjectName(QString::fromLatin1(role));
+    // an object name change needs the style re-evaluated
+    m_status->style()->unpolish(m_status);
+    m_status->style()->polish(m_status);
+    m_status->setVisible(!text.isEmpty());
 }
 
 void CameraPanel::refreshCameras()
@@ -238,7 +265,9 @@ bool CameraPanel::connectCamera(int index)
                         "Tools → Install / repair camera driver.")
                          .arg(err),
                      15000);
-        m_info->setText(tr("Error: %1").arg(err));
+        m_info->clear();
+        setStatus(tr("Could not connect"), "StatusError");
+        m_info->setText(err);
         updateEnabled();
         return false;
     }
@@ -251,6 +280,7 @@ bool CameraPanel::connectCamera(int index)
     cam->setExposure(S.exposureMs);
     cam->setGain(S.gain);
     syncFromCamera();
+    setStatus(tr("Connected"), "StatusOk");
     emit message(tr("Connected: %1").arg(QString::fromStdString(m_cameras[size_t(index)].name)), 4000);
     emit cameraChanged();
     return true;
@@ -262,18 +292,33 @@ void CameraPanel::syncFromCamera()
     m_resolution->clear();
     if (!cam) {
         m_info->clear();
+        m_canSetExposure = m_canSetGain = true;
+        setStatus(tr("Not connected"), "Hint");
         updateEnabled();
         return;
     }
     for (const auto &r : cam->resolutions())
         m_resolution->addItem(QString::fromStdString(r.label));
     m_resolution->setCurrentIndex(cam->resolutionIndex());
+    m_canSetExposure = cam->canSetExposure();
+    m_canSetGain = cam->canSetGain();
     const Range er = cam->exposureRange();
     m_exposure->setRange(er.min, std::min(er.max, 60000.0));
     m_exposure->setValue(cam->exposure());
     const Range gr = cam->gainRange();
     m_gain->setRange(gr.min, std::max(gr.min + 0.01, gr.max));
     m_gain->setValue(cam->gain());
+    // A camera without manual control (a UVC camera on macOS, for instance)
+    // must not offer sliders and auto exposure that cannot do anything.
+    const QString noManual = tr("This camera controls its own exposure; DM Imaging cannot set it.");
+    m_exposure->setToolTip(m_canSetExposure ? QString() : noManual);
+    m_gain->setToolTip(m_canSetGain ? tr("Amplifies the signal but also the noise. Prefer a longer exposure; keep the "
+                                         "gain at 1×.")
+                                    : noManual);
+    m_autoExposure->setEnabled(m_canSetExposure);
+    m_aeOnce->setEnabled(m_canSetExposure);
+    m_aeTarget->setEnabledControls(m_canSetExposure && m_autoExposure->isChecked());
+    m_aeGain->setEnabled(m_canSetExposure && m_canSetGain);
     QStringList lines;
     for (const auto &[k, v] : cam->details())
         lines << QStringLiteral("%1: %2").arg(QString::fromStdString(k), QString::fromStdString(v));

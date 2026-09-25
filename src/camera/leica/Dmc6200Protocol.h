@@ -4,7 +4,7 @@
 // PID 0x30E0. The protocol was reconstructed from USB traces; see
 // docs/DMC6200_PROTOCOL.md.
 //
-// Transport (interface 0, WinUSB):
+// Transport (interface 0; WinUSB on Windows, libusb on macOS/Linux):
 //   EP 0x01 bulk OUT  command channel
 //   EP 0x81 bulk IN   command responses
 //   EP 0x82 intr IN   64-byte "frame ready" events
@@ -15,7 +15,7 @@
 // Command response: u16 cmd, u16 payloadLen, u16 status, u16 tag, payload
 // (tag varies per firmware boot: 0x7BBB, 0x3B3A, ...)
 
-#include "camera/usb/WinUsbDevice.h"
+#include "camera/usb/UsbDevice.h"
 
 #include <cstdint>
 #include <memory>
@@ -92,7 +92,7 @@ class Protocol {
 public:
     ~Protocol();
 
-    static std::vector<std::string> findDevices();
+    static std::vector<usb::DeviceId> findDevices();
     bool open(const std::string &path, std::string &error);
     void close();
     bool isOpen() const { return m_dev != nullptr; }
@@ -124,10 +124,10 @@ public:
         std::lock_guard<std::mutex> l(m_errMutex);
         return m_error;
     }
-    usb::WinUsbDevice *device() { return m_dev.get(); }
+    usb::Device *device() { return m_dev.get(); }
 
 private:
-    std::unique_ptr<usb::WinUsbDevice> m_dev;
+    std::unique_ptr<usb::Device> m_dev;
     std::mutex m_cmdMutex;
     mutable std::mutex m_errMutex;
     std::string m_error;

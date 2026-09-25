@@ -10,9 +10,11 @@
 #include "ui/CompareWindow.h"
 #include "ui/GalleryWidget.h"
 #include "ui/HistogramWidget.h"
+#include "ui/Icons.h"
 #include "ui/ImageView.h"
 #include "ui/MicroscopePanel.h"
 #include "ui/Overlays.h"
+#include "ui/PlatformUi.h"
 #include "ui/ProcessPage.h"
 #include "ui/SettingsDialog.h"
 #include "ui/Theme.h"
@@ -50,6 +52,10 @@
 namespace lm {
 
 namespace {
+// Wide enough for the longest control label in every platform font (the
+// interface font is larger on macOS and Linux than on Windows).
+constexpr int kPanelWidth = 340;
+
 QScrollArea *panelScroll(QWidget *content, int minWidth)
 {
     auto *sa = new QScrollArea;
@@ -87,16 +93,28 @@ MainWindow::MainWindow()
     top->setObjectName(QStringLiteral("TopBar"));
     auto *tl = new QHBoxLayout(top);
     tl->setContentsMargins(0, 0, 8, 0);
+    auto *logo = new QLabel(top);
+    logo->setPixmap(QIcon(QStringLiteral(":/icons/app.png")).pixmap(20, 20));
+    logo->setContentsMargins(12, 0, 0, 0);
+    tl->addWidget(logo);
     auto *title = new QLabel(QStringLiteral("DM Imaging"), top);
     title->setObjectName(QStringLiteral("AppTitle"));
     tl->addWidget(title);
     m_tabs = new QTabBar(top);
     m_tabs->setObjectName(QStringLiteral("WorkflowTabs"));
-    m_tabs->addTab(tr("ACQUIRE"));
-    m_tabs->addTab(tr("BROWSE"));
-    m_tabs->addTab(tr("PROCESS"));
+    // The three stages of the workflow, left to right, each with its own symbol.
+    m_tabs->addTab(icon(Icon::Acquire, theme().subText, 16), tr("Acquire"));
+    m_tabs->addTab(icon(Icon::Browse, theme().subText, 16), tr("Browse"));
+    m_tabs->addTab(icon(Icon::Process, theme().subText, 16), tr("Process"));
+    m_tabs->setTabToolTip(0, tr("Live image, camera settings and capturing (Alt+1)"));
+    m_tabs->setTabToolTip(1, tr("The images you have captured (Alt+2)"));
+    m_tabs->setTabToolTip(2, tr("Measure, quantify and export one image (Alt+3)"));
+    m_tabs->setIconSize(QSize(16, 16));
     m_tabs->setDrawBase(false);
     m_tabs->setExpanding(false);
+    // without this the bar shrinks to its minimum and hides tabs behind arrows
+    m_tabs->setUsesScrollButtons(false);
+    m_tabs->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Preferred);
     tl->addWidget(m_tabs);
     tl->addStretch();
     cl->addWidget(top);
@@ -247,11 +265,13 @@ QWidget *MainWindow::buildAcquirePage()
     m_cameraPanel = new CameraPanel(m_engine, left);
     m_scopePanel = new MicroscopePanel(&m_scope, left);
     m_capturePanel = new CapturePanel(left);
+    // workflow order: connect the camera, set the exposure, pick the objective,
+    // then capture
     ll->addWidget(m_cameraPanel);
-    ll->addWidget(m_capturePanel);
     ll->addWidget(m_scopePanel);
+    ll->addWidget(m_capturePanel);
     ll->addStretch();
-    split->addWidget(panelScroll(left, 300));
+    split->addWidget(panelScroll(left, kPanelWidth));
 
     // centre: image + gallery
     auto *centre = new QSplitter(Qt::Vertical, split);
@@ -266,7 +286,8 @@ QWidget *MainWindow::buildAcquirePage()
     centre->setSizes({800, 150});
     split->addWidget(centre);
 
-    // right: histogram/overlays/info + colour
+    // right: what the image is (histogram, focus, information), then how it is
+    // adjusted, then what is drawn over it
     auto *right = new QWidget;
     auto *rl = new QVBoxLayout(right);
     rl->setContentsMargins(0, 0, 0, 0);
@@ -276,13 +297,14 @@ QWidget *MainWindow::buildAcquirePage()
     m_colorPanel->setSettings(S.color);
     rl->addWidget(m_toolsPanel);
     rl->addWidget(m_colorPanel);
+    rl->addWidget(m_toolsPanel->overlaysPanel());
     rl->addStretch();
-    split->addWidget(panelScroll(right, 300));
+    split->addWidget(panelScroll(right, kPanelWidth));
 
     split->setStretchFactor(0, 0);
     split->setStretchFactor(1, 1);
     split->setStretchFactor(2, 0);
-    split->setSizes({320, 1100, 320});
+    split->setSizes({kPanelWidth + 20, 1100, kPanelWidth + 20});
     lay->addWidget(split);
 
     // --- wiring of the panels
@@ -522,21 +544,22 @@ void MainWindow::buildMenus()
 {
     // ---- File
     QMenu *file = menuBar()->addMenu(tr("&File"));
-    file->addAction(tr("&Open image…"), QKeySequence::Open, this, [this] {
+    file->addAction(icon(Icon::Open), tr("&Open image…"), QKeySequence::Open, this, [this] {
         m_tabs->setCurrentIndex(2);
         m_process->openDialog();
     });
-    file->addAction(tr("Save image &as…"), QKeySequence::SaveAs, m_process, &ProcessPage::saveAs);
-    file->addAction(tr("&Export with overlays…"), QKeySequence(tr("Ctrl+E")), m_process, &ProcessPage::exportWithOverlays);
-    file->addAction(tr("&Print…"), QKeySequence::Print, m_process, &ProcessPage::print);
+    file->addAction(icon(Icon::Save), tr("Save image &as…"), QKeySequence::SaveAs, m_process, &ProcessPage::saveAs);
+    file->addAction(icon(Icon::Export), tr("&Export with overlays…"), QKeySequence(tr("Ctrl+E")), m_process,
+                    &ProcessPage::exportWithOverlays);
+    file->addAction(icon(Icon::Print), tr("&Print…"), QKeySequence::Print, m_process, &ProcessPage::print);
     file->addSeparator();
-    file->addAction(tr("Open image &folder"), this, [] {
+    file->addAction(icon(Icon::Folder), tr("Open image &folder"), this, [] {
         const QString d = AppSettings::instance().capture.folder;
         QDir().mkpath(d);
         QDesktopServices::openUrl(QUrl::fromLocalFile(d));
     });
     file->addSeparator();
-    file->addAction(tr("&Settings…"), QKeySequence(tr("Ctrl+,")), this, [this] {
+    auto *settingsAction = file->addAction(icon(Icon::Settings), tr("&Settings…"), QKeySequence(tr("Ctrl+,")), this, [this] {
         SettingsDialog dlg(this);
         connect(&dlg, &SettingsDialog::themeChanged, this, [](const QString &t) { applyTheme(*qApp, t); });
         if (dlg.exec() == QDialog::Accepted) {
@@ -544,8 +567,11 @@ void MainWindow::buildMenus()
             updateNextName();
         }
     });
+    // macOS moves these two into the application menu; the roles tell Qt which.
+    settingsAction->setMenuRole(QAction::PreferencesRole);
     file->addSeparator();
-    file->addAction(tr("E&xit"), QKeySequence::Quit, this, &QWidget::close);
+    auto *quitAction = file->addAction(tr("E&xit"), QKeySequence::Quit, this, &QWidget::close);
+    quitAction->setMenuRole(QAction::QuitRole);
 
     // ---- Acquire
     QMenu *acq = menuBar()->addMenu(tr("&Acquire"));
@@ -565,13 +591,16 @@ void MainWindow::buildMenus()
         m_engine->setFrozen(!m_engine->isFrozen());
         m_view->setStatusText(m_engine->isFrozen() ? tr("FROZEN") : QString());
     });
-    acq->addAction(tr("&Capture image"), QKeySequence(Qt::Key_F9), this, &MainWindow::capture);
+    acq->addAction(icon(Icon::Capture), tr("&Capture image"), QKeySequence(Qt::Key_F9), this, &MainWindow::capture);
     acq->addSeparator();
-    acq->addAction(tr("Auto &white balance"), QKeySequence(Qt::Key_F7), this, [this] { m_engine->requestWhiteBalance(); });
-    acq->addAction(tr("Auto &exposure once"), QKeySequence(Qt::Key_F8), this, [this] { m_engine->requestAutoExposureOnce(); });
-    acq->addAction(tr("Auto &levels"), this, [this] { m_engine->requestAutoLevels(); });
+    acq->addAction(icon(Icon::Wand), tr("Auto &white balance"), QKeySequence(Qt::Key_F7), this,
+                   [this] { m_engine->requestWhiteBalance(); });
+    acq->addAction(icon(Icon::Wand), tr("Auto &exposure once"), QKeySequence(Qt::Key_F8), this,
+                   [this] { m_engine->requestAutoExposureOnce(); });
+    acq->addAction(icon(Icon::Wand), tr("Auto &levels"), this, [this] { m_engine->requestAutoLevels(); });
     acq->addSeparator();
     QMenu *obj = acq->addMenu(tr("&Objective"));
+    obj->setIcon(icon(Icon::Objective));
     for (int i = 0; i < 9; ++i) {
         auto *a = obj->addAction(QString(), QKeySequence(QStringLiteral("Ctrl+%1").arg(i + 1)), this, [this, i] {
             if (i < m_scope.objectives.size()) {
@@ -594,32 +623,32 @@ void MainWindow::buildMenus()
 
     // ---- View
     QMenu *view = menuBar()->addMenu(tr("&View"));
-    view->addAction(tr("&Acquire"), QKeySequence(tr("Alt+1")), this, [this] { m_tabs->setCurrentIndex(0); });
-    view->addAction(tr("&Browse"), QKeySequence(tr("Alt+2")), this, [this] { m_tabs->setCurrentIndex(1); });
-    view->addAction(tr("&Process"), QKeySequence(tr("Alt+3")), this, [this] { m_tabs->setCurrentIndex(2); });
+    view->addAction(icon(Icon::Acquire), tr("&Acquire"), QKeySequence(tr("Alt+1")), this, [this] { m_tabs->setCurrentIndex(0); });
+    view->addAction(icon(Icon::Browse), tr("&Browse"), QKeySequence(tr("Alt+2")), this, [this] { m_tabs->setCurrentIndex(1); });
+    view->addAction(icon(Icon::Process), tr("&Process"), QKeySequence(tr("Alt+3")), this, [this] { m_tabs->setCurrentIndex(2); });
     view->addSeparator();
-    view->addAction(tr("Zoom to &fit"), QKeySequence(tr("Ctrl+0")), m_view, &ImageView::zoomFit);
-    view->addAction(tr("Actual &pixels"), QKeySequence(tr("Ctrl+Alt+0")), m_view, &ImageView::zoomActual);
-    view->addAction(tr("Zoom &in"), QKeySequence::ZoomIn, m_view, &ImageView::zoomIn);
-    view->addAction(tr("Zoom &out"), QKeySequence::ZoomOut, m_view, &ImageView::zoomOut);
+    view->addAction(icon(Icon::ZoomFit), tr("Zoom to &fit"), QKeySequence(tr("Ctrl+0")), m_view, &ImageView::zoomFit);
+    view->addAction(icon(Icon::ZoomActual), tr("Actual &pixels"), QKeySequence(tr("Ctrl+Alt+0")), m_view, &ImageView::zoomActual);
+    view->addAction(icon(Icon::ZoomIn), tr("Zoom &in"), QKeySequence::ZoomIn, m_view, &ImageView::zoomIn);
+    view->addAction(icon(Icon::ZoomOut), tr("Zoom &out"), QKeySequence::ZoomOut, m_view, &ImageView::zoomOut);
     view->addSeparator();
-    view->addAction(tr("F&ull screen"), QKeySequence(Qt::Key_F11), this, [this] {
+    view->addAction(icon(Icon::Fullscreen), tr("F&ull screen"), QKeySequence(Qt::Key_F11), this, [this] {
         isFullScreen() ? showNormal() : showFullScreen();
     });
 
     // ---- Process
     QMenu *proc = menuBar()->addMenu(tr("&Process"));
-    proc->addAction(tr("&Multifocus from files…"), this, [this] {
+    proc->addAction(icon(Icon::Multifocus), tr("&Multifocus from files…"), this, [this] {
         m_tabs->setCurrentIndex(2);
         m_process->multifocusFromFiles();
     });
-    proc->addAction(tr("&Stitch images from files…"), this, [this] {
+    proc->addAction(icon(Icon::Stitch), tr("&Stitch images from files…"), this, [this] {
         m_tabs->setCurrentIndex(2);
         m_process->stitchFromFiles();
     });
-    proc->addAction(tr("Set &pixel size…"), m_process, &ProcessPage::setCalibration);
+    proc->addAction(icon(Icon::Calibrate), tr("Set &pixel size…"), m_process, &ProcessPage::setCalibration);
     proc->addSeparator();
-    proc->addAction(tr("&Compare two images…"), QKeySequence(tr("Ctrl+K")), this, [this] {
+    proc->addAction(icon(Icon::Compare), tr("&Compare two images…"), QKeySequence(tr("Ctrl+K")), this, [this] {
         auto *w = new CompareWindow(this);
         if (m_process->hasImage() && !m_process->currentPath().isEmpty())
             w->openLeft(m_process->currentPath());
@@ -628,31 +657,56 @@ void MainWindow::buildMenus()
 
     // ---- Tools
     QMenu *tools = menuBar()->addMenu(tr("&Tools"));
-    tools->addAction(tr("&Calibrate objective with stage micrometer…"), this, &MainWindow::startCalibration);
-    tools->addAction(tr("Install / repair camera &driver…"), this, [this] {
-        const QString r = installCameraDriver(this);
-        if (!r.isEmpty())
-            showMessage(r, 6000);
-        m_cameraPanel->refreshCameras();
-    });
-    tools->addAction(tr("&Search cameras"), m_cameraPanel, &CameraPanel::refreshCameras);
+    tools->addAction(icon(Icon::Calibrate), tr("&Calibrate objective with stage micrometer…"), this,
+                     &MainWindow::startCalibration);
+    if (cameraAccessSetupAvailable())
+        tools->addAction(icon(Icon::Chip), cameraAccessSetupLabel(), this, [this] {
+            const QString r = setUpCameraAccess(this);
+            if (!r.isEmpty())
+                showMessage(r, 6000);
+            m_cameraPanel->refreshCameras();
+        });
+    tools->addAction(icon(Icon::Refresh), tr("&Search cameras"), m_cameraPanel, &CameraPanel::refreshCameras);
 
     // ---- Help
     QMenu *help = menuBar()->addMenu(tr("&Help"));
-    help->addAction(tr("&Keyboard shortcuts"), this, [this] {
-        QMessageBox::information(this, tr("Keyboard shortcuts"),
-                                 tr("F5\tLive on/off\nF6\tFreeze\nF7\tAuto white balance\nF8\tAuto exposure once\n"
-                                    "F9 / Space\tCapture image\nF11\tFull screen\nCtrl+1, Ctrl+2, …\tSelect objective (one per objective)\n"
-                                    "Alt+1/2/3\tAcquire / Browse / Process\nMouse wheel\tZoom\nDouble click\tFit / 100%\n"
-                                    "Ctrl+drag, middle drag\tPan\n0 / 1 / 2\tFit / 100% / 200%\nDel\tDelete annotation\n"
-                                    "Ctrl+Z / Ctrl+Y\tUndo / redo annotations"));
+    help->addAction(icon(Icon::Help), tr("&Keyboard shortcuts"), this, [this] {
+        // Qt maps Ctrl to Command on macOS; name the key the user's keyboard has.
+#ifdef Q_OS_MACOS
+        const QString ctrl = QStringLiteral("Cmd");
+#else
+        const QString ctrl = QStringLiteral("Ctrl");
+#endif
+        QMessageBox box(QMessageBox::NoIcon, tr("Keyboard shortcuts"),
+                        tr("<b>Camera</b><br>"
+                           "F5 — live on/off · F6 — freeze<br>"
+                           "F7 — auto white balance · F8 — auto exposure once<br>"
+                           "F9 or Space — capture image<br>"
+                           "%1+1, %1+2, … — select objective<br><br>"
+                           "<b>Workspaces</b><br>"
+                           "Alt+1 / Alt+2 / Alt+3 — Acquire / Browse / Process · F11 — full screen<br><br>"
+                           "<b>Image</b><br>"
+                           "Mouse wheel over the image — zoom<br>"
+                           "Double click — fit / 100%%  ·  0 / 1 / 2 — fit / 100%% / 200%%<br>"
+                           "%1+drag or middle drag — pan<br>"
+                           "%1+0 — fit · %1++ / %1+- — zoom in / out<br><br>"
+                           "<b>Annotations</b><br>"
+                           "Del — delete selected · %1+Z / %1+Y — undo / redo<br><br>"
+                           "<b>Side panels</b><br>"
+                           "The mouse wheel scrolls the panel. It never changes a setting: "
+                           "drag a slider, type in the box, or use the arrow keys.")
+                            .arg(ctrl),
+                        QMessageBox::Ok, this);
+        box.setTextFormat(Qt::RichText);
+        box.exec();
     });
-    help->addAction(tr("&About DM Imaging"), this, [this] {
+    auto *aboutAction = help->addAction(icon(Icon::Info), tr("&About DM Imaging"), this, [this] {
         QString cam;
         if (m_engine->camera())
             cam = QString::fromStdString(m_engine->camera()->info().name);
         AboutDialog(cam, this).exec();
     });
+    aboutAction->setMenuRole(QAction::AboutRole); // macOS: into the application menu
 }
 
 void MainWindow::startup()

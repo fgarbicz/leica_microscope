@@ -2,6 +2,9 @@
 
 #include "app/AppSettings.h"
 #include "ui/CollapsibleSection.h"
+#include "ui/Icons.h"
+#include "ui/PanelGroup.h"
+#include "ui/Theme.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -39,10 +42,18 @@ CapturePanel::CapturePanel(QWidget *parent) : QWidget(parent)
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(0);
 
+    // Two groups: what every capture does, and the modes that run over several
+    // frames. The four advanced modes used to sit as siblings next to "Acquire
+    // image", which made the panel read as one long list of equals.
+    auto *capGroup = new PanelGroup(tr("Capture"), Icon::Capture, theme().groupCapture, this);
+    root->addWidget(capGroup);
+
     // --- capture
-    auto *cap = new CollapsibleSection(tr("Acquire image"), this);
+    auto *cap = capGroup->addSection(tr("Acquire image"), Icon::Capture);
     m_capture = new QPushButton(tr("Capture image"), this);
     m_capture->setObjectName(QStringLiteral("PrimaryButton"));
+    m_capture->setIcon(icon(Icon::Capture, QColor(Qt::white), 18));
+    m_capture->setIconSize(QSize(18, 18));
     m_capture->setToolTip(tr("Acquire and save an image (F9 or Space)"));
     m_capture->setMinimumHeight(42);
     cap->contentLayout()->addWidget(m_capture);
@@ -66,19 +77,19 @@ CapturePanel::CapturePanel(QWidget *parent) : QWidget(parent)
     m_average->setToolTip(tr("Average several frames to reduce noise"));
     form->addRow(tr("Averaging"), m_average);
     cap->contentLayout()->addLayout(form);
-    root->addWidget(cap);
 
     // --- files
-    auto *files = new CollapsibleSection(tr("Save settings"), this, false);
+    auto *files = capGroup->addSection(tr("Saving"), Icon::Folder, false);
     auto *ff = new QFormLayout;
     ff->setContentsMargins(0, 0, 0, 0);
     auto *folderRow = new QHBoxLayout;
     m_folder = new QLineEdit(this);
     auto *browse = new QToolButton(this);
     browse->setText(QStringLiteral("…"));
+    browse->setToolTip(tr("Choose the folder"));
     auto *open = new QToolButton(this);
-    open->setText(QStringLiteral("↗"));
-    open->setToolTip(tr("Open folder in Explorer"));
+    open->setIcon(icon(Icon::Folder, theme().subText, 15));
+    open->setToolTip(tr("Open the image folder"));
     folderRow->addWidget(m_folder, 1);
     folderRow->addWidget(browse);
     folderRow->addWidget(open);
@@ -111,10 +122,13 @@ CapturePanel::CapturePanel(QWidget *parent) : QWidget(parent)
     files->contentLayout()->addWidget(m_openProcess);
     m_prompt = new QCheckBox(tr("Ask for magnification and name after capture"), this);
     files->contentLayout()->addWidget(m_prompt);
-    root->addWidget(files);
+
+    // Everything below acquires a series rather than a single image.
+    auto *advGroup = new PanelGroup(tr("Advanced acquisition"), Icon::Multifocus, theme().groupCapture, this);
+    root->addWidget(advGroup);
 
     // --- multifocus
-    auto *mf = new CollapsibleSection(tr("Multifocus (extended depth of field)"), this, false);
+    auto *mf = advGroup->addSection(tr("Multifocus (depth of field)"), Icon::Multifocus, false);
     auto *mfHint = new QLabel(tr("Start, then slowly turn the fine focus through the whole thickness of the "
                                  "specimen. Every sharp detail is merged into one image."), this);
     mfHint->setObjectName(QStringLiteral("Hint"));
@@ -122,7 +136,9 @@ CapturePanel::CapturePanel(QWidget *parent) : QWidget(parent)
     mf->contentLayout()->addWidget(mfHint);
     auto *mfRow = new QHBoxLayout;
     m_mfStart = new QPushButton(tr("Start"), this);
+    m_mfStart->setIcon(icon(Icon::Play, theme().text, 15));
     m_mfFinish = new QPushButton(tr("Finish && save"), this);
+    m_mfFinish->setIcon(icon(Icon::Check, theme().success, 15));
     m_mfCancel = new QPushButton(tr("Cancel"), this);
     mfRow->addWidget(m_mfStart);
     mfRow->addWidget(m_mfFinish);
@@ -131,10 +147,9 @@ CapturePanel::CapturePanel(QWidget *parent) : QWidget(parent)
     m_mfStatus = new QLabel(this);
     m_mfStatus->setObjectName(QStringLiteral("Hint"));
     mf->contentLayout()->addWidget(m_mfStatus);
-    root->addWidget(mf);
 
     // --- mosaic
-    auto *mo = new CollapsibleSection(tr("Live image builder (stitching)"), this, false);
+    auto *mo = advGroup->addSection(tr("Live image builder (stitching)"), Icon::Stitch, false);
     auto *moHint = new QLabel(tr("Start, then move the stage slowly. New areas are added automatically "
                                  "when the stage rests; overlap with already scanned areas."), this);
     moHint->setObjectName(QStringLiteral("Hint"));
@@ -142,7 +157,9 @@ CapturePanel::CapturePanel(QWidget *parent) : QWidget(parent)
     mo->contentLayout()->addWidget(moHint);
     auto *moRow = new QHBoxLayout;
     m_moStart = new QPushButton(tr("Start"), this);
+    m_moStart->setIcon(icon(Icon::Play, theme().text, 15));
     m_moFinish = new QPushButton(tr("Finish && save"), this);
+    m_moFinish->setIcon(icon(Icon::Check, theme().success, 15));
     m_moCancel = new QPushButton(tr("Cancel"), this);
     moRow->addWidget(m_moStart);
     moRow->addWidget(m_moFinish);
@@ -158,10 +175,9 @@ CapturePanel::CapturePanel(QWidget *parent) : QWidget(parent)
     m_moStatus = new QLabel(this);
     m_moStatus->setObjectName(QStringLiteral("Hint"));
     mo->contentLayout()->addWidget(m_moStatus);
-    root->addWidget(mo);
 
     // --- video
-    auto *vid = new CollapsibleSection(tr("Video recording"), this, false);
+    auto *vid = advGroup->addSection(tr("Video recording"), Icon::Video, false);
     auto *vf = new QFormLayout;
     vf->setContentsMargins(0, 0, 0, 0);
     m_videoFps = new QSpinBox(this);
@@ -171,7 +187,8 @@ CapturePanel::CapturePanel(QWidget *parent) : QWidget(parent)
     vid->contentLayout()->addLayout(vf);
     m_videoScale = new QCheckBox(tr("Include scale bar"), this);
     vid->contentLayout()->addWidget(m_videoScale);
-    m_record = new QPushButton(tr("● Record video"), this);
+    m_record = new QPushButton(tr("Record video"), this);
+    m_record->setIcon(icon(Icon::Video, theme().live, 15));
     m_record->setCheckable(true);
     m_record->setObjectName(QStringLiteral("LiveButton"));
     vid->contentLayout()->addWidget(m_record);
@@ -179,10 +196,9 @@ CapturePanel::CapturePanel(QWidget *parent) : QWidget(parent)
     m_recStatus->setObjectName(QStringLiteral("Hint"));
     m_recStatus->setWordWrap(true);
     vid->contentLayout()->addWidget(m_recStatus);
-    root->addWidget(vid);
 
     // --- time lapse
-    auto *tl = new CollapsibleSection(tr("Time lapse"), this, false);
+    auto *tl = advGroup->addSection(tr("Time lapse"), Icon::Timelapse, false);
     auto *tf = new QFormLayout;
     tf->setContentsMargins(0, 0, 0, 0);
     m_tlInterval = new QDoubleSpinBox(this);
@@ -196,12 +212,12 @@ CapturePanel::CapturePanel(QWidget *parent) : QWidget(parent)
     tf->addRow(tr("Count"), m_tlCount);
     tl->contentLayout()->addLayout(tf);
     m_tlStart = new QPushButton(tr("Start time lapse"), this);
+    m_tlStart->setIcon(icon(Icon::Timelapse, theme().text, 15));
     m_tlStart->setCheckable(true);
     tl->contentLayout()->addWidget(m_tlStart);
     m_tlStatus = new QLabel(this);
     m_tlStatus->setObjectName(QStringLiteral("Hint"));
     tl->contentLayout()->addWidget(m_tlStatus);
-    root->addWidget(tl);
 
     refreshFromSettings();
     setMultifocusRunning(false, 0);

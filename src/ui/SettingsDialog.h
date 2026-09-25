@@ -31,7 +31,4 @@ public:
     explicit AboutDialog(const QString &cameraInfo, QWidget *parent = nullptr);
 };
 
-// Runs driver/install_driver.ps1 elevated; returns a short status message.
-QString installCameraDriver(QWidget *parent);
-
 } // namespace lm

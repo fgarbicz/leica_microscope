@@ -2,7 +2,10 @@
 
 #include "app/Calibration.h"
 #include "ui/CollapsibleSection.h"
+#include "ui/Icons.h"
 #include "ui/Overlays.h"
+#include "ui/PanelGroup.h"
+#include "ui/Theme.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -15,6 +18,7 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QStyle>
 #include <QTableWidget>
 #include <QUuid>
 #include <QVBoxLayout>
@@ -27,7 +31,10 @@ MicroscopePanel::MicroscopePanel(MicroscopeConfig *config, QWidget *parent) : QW
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(0);
 
-    auto *sec = new CollapsibleSection(tr("Microscope"), this);
+    auto *group = new PanelGroup(tr("Microscope"), Icon::Microscope, theme().groupMicroscope, this);
+    root->addWidget(group);
+
+    auto *sec = group->addSection(tr("Objective & calibration"), Icon::Objective);
     auto *form = new QFormLayout;
     form->setContentsMargins(0, 0, 0, 0);
     m_objective = new QComboBox(this);
@@ -45,7 +52,7 @@ MicroscopePanel::MicroscopePanel(MicroscopeConfig *config, QWidget *parent) : QW
     m_scaleInfo->setObjectName(QStringLiteral("Hint"));
     m_scaleInfo->setWordWrap(true);
     sec->contentLayout()->addWidget(m_scaleInfo);
-    auto *remember = new QCheckBox(tr("Remember exposure && white balance per objective"), this);
+    auto *remember = new QCheckBox(tr("Remember settings per objective"), this);
     remember->setChecked(m_cfg->rememberSettings);
     remember->setToolTip(tr("Each objective keeps its own exposure, gain and white balance; they are restored when you switch."));
     connect(remember, &QCheckBox::toggled, this, [this](bool on) {
@@ -55,20 +62,23 @@ MicroscopePanel::MicroscopePanel(MicroscopeConfig *config, QWidget *parent) : QW
     sec->contentLayout()->addWidget(remember);
     auto *row = new QHBoxLayout;
     auto *edit = new QPushButton(tr("Objectives…"), this);
+    edit->setIcon(icon(Icon::Settings, theme().text, 15));
     auto *cal = new QPushButton(tr("Calibrate…"), this);
+    cal->setIcon(icon(Icon::Calibrate, theme().text, 15));
     cal->setToolTip(tr("Measure a stage micrometer to calibrate the current objective"));
     row->addWidget(edit);
     row->addWidget(cal);
     sec->contentLayout()->addLayout(row);
-    root->addWidget(sec);
+    m_section = sec;
 
-    auto *sh = new CollapsibleSection(tr("Shading correction"), this, false);
+    auto *sh = group->addSection(tr("Shading correction"), Icon::Shading, false);
     auto *hint = new QLabel(tr("Move to an empty area of the slide (or remove it), keep the illumination "
                                "as for imaging, then acquire a reference. Stored per objective."), this);
     hint->setObjectName(QStringLiteral("Hint"));
     hint->setWordWrap(true);
     sh->contentLayout()->addWidget(hint);
     auto *acq = new QPushButton(tr("Acquire reference"), this);
+    acq->setIcon(icon(Icon::Shading, theme().text, 15));
     sh->contentLayout()->addWidget(acq);
     m_shading = new QCheckBox(tr("Apply shading correction"), this);
     m_shading->setToolTip(tr("Evens out uneven illumination (darker corners), using the reference of this objective"));
@@ -78,8 +88,9 @@ MicroscopePanel::MicroscopePanel(MicroscopeConfig *config, QWidget *parent) : QW
     m_shadingInfo->setWordWrap(true);
     sh->contentLayout()->addWidget(m_shadingInfo);
     m_shadingClear = new QPushButton(tr("Delete reference"), this);
+    m_shadingClear->setObjectName(QStringLiteral("DangerButton"));
+    m_shadingClear->setIcon(icon(Icon::Trash, theme().danger, 15));
     sh->contentLayout()->addWidget(m_shadingClear);
-    root->addWidget(sh);
 
     connect(m_objective, &QComboBox::activated, this, [this](int i) {
         m_cfg->current = i;
@@ -111,14 +122,25 @@ void MicroscopePanel::refresh()
     m_adapter->setValue(m_cfg->adapterFactor);
     if (m_cfg->objectives.isEmpty()) {
         m_scaleInfo->clear();
+        if (m_section)
+            m_section->setSummary(QString());
         return;
     }
     const auto &o = m_cfg->currentObjective();
     const double um = m_cfg->umPerPixel();
+    const bool calibrated = o.calibratedUmPerPixel > 0;
     m_scaleInfo->setText(tr("%1 µm/pixel (%2)\nOptical resolution ≈ %3")
                              .arg(um, 0, 'g', 4)
-                             .arg(o.calibratedUmPerPixel > 0 ? tr("calibrated") : tr("nominal"))
+                             .arg(calibrated ? tr("calibrated") : tr("nominal"))
                              .arg(formatLength(m_cfg->resolutionLimitUm())));
+    // An uncalibrated objective is the single most common cause of a wrong
+    // scale bar, so say so where it cannot be missed.
+    m_scaleInfo->setObjectName(QString::fromLatin1(calibrated ? "Hint" : "StatusWarn"));
+    m_scaleInfo->style()->unpolish(m_scaleInfo);
+    m_scaleInfo->style()->polish(m_scaleInfo);
+    // the collapsed section still shows which objective is selected
+    if (m_section)
+        m_section->setSummary(tr("%1× · %2 µm/px").arg(o.magnification).arg(um, 0, 'g', 3));
 }
 
 void MicroscopePanel::setShadingStatus(const QString &text, bool available)

@@ -1,5 +1,9 @@
 #include "BrowsePage.h"
 
+#include "ui/Icons.h"
+#include "ui/PlatformUi.h"
+#include "ui/Theme.h"
+
 #include "app/AppSettings.h"
 #include "io/ImageIO.h"
 #include "ui/BatchExportDialog.h"
@@ -45,21 +49,21 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
     root->setSpacing(0);
 
     auto *tb = new QToolBar(this);
-    auto *up = tb->addAction(tr("▲ Up"));
-    auto *refreshAct = tb->addAction(tr("⟳ Refresh"));
+    auto *up = tb->addAction(icon(Icon::Up, theme().subText, 16), tr("Up"));
+    auto *refreshAct = tb->addAction(icon(Icon::Refresh, theme().subText, 16), tr("Refresh"));
     tb->addSeparator();
-    auto *openProc = tb->addAction(tr("Open in Process"));
-    auto *openExt = tb->addAction(tr("Open externally"));
-    auto *reveal = tb->addAction(tr("Show in Explorer"));
+    auto *openProc = tb->addAction(icon(Icon::Process, theme().subText, 16), tr("Open in Process"));
+    auto *openExt = tb->addAction(icon(Icon::Open, theme().subText, 16), tr("Open externally"));
+    auto *reveal = tb->addAction(icon(Icon::Folder, theme().subText, 16), revealActionText());
     tb->addSeparator();
-    auto *exportAct = tb->addAction(tr("Export…"));
+    auto *exportAct = tb->addAction(icon(Icon::Export, theme().subText, 16), tr("Export…"));
     exportAct->setToolTip(tr("Export the selected images (JPEG/PNG, scale bar, annotations, resize)"));
-    auto *ihc = tb->addAction(tr("IHC quantification…"));
+    auto *ihc = tb->addAction(icon(Icon::Ihc, theme().subText, 16), tr("IHC quantification…"));
     ihc->setToolTip(tr("DAB quantification of the selected images (or all images in the folder), exported as CSV"));
-    auto *compare = tb->addAction(tr("Compare…"));
+    auto *compare = tb->addAction(icon(Icon::Compare, theme().subText, 16), tr("Compare…"));
     compare->setToolTip(tr("Compare two selected images side by side"));
     auto *rename = tb->addAction(tr("Rename…"));
-    auto *del = tb->addAction(tr("Delete…"));
+    auto *del = tb->addAction(icon(Icon::Trash, theme().danger, 16), tr("Delete…"));
     root->addWidget(tb);
 
     m_header = new QLabel(this);
@@ -67,13 +71,8 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
     root->addWidget(m_header);
 
     auto *split = new QSplitter(Qt::Horizontal, this);
-    m_dirs = new QFileSystemModel(this);
-    m_dirs->setFilter(QDir::AllDirs | QDir::NoDotAndDotDot | QDir::Drives);
-    m_dirs->setRootPath(QString());
+    // the model is created in ensureLoaded(); see the header
     m_tree = new QTreeView(split);
-    m_tree->setModel(m_dirs);
-    for (int c = 1; c < m_dirs->columnCount(); ++c)
-        m_tree->hideColumn(c);
     m_tree->setHeaderHidden(true);
     m_tree->setMinimumWidth(200);
 
@@ -104,9 +103,7 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
     split->setSizes({220, 600, 520});
     root->addWidget(split, 1);
 
-    connect(m_tree->selectionModel(), &QItemSelectionModel::currentChanged, this, [this](const QModelIndex &i) {
-        setFolder(m_dirs->filePath(i));
-    });
+    // (the tree's selection model only exists once ensureLoaded() sets a model)
     connect(m_grid, &QListWidget::currentItemChanged, this, [this](QListWidgetItem *it) {
         if (it)
             showPreview(it->data(Qt::UserRole).toString());
@@ -132,7 +129,7 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
     connect(reveal, &QAction::triggered, this, [this] {
         const auto sel = selectedPaths();
         if (!sel.isEmpty())
-            QProcess::startDetached(QStringLiteral("explorer.exe"), {QStringLiteral("/select,"), QDir::toNativeSeparators(sel.first())});
+            revealInFileManager(sel.first());
         else
             QDesktopServices::openUrl(QUrl::fromLocalFile(m_folder));
     });
@@ -188,7 +185,7 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
         const auto sel = selectedPaths();
         if (sel.isEmpty())
             return;
-        if (QMessageBox::question(this, tr("Delete"), tr("Move %n image(s) to the recycle bin?", nullptr, int(sel.size())))
+        if (QMessageBox::question(this, tr("Delete"), tr("Move %n image(s) to the %1?", nullptr, int(sel.size())).arg(trashName()))
             != QMessageBox::Yes)
             return;
         for (const auto &p : sel) {
@@ -214,11 +211,35 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
             QApplication::clipboard()->setText(QDir::toNativeSeparators(selectedPaths().value(0)));
     });
 
-    QString start = AppSettings::instance().browseFolder;
-    if (start.isEmpty() || !QDir(start).exists())
-        start = AppSettings::instance().capture.folder;
-    QDir().mkpath(start);
-    setFolder(start);
+    // Which folder to open is decided in ensureLoaded(): even asking whether
+    // ~/Pictures/DM Imaging exists makes macOS put up a permission dialog, and
+    // that must wait until the user actually opens Browse.
+}
+
+void BrowsePage::ensureLoaded()
+{
+    if (m_loaded)
+        return;
+    m_loaded = true;
+    if (m_startFolder.isEmpty()) {
+        QString start = AppSettings::instance().browseFolder;
+        if (start.isEmpty() || !QDir(start).exists())
+            start = AppSettings::instance().capture.folder;
+        // the image folder is created by the first capture, not here
+        if (!QDir(start).exists())
+            start = QDir::homePath();
+        m_startFolder = start;
+    }
+    m_dirs = new QFileSystemModel(this);
+    m_dirs->setFilter(QDir::AllDirs | QDir::NoDotAndDotDot | QDir::Drives);
+    m_dirs->setRootPath(QString());
+    m_tree->setModel(m_dirs);
+    for (int c = 1; c < m_dirs->columnCount(); ++c)
+        m_tree->hideColumn(c);
+    connect(m_tree->selectionModel(), &QItemSelectionModel::currentChanged, this, [this](const QModelIndex &i) {
+        setFolder(m_dirs->filePath(i));
+    });
+    setFolder(m_startFolder);
 }
 
 QStringList BrowsePage::selectedPaths() const
@@ -235,6 +256,10 @@ void BrowsePage::setFolder(const QString &path)
         return;
     m_folder = QDir(path).absolutePath();
     AppSettings::instance().browseFolder = m_folder;
+    if (!m_dirs) { // not shown yet: remember it for ensureLoaded()
+        m_startFolder = m_folder;
+        return;
+    }
     const QModelIndex idx = m_dirs->index(m_folder);
     if (idx.isValid() && m_tree->currentIndex() != idx) {
         QSignalBlocker b(m_tree->selectionModel());
@@ -247,6 +272,7 @@ void BrowsePage::setFolder(const QString &path)
 
 void BrowsePage::refresh()
 {
+    ensureLoaded();
     const int gen = ++(*m_generation);
     m_grid->clear();
     const QFileInfoList files = QDir(m_folder).entryInfoList(kImageFilters, QDir::Files, QDir::Time);

@@ -2,7 +2,7 @@
 ;   ISCC /DAppVersion=1.0.0 /DStageDir=<staged files> /DOutDir=<output> installer\DMImaging.iss
 
 #ifndef AppVersion
-  #define AppVersion "1.0.0"
+  #define AppVersion "1.1.0"
 #endif
 #ifndef StageDir
   #define StageDir "..\build\package\app"

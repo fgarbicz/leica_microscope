@@ -23,6 +23,11 @@ public:
     void setFolder(const QString &path);
     QString folder() const { return m_folder; }
     void refresh();
+    // Builds the folder tree and loads the starting folder. Called the first
+    // time the page is shown, not in the constructor: on macOS listing the
+    // home directory asks the user for permission to the Pictures folder, and
+    // that must not happen while they are still on the Acquire page.
+    void ensureLoaded();
 
 signals:
     void openInProcess(const QString &path);
@@ -32,7 +37,9 @@ private:
     QStringList selectedPaths() const;
 
     QTreeView *m_tree;
-    QFileSystemModel *m_dirs;
+    QFileSystemModel *m_dirs = nullptr;
+    QString m_startFolder;
+    bool m_loaded = false;
     QListWidget *m_grid;
     ImageView *m_preview;
     QTableWidget *m_meta;

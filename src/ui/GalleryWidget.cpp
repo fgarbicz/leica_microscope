@@ -1,5 +1,7 @@
 #include "GalleryWidget.h"
 
+#include "ui/PlatformUi.h"
+
 #include "io/ImageIO.h"
 
 #include <QApplication>
@@ -105,7 +107,7 @@ void GalleryWidget::contextMenuEvent(QContextMenuEvent *e)
     QMenu m(this);
     auto *open = m.addAction(tr("Open in Process"));
     auto *ext = m.addAction(tr("Open with default application"));
-    auto *reveal = m.addAction(tr("Show in Explorer"));
+    auto *reveal = m.addAction(revealActionText());
     auto *copy = m.addAction(tr("Copy path"));
     m.addSeparator();
     auto *del = m.addAction(tr("Delete file…"));
@@ -115,11 +117,11 @@ void GalleryWidget::contextMenuEvent(QContextMenuEvent *e)
     else if (a == ext)
         QDesktopServices::openUrl(QUrl::fromLocalFile(path));
     else if (a == reveal)
-        QProcess::startDetached(QStringLiteral("explorer.exe"), {QStringLiteral("/select,"), QDir::toNativeSeparators(path)});
+        revealInFileManager(path);
     else if (a == copy)
         QApplication::clipboard()->setText(QDir::toNativeSeparators(path));
     else if (a == del) {
-        if (QMessageBox::question(this, tr("Delete"), tr("Move %1 to the recycle bin?").arg(QFileInfo(path).fileName()))
+        if (QMessageBox::question(this, tr("Delete"), tr("Move %1 to the %2?").arg(QFileInfo(path).fileName(), trashName()))
             == QMessageBox::Yes) {
             if (QFile::moveToTrash(path)) {
                 QFile::moveToTrash(path + QStringLiteral(".json"));

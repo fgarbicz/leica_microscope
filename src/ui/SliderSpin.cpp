@@ -31,7 +31,8 @@ SliderSpin::SliderSpin(const QString &label, double min, double max, int decimal
     m_spin->setDecimals(decimals);
     m_spin->setKeyboardTracking(false);
     m_spin->setSuffix(suffix);
-    m_spin->setMinimumWidth(86);
+    // wide enough for "20.000 ms" and "1.00 x" in every platform font
+    m_spin->setMinimumWidth(104);
     m_spin->setAlignment(Qt::AlignRight);
     m_spin->setSingleStep(m_log ? std::pow(10.0, -decimals) * 10 : (max - min) / 100.0);
     if (m_log)

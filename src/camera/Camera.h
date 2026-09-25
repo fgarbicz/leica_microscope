@@ -72,11 +72,17 @@ public:
     virtual Range exposureRange() const = 0;
     virtual double exposure() const = 0;
     virtual bool setExposure(double ms) = 0;
+    // Whether the exposure time can be set at all. False for a camera that
+    // only exposes automatic exposure (some UVC devices, and every UVC camera
+    // on macOS, where AVFoundation has no manual exposure API); the UI then
+    // disables the control instead of letting it do nothing.
+    virtual bool canSetExposure() const { return true; }
 
     // Analog gain as a multiplier (1.0 = unity)
     virtual Range gainRange() const = 0;
     virtual double gain() const = 0;
     virtual bool setGain(double g) = 0;
+    virtual bool canSetGain() const { return true; }
 
     // Bit depth of delivered data (8 or up to 16); setBitDepth may be unsupported.
     virtual std::vector<int> bitDepths() const { return {8}; }

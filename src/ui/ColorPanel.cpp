@@ -2,7 +2,10 @@
 
 #include "app/AppSettings.h"
 #include "ui/CollapsibleSection.h"
+#include "ui/Icons.h"
+#include "ui/PanelGroup.h"
 #include "ui/SliderSpin.h"
+#include "ui/Theme.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -26,15 +29,20 @@ ColorPanel::ColorPanel(QWidget *parent) : QWidget(parent)
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(0);
 
+    // Everything that changes how the image looks, in the order it is used:
+    // neutralise the white, correct the lamp, set the tone, then the finish.
+    auto *group = new PanelGroup(tr("Adjust"), Icon::Palette, theme().groupAdjust, this);
+    root->addWidget(group);
+
     // --- presets
-    auto *pre = new CollapsibleSection(tr("Colour"), this);
+    auto *pre = group->addSection(tr("White balance & presets"), Icon::Palette);
     auto *prow = new QHBoxLayout;
     m_presets = new QComboBox(this);
     auto *savePreset = new QToolButton(this);
-    savePreset->setText(QStringLiteral("＋"));
+    savePreset->setIcon(icon(Icon::Plus, theme().subText, 15));
     savePreset->setToolTip(tr("Save current settings as a preset"));
     auto *delPreset = new QToolButton(this);
-    delPreset->setText(QStringLiteral("－"));
+    delPreset->setIcon(icon(Icon::Minus, theme().subText, 15));
     delPreset->setToolTip(tr("Delete the selected user preset"));
     prow->addWidget(m_presets, 1);
     prow->addWidget(savePreset);
@@ -44,8 +52,10 @@ ColorPanel::ColorPanel(QWidget *parent) : QWidget(parent)
     // white balance
     auto *wbRow = new QHBoxLayout;
     auto *wbAuto = new QPushButton(tr("Auto white balance"), this);
+    wbAuto->setIcon(icon(Icon::Wand, theme().text, 15));
     wbAuto->setToolTip(tr("Neutralise the bright background of the current image (F7)"));
     auto *wbPick = new QPushButton(tr("Pick area…"), this);
+    wbPick->setIcon(icon(Icon::Pick, theme().text, 15));
     wbPick->setToolTip(tr("Drag a rectangle over an empty (white) area of the slide"));
     wbRow->addWidget(wbAuto, 1);
     wbRow->addWidget(wbPick);
@@ -57,10 +67,9 @@ ColorPanel::ColorPanel(QWidget *parent) : QWidget(parent)
         s->setDefault(1.0);
         pre->contentLayout()->addWidget(s);
     }
-    root->addWidget(pre);
 
     // --- light filter (emulates a colour filter in front of the lamp)
-    auto *filt = new CollapsibleSection(tr("Light filter"), this);
+    auto *filt = group->addSection(tr("Light filter"), Icon::Lamp);
     m_filterPresets = new QComboBox(this);
     m_filterPresets->setToolTip(tr("Emulates a colour filter in front of the lamp. A halogen lamp looks slightly "
                                    "yellow; a blue (cooling) filter gives a cleaner white background and crisper "
@@ -102,7 +111,6 @@ ColorPanel::ColorPanel(QWidget *parent) : QWidget(parent)
     filtNote->setWordWrap(true);
     filtNote->setEnabled(false);
     filt->contentLayout()->addWidget(filtNote);
-    root->addWidget(filt);
     connect(m_filterPresets, &QComboBox::activated, this, [this](int i) {
         const QVariant v = m_filterPresets->itemData(i);
         if (!v.isValid())
@@ -115,12 +123,14 @@ ColorPanel::ColorPanel(QWidget *parent) : QWidget(parent)
     });
 
     // --- tone
-    auto *tone = new CollapsibleSection(tr("Brightness & contrast"), this, false);
+    auto *tone = group->addSection(tr("Brightness & contrast"), Icon::Contrast, false);
     auto *toneRow = new QHBoxLayout;
     auto *autoBlack = new QPushButton(tr("Black balance"), this);
+    autoBlack->setIcon(icon(Icon::Wand, theme().text, 15));
     autoBlack->setToolTip(tr("Measures the camera's dark signal. Turn the lamp off (or close the light path) first. "
                              "Rarely needed."));
     auto *autoLevels = new QPushButton(tr("Auto levels"), this);
+    autoLevels->setIcon(icon(Icon::Wand, theme().text, 15));
     autoLevels->setToolTip(tr("Automatically sets the black and white points for the best contrast of this image"));
     toneRow->addWidget(autoBlack);
     toneRow->addWidget(autoLevels);
@@ -141,10 +151,9 @@ ColorPanel::ColorPanel(QWidget *parent) : QWidget(parent)
     m_contrast->setDefault(1.0);
     for (auto *s : {m_black, m_blackPoint, m_whitePoint, m_gamma, m_brightness, m_contrast})
         tone->contentLayout()->addWidget(s);
-    root->addWidget(tone);
 
     // --- colour appearance
-    auto *col = new CollapsibleSection(tr("Saturation & sharpness"), this, false);
+    auto *col = group->addSection(tr("Saturation & sharpness"), Icon::Sharpen, false);
     m_saturation = new SliderSpin(tr("Saturation"), 0.0, 3.0, 2, this);
     m_saturation->setDefault(1.0);
     m_hue = new SliderSpin(tr("Hue"), -180, 180, 0, this, false, QStringLiteral("°"));
@@ -165,8 +174,8 @@ ColorPanel::ColorPanel(QWidget *parent) : QWidget(parent)
     for (auto *c : {m_ccm, m_gray, m_invert, m_srgb})
         col->contentLayout()->addWidget(c);
     auto *reset = new QPushButton(tr("Reset all colour settings"), this);
+    reset->setIcon(icon(Icon::Reset, theme().text, 15));
     col->contentLayout()->addWidget(reset);
-    root->addWidget(col);
 
     reloadPresets();
 

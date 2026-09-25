@@ -1,33 +1,31 @@
 #pragma once
-// Windows Media Foundation backend: any UVC camera or vendor camera that ships
-// a WDM/AVStream driver (as many Leica "HD" cameras do).
+// Linux Video4Linux2 backend: any UVC camera (the counterpart of MFCamera on
+// Windows and AvfCamera on macOS).
 
 #include "camera/Camera.h"
 
 #include <atomic>
+#include <mutex>
 #include <thread>
-
-struct IMFSourceReader;
-struct IMFMediaSource;
 
 namespace lm {
 
-class MFBackend : public CameraBackend {
+class V4l2Backend : public CameraBackend {
 public:
-    std::string name() const override { return "Media Foundation"; }
+    std::string name() const override { return "Video4Linux"; }
     std::vector<CameraInfo> enumerate() override;
     std::unique_ptr<Camera> create(const CameraInfo &info) override;
 };
 
-class MFCamera : public Camera {
+class V4l2Camera : public Camera {
 public:
-    explicit MFCamera(CameraInfo info);
-    ~MFCamera() override;
+    explicit V4l2Camera(CameraInfo info);
+    ~V4l2Camera() override;
 
     CameraInfo info() const override { return m_info; }
     bool open(std::string &error) override;
     void close() override;
-    bool isOpen() const override { return m_reader != nullptr; }
+    bool isOpen() const override { return m_fd >= 0; }
 
     bool startStreaming(std::string &error) override;
     void stopStreaming() override;
@@ -51,18 +49,33 @@ public:
     bool setProperty(const std::string &key, double value) override;
     bool deliversRaw() const override { return false; }
 
+    std::vector<std::pair<std::string, std::string>> details() const override;
+
 private:
+    struct Mode {
+        uint32_t fourcc = 0;
+        int width = 0, height = 0;
+    };
+    struct Buffer {
+        void *start = nullptr;
+        size_t length = 0;
+    };
+
     void run();
-    bool configureType(int index, std::string &error);
+    bool configure(int index, std::string &error);
+    bool mapBuffers(std::string &error);
+    void unmapBuffers();
     void queryControls();
+    bool controlRange(uint32_t id, double &min, double &max, double &step, double &value) const;
 
     CameraInfo m_info;
-    IMFMediaSource *m_source = nullptr;
-    IMFSourceReader *m_reader = nullptr;
+    int m_fd = -1;
     std::vector<Resolution> m_resolutions;
-    std::vector<int> m_typeIndex; // native media type index per resolution
+    std::vector<Mode> m_modes; // one per entry of m_resolutions
+    std::vector<Buffer> m_buffers;
     int m_resIndex = 0;
-    int m_outW = 0, m_outH = 0;
+    int m_outW = 0, m_outH = 0, m_outStride = 0;
+    uint32_t m_fourcc = 0;
     std::atomic<bool> m_streaming{false};
     std::thread m_thread;
     Range m_expRange{1, 1000};
@@ -70,7 +83,8 @@ private:
     double m_exposure = 33;
     double m_gain = 1;
     bool m_hasExposure = false, m_hasGain = false;
-    long m_gainMinRaw = 0, m_gainMaxRaw = 0;
+    double m_gainMinRaw = 0, m_gainMaxRaw = 0;
+    std::string m_driver, m_card;
     mutable std::mutex m_mutex;
 };
 
