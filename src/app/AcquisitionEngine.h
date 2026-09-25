@@ -6,6 +6,7 @@
 #include "camera/Camera.h"
 #include "imaging/Analysis.h"
 #include "imaging/ColorPipeline.h"
+#include "imaging/StainAnalysis.h"
 #include "imaging/FocusStacker.h"
 #include "imaging/MosaicBuilder.h"
 #include "imaging/ShadingCorrection.h"
@@ -36,6 +37,9 @@ struct LiveStats {
     uint64_t frames = 0;
     uint64_t dropped = 0;
     double displayScale = 1.0; // displayed pixels per sensor pixel (mosaic preview < 1)
+    // live IHC analysis (when enabled): overlay of the displayed image size, DAB-positive % of tissue
+    QImage dabOverlay;
+    double dabPositive = -1.0;
 };
 
 enum class LiveMode { Normal, Multifocus, Mosaic };
@@ -88,6 +92,8 @@ public:
     void setAutoExposure(const AutoExposureSettings &s);
     AutoExposureSettings autoExposure() const;
     void setShowClipping(bool on) { m_showClipping = on; }
+    // live DAB overlay (IHC), refreshed a few times per second
+    void setLiveDab(bool on, const StainOptions &opt);
     void setPreviewQuality(bool high) { m_previewHighQuality = high; }
     // half resolution live preview (view zoomed out)
     void setPreviewHalf(bool half) { m_previewHalf = half; }
@@ -169,6 +175,11 @@ private:
     AutoExposureSettings m_ae;
     std::atomic<bool> m_aeOnce{false};
     std::atomic<bool> m_showClipping{false};
+    std::atomic<bool> m_liveDab{false};
+    StainOptions m_liveDabOptions;        // guarded by m_mutex
+    QImage m_dabOverlay;                  // processing thread only
+    double m_dabPositive = -1.0;
+    std::chrono::steady_clock::time_point m_lastDab{};
     std::atomic<bool> m_previewHighQuality{false};
     std::atomic<bool> m_previewHalf{false};
     std::atomic<bool> m_previewVisible{true};

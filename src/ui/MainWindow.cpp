@@ -314,6 +314,7 @@ QWidget *MainWindow::buildAcquirePage()
     });
     connect(m_toolsPanel, &ToolsPanel::overlaysChanged, this, [this] {
         m_engine->setShowClipping(AppSettings::instance().overlays.clipping);
+        applyLiveDab();
         m_view->update();
     });
     connect(m_toolsPanel, &ToolsPanel::focusRegionRequested, this, [this] {
@@ -640,6 +641,19 @@ void MainWindow::startup()
     onCameraChanged();
 }
 
+void MainWindow::applyLiveDab()
+{
+    // same stain colours and threshold as the IHC analysis in Process
+    const auto &S = AppSettings::instance();
+    StainOptions so;
+    so.dabThreshold = S.ihc.dabThreshold;
+    for (int c = 0; c < 3; ++c) {
+        so.vectors.h[c] = S.ihc.h[c];
+        so.vectors.dab[c] = S.ihc.dab[c];
+    }
+    m_engine->setLiveDab(S.overlays.liveDab, so);
+}
+
 void MainWindow::updatePreviewVisibility()
 {
     // the live image is only rendered at full rate when someone can see it (or a video records it)
@@ -657,6 +671,8 @@ void MainWindow::setWorkspace(int index)
 {
     m_stack->setCurrentIndex(index);
     updatePreviewVisibility();
+    if (index == 0)
+        applyLiveDab(); // stain settings may have changed in Process
     if (index == 1)
         m_browse->refresh();
 }
@@ -677,6 +693,7 @@ void MainWindow::onFrame(const QImage &img, const LiveStats &stats)
     m_lastStats = stats;
     m_view->setSensorScale(stats.displayScale);
     m_view->setImage(img);
+    m_view->setOverlayImage(stats.dabOverlay);
     if (m_recorder.isRecording())
         m_recorder.push(img, m_view->umPerPixel());
     // choose the live preview resolution from the effective zoom (sensor pixels)
@@ -755,6 +772,7 @@ void MainWindow::onCameraChanged()
     ae.target = S.aeTarget;
     m_engine->setAutoExposure(ae);
     m_engine->setShowClipping(S.overlays.clipping);
+    applyLiveDab();
     if (S.shadingEnabled)
         m_scopePanel->setShadingEnabled(true);
     // first use: white balance is still neutral -> balance on the live image

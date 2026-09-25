@@ -128,6 +128,11 @@ the DAB-positive percentage of the tissue, the areas, the intensity distribution
 pixels in red and negative tissue in blue. Adjust the *DAB positivity threshold*
 if needed, and use *Copy results* to paste a table row into Excel.
 
+**Live DAB overlay:** in *Acquire*, tick *Overlays → Live DAB overlay (IHC)* to see DAB-positive
+areas in red on the live image, with an approximate DAB-positive percentage in *Information*. It
+uses the same stain colours and threshold on a reduced image, to help choose fields and check the
+threshold; measure captured images for exact values.
+
 **Stain colours:** the analysis uses standard haematoxylin/DAB colours. For your own
 staining, open a representative image with both stains and press **Estimate stain
 colours** (Macenko method); the measured colours are used for all IHC analyses, including

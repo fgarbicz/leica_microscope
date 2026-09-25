@@ -53,6 +53,7 @@ struct OverlaySettings {
     bool crosshair = false;
     bool clipping = false;
     bool focusAssist = false;
+    bool liveDab = false;                    // live IHC (DAB) overlay
     int scaleBarPosition = 3;                // 0 TL, 1 TR, 2 BL, 3 BR
     QColor scaleBarColor = Qt::white;
     bool scaleBarBackground = true;

@@ -39,6 +39,7 @@ protected:
     void closeEvent(QCloseEvent *e) override;
     void changeEvent(QEvent *e) override;
     void updatePreviewVisibility();
+    void applyLiveDab();
     bool eventFilter(QObject *o, QEvent *e) override;
 
 private slots:

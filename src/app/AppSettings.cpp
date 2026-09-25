@@ -143,6 +143,7 @@ void AppSettings::load()
     overlays.gridDivisions = s.value(QStringLiteral("gridDiv"), 4).toInt();
     overlays.crosshair = s.value(QStringLiteral("crosshair"), false).toBool();
     overlays.clipping = s.value(QStringLiteral("clipping"), false).toBool();
+    overlays.liveDab = s.value(QStringLiteral("liveDab"), false).toBool();
     overlays.focusAssist = s.value(QStringLiteral("focusAssist"), false).toBool();
     overlays.scaleBarPosition = s.value(QStringLiteral("sbPos"), 3).toInt();
     overlays.scaleBarColor = s.value(QStringLiteral("sbColor"), QColor(Qt::white)).value<QColor>();
@@ -216,6 +217,7 @@ void AppSettings::save() const
     s.setValue(QStringLiteral("gridDiv"), overlays.gridDivisions);
     s.setValue(QStringLiteral("crosshair"), overlays.crosshair);
     s.setValue(QStringLiteral("clipping"), overlays.clipping);
+    s.setValue(QStringLiteral("liveDab"), overlays.liveDab);
     s.setValue(QStringLiteral("focusAssist"), overlays.focusAssist);
     s.setValue(QStringLiteral("sbPos"), overlays.scaleBarPosition);
     s.setValue(QStringLiteral("sbColor"), overlays.scaleBarColor);

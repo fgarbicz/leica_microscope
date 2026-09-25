@@ -228,6 +228,15 @@ ColorSettings AcquisitionEngine::colorSettings() const
     return m_color;
 }
 
+void AcquisitionEngine::setLiveDab(bool on, const StainOptions &opt)
+{
+    {
+        QMutexLocker l(&m_mutex);
+        m_liveDabOptions = opt;
+    }
+    m_liveDab = on;
+}
+
 void AcquisitionEngine::setShading(std::shared_ptr<const ShadingCorrection> sc)
 {
     {
@@ -518,6 +527,53 @@ void AcquisitionEngine::processingLoop()
                                                   int(q.bytesPerLine() / 4), 3);
                 const bool identityGeometry = !cs.flipHorizontal && !cs.flipVertical && cs.rotation % 360 == 0;
                 st.focus = focusMeasureRaw(*raw, identityGeometry ? focusRegion : Rect{});
+                if (m_liveDab) {
+                    // colour deconvolution of a reduced copy of the displayed image, ~4 times a second
+                    if (m_dabOverlay.size() != q.size() || secondsSince(m_lastDab) > 0.25) {
+                        StainOptions so;
+                        {
+                            QMutexLocker l(&m_mutex);
+                            so = m_liveDabOptions;
+                        }
+                        so.umPerPixel = 0;
+                        const int f = std::max(1, w / 480);
+                        const int sw = w / f, sh = h / f;
+                        Image16 small(sw, sh);
+                        for (int y = 0; y < sh; ++y) {
+                            uint16_t *d = small.row(y);
+                            for (int x = 0; x < sw; ++x) {
+                                int r = 0, g = 0, b = 0;
+                                for (int j = 0; j < f; ++j) {
+                                    const QRgb *s = reinterpret_cast<const QRgb *>(q.constScanLine(y * f + j)) + x * f;
+                                    for (int i = 0; i < f; ++i) {
+                                        r += qRed(s[i]);
+                                        g += qGreen(s[i]);
+                                        b += qBlue(s[i]);
+                                    }
+                                }
+                                const int n = f * f;
+                                d[x * 3 + 0] = uint16_t(r * 257 / n);
+                                d[x * 3 + 1] = uint16_t(g * 257 / n);
+                                d[x * 3 + 2] = uint16_t(b * 257 / n);
+                            }
+                        }
+                        const StainResult sr = analyzeStains(small, so);
+                        QImage mask(sw, sh, QImage::Format_ARGB32);
+                        for (int y = 0; y < sh; ++y) {
+                            QRgb *d = reinterpret_cast<QRgb *>(mask.scanLine(y));
+                            const uint8_t *mk = sr.mask.data() + size_t(y) * size_t(sw);
+                            for (int x = 0; x < sw; ++x)
+                                d[x] = mk[x] == 2 ? qRgba(200, 20, 20, 120) : 0;
+                        }
+                        m_dabOverlay = mask.scaled(w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+                        m_dabPositive = sr.positiveFraction * 100;
+                        m_lastDab = Clock::now();
+                    }
+                    st.dabOverlay = m_dabOverlay;
+                    st.dabPositive = m_dabPositive;
+                } else if (!m_dabOverlay.isNull()) {
+                    m_dabOverlay = QImage();
+                }
                 const auto now = Clock::now();
                 if (profile) {
                     static double a = 0, b = 0, c = 0;

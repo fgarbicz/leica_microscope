@@ -59,7 +59,11 @@ ToolsPanel::ToolsPanel(QWidget *parent) : QWidget(parent)
     auto *clip = new QCheckBox(tr("Show over/under exposure"), this);
     clip->setChecked(O.clipping);
     clip->setToolTip(tr("Saturated pixels red, black pixels blue"));
-    for (auto *c : {scale, grid, cross, clip})
+    auto *dab = new QCheckBox(tr("Live DAB overlay (IHC)"), this);
+    dab->setChecked(O.liveDab);
+    dab->setToolTip(tr("Marks DAB-positive areas red in the live image and shows the DAB-positive percentage "
+                       "(same stain colours and threshold as Process → IHC quantification)"));
+    for (auto *c : {scale, grid, cross, clip, dab})
         os->contentLayout()->addWidget(c);
     auto *of = new QFormLayout;
     of->setContentsMargins(0, 4, 0, 0);
@@ -110,6 +114,7 @@ ToolsPanel::ToolsPanel(QWidget *parent) : QWidget(parent)
     connect(grid, &QCheckBox::toggled, this, [changed](bool on) { AppSettings::instance().overlays.grid = on; changed(); });
     connect(cross, &QCheckBox::toggled, this, [changed](bool on) { AppSettings::instance().overlays.crosshair = on; changed(); });
     connect(clip, &QCheckBox::toggled, this, [changed](bool on) { AppSettings::instance().overlays.clipping = on; changed(); });
+    connect(dab, &QCheckBox::toggled, this, [changed](bool on) { AppSettings::instance().overlays.liveDab = on; changed(); });
     connect(fa, &QCheckBox::toggled, this, [changed](bool on) { AppSettings::instance().overlays.focusAssist = on; changed(); });
     connect(pos, &QComboBox::activated, this, [changed](int i) { AppSettings::instance().overlays.scaleBarPosition = i; changed(); });
     connect(len, &QDoubleSpinBox::valueChanged, this, [changed](double v) { AppSettings::instance().overlays.scaleBarLengthUm = v; changed(); });
@@ -142,6 +147,8 @@ void ToolsPanel::setStats(const LiveStats &s, double umPerPixel)
                        .arg(s.saturated * 100, 0, 'f', 2);
     if (umPerPixel > 0)
         info += tr("\nField of view %1 × %2").arg(formatLength(s.width * umPerPixel), formatLength(s.height * umPerPixel));
+    if (s.dabPositive >= 0)
+        info += tr("\nDAB positive ≈ %1 % (live preview)").arg(s.dabPositive, 0, 'f', 0);
     m_info->setText(info);
 }
 
