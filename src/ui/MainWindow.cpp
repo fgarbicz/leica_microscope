@@ -971,6 +971,16 @@ void MainWindow::capture()
     } else {
         m_capturePanel->setBusy(true);
         m_engine->capture(c.averageFrames);
+        // watchdog: if the camera stops delivering frames the capture would wait forever
+        // (pixel-shift captures have their own per-shot timeouts)
+        const int serial = ++m_captureSerial;
+        const double frameMs = std::max(40.0, m_engine->camera()->exposure());
+        const int timeoutMs = int(std::max(1, c.averageFrames) * frameMs) + 5000;
+        QTimer::singleShot(timeoutMs, this, [this, serial] {
+            if (m_capturing && serial == m_captureSerial && !m_engine->isBusy())
+                m_engine->cancelPendingCapture(tr("No image from the camera. Check that the live image is running "
+                                                  "(F5) and try again."));
+        });
     }
 }
 

@@ -490,8 +490,14 @@ void ProcessPage::updateInfo()
 void ProcessPage::saveAnnotations()
 {
     if (!m_path.isEmpty() && m_dirtyAnnotations) {
-        m_layer->saveSidecar(m_path);
-        m_dirtyAnnotations = false;
+        // on failure (read-only or network folder) keep them marked unsaved and say so
+        if (m_layer->saveSidecar(m_path))
+            m_dirtyAnnotations = false;
+        else
+            emit message(tr("Annotations could not be saved next to %1 (is the folder read-only?). "
+                            "Use Save as… to keep them with a copy of the image.")
+                             .arg(QFileInfo(m_path).fileName()),
+                         12000);
     }
 }
 

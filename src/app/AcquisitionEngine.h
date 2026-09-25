@@ -132,6 +132,9 @@ public:
     // engine renders a new display image only when the previous one was taken).
     void frameConsumed() { m_uiBusy = false; }
 
+    // Abandons a capture that is still waiting for frames (emits captureFailed); thread safe
+    void cancelPendingCapture(const QString &reason);
+
 signals:
     void frameReady(const QImage &display, const lm::LiveStats &stats);
     void cameraError(const QString &message);
@@ -160,7 +163,6 @@ private:
     std::shared_ptr<Camera> m_camera;
     std::array<double, 9> m_cameraMatrix{1, 0, 0, 0, 1, 0, 0, 0, 1}; // guarded by m_mutex
     std::shared_ptr<Camera> cameraRef() const;
-    void cancelPendingCapture(const QString &reason);
     QThreadPool m_jobs; // capture / reconstruction jobs (joined on shutdown)
 
     mutable QMutex m_mutex;
