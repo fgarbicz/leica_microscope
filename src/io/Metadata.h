@@ -30,6 +30,7 @@ struct ImageMetadata {
     double wbRed = 1, wbGreen = 1, wbBlue = 1;
     double gamma = 1, saturation = 1, blackLevel = 0;
     bool shadingCorrected = false;
+    QString colorCorrection;      // e.g. "camera matrix", "off"; empty = not recorded (older files)
     QString sample;              // user fields
     QString operatorName;
     QString notes;

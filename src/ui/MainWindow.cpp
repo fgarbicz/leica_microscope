@@ -957,6 +957,14 @@ ImageMetadata MainWindow::currentMetadata(const CaptureResult &r) const
     m.saturation = cs.saturation;
     m.blackLevel = cs.blackLevel;
     m.shadingCorrected = m_engine->shadingEnabled() && m_engine->shading();
+    {
+        static const std::array<double, 9> identity{1, 0, 0, 0, 1, 0, 0, 0, 1};
+        m.colorCorrection = !cs.colorCorrection            ? QStringLiteral("off")
+                            : cs.cameraMatrix == identity ? QStringLiteral("none (camera has no calibration)")
+                                                          : QStringLiteral("camera matrix (%1)").arg(QString::fromStdString(
+                                                                m_engine->camera() ? m_engine->camera()->colorMatrixName()
+                                                                                   : std::string()));
+    }
     m.sample = S.capture.sample;
     m.operatorName = S.capture.operatorName;
     return m;

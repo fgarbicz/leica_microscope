@@ -50,6 +50,7 @@ public:
 
     std::vector<ShotMode> shotModes() const override;
     std::array<double, 9> colorMatrix() const override;
+    std::string colorMatrixName() const override { return "IMX174, 3200 K halogen, Jenoptik calibration"; }
     bool captureShots(int modeIndex, std::vector<RawFramePtr> &shots, std::string &error,
                       const std::function<void(int, int)> &progress = {}) override;
 

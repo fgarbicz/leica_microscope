@@ -31,6 +31,8 @@ QJsonObject ImageMetadata::toJson() const
     o["saturation"] = saturation;
     o["blackLevel"] = blackLevel;
     o["shadingCorrected"] = shadingCorrected;
+    if (!colorCorrection.isEmpty())
+        o["colorCorrection"] = colorCorrection;
     o["sample"] = sample;
     o["operator"] = operatorName;
     o["notes"] = notes;
@@ -67,6 +69,7 @@ ImageMetadata ImageMetadata::fromJson(const QJsonObject &o)
     m.saturation = o["saturation"].toDouble(1);
     m.blackLevel = o["blackLevel"].toDouble(0);
     m.shadingCorrected = o["shadingCorrected"].toBool();
+    m.colorCorrection = o["colorCorrection"].toString();
     m.sample = o["sample"].toString();
     m.operatorName = o["operator"].toString();
     m.notes = o["notes"].toString();
@@ -112,6 +115,7 @@ QList<QPair<QString, QString>> ImageMetadata::describe() const
     add(QObject::tr("Frames averaged"), averagedFrames > 1 ? QString::number(averagedFrames) : QString());
     add(QObject::tr("White balance"), QStringLiteral("R %1  G %2  B %3").arg(wbRed, 0, 'f', 3).arg(wbGreen, 0, 'f', 3).arg(wbBlue, 0, 'f', 3));
     add(QObject::tr("Shading correction"), shadingCorrected ? QObject::tr("applied") : QObject::tr("off"));
+    add(QObject::tr("Colour correction"), colorCorrection.isEmpty() ? QObject::tr("not recorded (older version)") : colorCorrection);
     add(QObject::tr("Sample"), sample);
     add(QObject::tr("Operator"), operatorName);
     add(QObject::tr("Notes"), notes);
