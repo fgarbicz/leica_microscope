@@ -89,6 +89,7 @@ BatchExportDialog::BatchExportDialog(const QStringList &files, QWidget *parent) 
         m_quality->setEnabled(FileFormat(m_format->currentData().toInt()) == FileFormat::Jpeg);
     });
     connect(bb, &QDialogButtonBox::accepted, this, &BatchExportDialog::run);
+    connect(m_status, &QLabel::linkActivated, this, [](const QString &url) { QDesktopServices::openUrl(QUrl(url)); });
     connect(bb, &QDialogButtonBox::rejected, this, [this] {
         if (m_running)
             m_cancel = true;
@@ -170,13 +171,12 @@ void BatchExportDialog::run()
     }
     m_running = false;
     m_start->setEnabled(true);
-    m_status->setText(tr("%1 exported, %2 failed%3 — <a href=\"open\">open folder</a>")
+    m_status->setText(tr("%1 exported, %2 failed%3 — <a href=\"%4\">open folder</a>")
                           .arg(ok)
                           .arg(failed)
-                          .arg(m_cancel ? tr(" (cancelled)") : QString()));
+                          .arg(m_cancel ? tr(" (cancelled)") : QString())
+                          .arg(QUrl::fromLocalFile(outDir).toString()));
     m_status->setTextFormat(Qt::RichText);
-    connect(m_status, &QLabel::linkActivated, this, [outDir] { QDesktopServices::openUrl(QUrl::fromLocalFile(outDir)); },
-            Qt::UniqueConnection);
 }
 
 } // namespace lm

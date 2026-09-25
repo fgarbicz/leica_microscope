@@ -6,6 +6,7 @@
 #include "ui/Annotations.h"
 #include "ui/Overlays.h"
 
+#include <QAbstractTextDocumentLayout>
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
@@ -21,8 +22,11 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPainter>
+#include <QPdfWriter>
+#include <QTextDocument>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QTableWidget>
 #include <QThread>
@@ -31,6 +35,7 @@
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
 
+#include <algorithm>
 #include <cmath>
 
 namespace lm {
@@ -145,6 +150,9 @@ BatchIhcDialog::BatchIhcDialog(const QStringList &files, QWidget *parent) : QDia
     m_start = bb->addButton(tr("Analyse"), QDialogButtonBox::AcceptRole);
     m_export = bb->addButton(tr("Export CSV…"), QDialogButtonBox::ActionRole);
     m_copy = bb->addButton(tr("Copy table"), QDialogButtonBox::ActionRole);
+    m_pdf = bb->addButton(tr("PDF report…"), QDialogButtonBox::ActionRole);
+    m_pdf->setToolTip(tr("Report with settings, summary, results table and every image next to its overlay"));
+    m_pdf->setEnabled(false);
     bb->addButton(QDialogButtonBox::Close);
     m_export->setEnabled(false);
     m_copy->setEnabled(false);
@@ -160,6 +168,8 @@ BatchIhcDialog::BatchIhcDialog(const QStringList &files, QWidget *parent) : QDia
     });
     connect(bb, &QDialogButtonBox::accepted, this, &BatchIhcDialog::run);
     connect(m_export, &QPushButton::clicked, this, &BatchIhcDialog::exportCsv);
+    connect(m_pdf, &QPushButton::clicked, this, &BatchIhcDialog::exportPdf);
+    connect(m_status, &QLabel::linkActivated, this, [](const QString &url) { QDesktopServices::openUrl(QUrl(url)); });
     // tab separated for pasting into Excel
     connect(m_copy, &QPushButton::clicked, this, [this] { QApplication::clipboard()->setText(QString(csv()).replace(QLatin1Char(','), QLatin1Char('\t'))); });
     connect(bb, &QDialogButtonBox::rejected, this, [this] {
@@ -185,6 +195,7 @@ void BatchIhcDialog::run()
     m_start->setEnabled(false);
     m_export->setEnabled(false);
     m_copy->setEnabled(false);
+    m_pdf->setEnabled(false);
     m_rows.clear();
     m_table->setRowCount(0);
     m_progress->setValue(0);
@@ -249,7 +260,7 @@ void BatchIhcDialog::run()
             row.meanDabPositive = r.meanDabPositive;
             if (r.tissuePixels == 0)
                 row.error = tr("no tissue found");
-            if (saveOverlays) {
+            {
                 QImage ov = overlayImage(img, r);
                 if (!region.isNull()) {
                     // outline the analysed regions
@@ -270,6 +281,11 @@ void BatchIhcDialog::run()
                                 p.drawPolygon(QPolygonF(a.pts));
                         }
                 }
+                // thumbnails for the PDF report
+                row.overlayThumb = ov.scaledToWidth(std::min(900, ov.width()), Qt::SmoothTransformation);
+                row.thumb = toQImage8(img).scaledToWidth(std::min(900, img.width), Qt::SmoothTransformation);
+                if (!saveOverlays)
+                    return row;
                 SaveOptions so;
                 so.format = FileFormat::Jpeg;
                 so.sixteenBit = false;
@@ -295,6 +311,7 @@ void BatchIhcDialog::run()
     m_start->setEnabled(true);
     m_export->setEnabled(!m_rows.empty());
     m_copy->setEnabled(!m_rows.empty());
+    m_pdf->setEnabled(!m_rows.empty());
 
     std::vector<double> pos, hs;
     int failed = 0;
@@ -318,11 +335,9 @@ void BatchIhcDialog::run()
                  .arg(mean(hs), 0, 'f', 0)
                  .arg(stddev(hs), 0, 'f', 0);
     if (saveOverlays)
-        s += QStringLiteral(" — <a href=\"open\">%1</a>").arg(tr("open overlay folder"));
+        s += QStringLiteral(" — <a href=\"%1\">%2</a>").arg(QUrl::fromLocalFile(outDir).toString(), tr("open overlay folder"));
     m_status->setTextFormat(Qt::RichText);
     m_status->setText(s);
-    connect(m_status, &QLabel::linkActivated, this, [outDir] { QDesktopServices::openUrl(QUrl::fromLocalFile(outDir)); },
-            Qt::UniqueConnection);
 }
 
 void BatchIhcDialog::addRow(const Row &r)
@@ -388,6 +403,230 @@ QString BatchIhcDialog::csv() const
                    .arg(r.meanDabPositive, 0, 'f', 4)
                    .arg(q(r.error));
     return out;
+}
+
+QString BatchIhcDialog::stainDescription() const
+{
+    const auto &ih = AppSettings::instance().ihc;
+    auto vec = [](const double v[3]) {
+        return QStringLiteral("%1 / %2 / %3").arg(v[0], 0, 'f', 3).arg(v[1], 0, 'f', 3).arg(v[2], 0, 'f', 3);
+    };
+    const QString vectors = tr("H %1, DAB %2 (optical density R / G / B)").arg(vec(ih.h), vec(ih.dab));
+    return ih.customVectors ? tr("estimated from %1: %2").arg(ih.vectorSource.toHtmlEscaped(), vectors)
+                            : tr("standard haematoxylin-DAB (Ruifrok & Johnston): %1").arg(vectors);
+}
+
+void BatchIhcDialog::exportPdf()
+{
+    if (m_rows.empty())
+        return;
+    const QString def = QFileInfo(m_files.value(0)).dir().filePath(QStringLiteral("ihc_report.pdf"));
+    const QString path = QFileDialog::getSaveFileName(this, tr("Save IHC report"), def, tr("PDF (*.pdf)"));
+    if (path.isEmpty())
+        return;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    QTextDocument doc;
+    doc.setDefaultStyleSheet(QStringLiteral(
+        "body { font-family: 'Segoe UI', Arial; font-size: 9pt; color: #202020; }"
+        "h1 { font-size: 16pt; color: #1b4f8a; margin-bottom: 2px; }"
+        "h2 { font-size: 12pt; color: #1b4f8a; margin-top: 14px; }"
+        "h3 { font-size: 10pt; margin-top: 12px; margin-bottom: 2px; }"
+        "td, th { padding: 3px 5px; }"
+        "th { background-color: #e4ebf3; text-align: left; }"
+        ".num { text-align: right; }"
+        ".muted { color: #707070; }"));
+
+    std::vector<double> pos, hs;
+    for (const auto &r : m_rows)
+        if (r.tissueArea > 0) {
+            pos.push_back(r.positivePct);
+            hs.push_back(r.hScore);
+        }
+    auto median = [](std::vector<double> v) {
+        if (v.empty())
+            return 0.0;
+        std::sort(v.begin(), v.end());
+        return v.size() % 2 ? v[v.size() / 2] : 0.5 * (v[v.size() / 2 - 1] + v[v.size() / 2]);
+    };
+    auto minmax = [](const std::vector<double> &v) {
+        return v.empty() ? std::pair<double, double>{0, 0}
+                         : std::pair<double, double>{*std::min_element(v.begin(), v.end()),
+                                                     *std::max_element(v.begin(), v.end())};
+    };
+
+    QString h;
+    h += QStringLiteral("<h1>%1</h1>").arg(tr("IHC quantification report (DAB)"));
+    h += QStringLiteral("<p class='muted'>%1 &middot; %2 &middot; %3</p>")
+             .arg(QLocale().toString(QDateTime::currentDateTime(), QLocale::LongFormat),
+                  QDir::toNativeSeparators(QFileInfo(m_files.value(0)).absolutePath()).toHtmlEscaped(),
+                  tr("DM Imaging %1").arg(QApplication::applicationVersion()));
+
+    h += QStringLiteral("<h2>%1</h2><table>").arg(tr("Method"));
+    auto kv = [&](const QString &k, const QString &v) {
+        h += QStringLiteral("<tr><td><b>%1</b></td><td>%2</td></tr>").arg(k, v);
+    };
+    kv(tr("Colour deconvolution"), stainDescription());
+    kv(tr("DAB positivity threshold"), tr("%1 OD; intensity classes: weak &lt; 0.35 &le; moderate &lt; 0.6 &le; strong")
+                                           .arg(m_threshold->value(), 0, 'f', 2));
+    kv(tr("H-score"), tr("1 &times; %weak + 2 &times; %moderate + 3 &times; %strong, of the tissue area (0–300)"));
+    kv(tr("Region"), m_useRegions->isChecked() ? tr("rectangle / ellipse / area annotations where present, else whole image")
+                                               : tr("whole image"));
+    h += QStringLiteral("</table>");
+
+    const auto pm = minmax(pos), hm = minmax(hs);
+    h += QStringLiteral("<h2>%1</h2><table>").arg(tr("Summary"));
+    kv(tr("Images analysed"), QString::number(pos.size()) + (pos.size() != m_rows.size()
+                                                                 ? tr(" (%1 without tissue or failed)").arg(m_rows.size() - pos.size())
+                                                                 : QString()));
+    kv(tr("DAB positive"), tr("mean %1 % &plusmn; %2 (SD), median %3 %, range %4–%5 %")
+                              .arg(mean(pos), 0, 'f', 1)
+                              .arg(stddev(pos), 0, 'f', 1)
+                              .arg(median(pos), 0, 'f', 1)
+                              .arg(pm.first, 0, 'f', 1)
+                              .arg(pm.second, 0, 'f', 1));
+    kv(tr("H-score"), tr("mean %1 &plusmn; %2 (SD), median %3, range %4–%5")
+                         .arg(mean(hs), 0, 'f', 0)
+                         .arg(stddev(hs), 0, 'f', 0)
+                         .arg(median(hs), 0, 'f', 0)
+                         .arg(hm.first, 0, 'f', 0)
+                         .arg(hm.second, 0, 'f', 0));
+    h += QStringLiteral("</table>");
+
+    const bool anyNote = std::any_of(m_rows.begin(), m_rows.end(), [](const Row &r) { return !r.error.isEmpty(); });
+    // "N PLAN 40x/0.65" -> "40x/0.65"
+    auto shortObjective = [](const QString &o) {
+        const int i = o.indexOf(QRegularExpression(QStringLiteral("[0-9.]+x")));
+        return i > 0 ? o.mid(i) : o;
+    };
+    h += QStringLiteral("<h2>%1</h2><table cellspacing='0' border='0.5' width='100%'>").arg(tr("Results"));
+    h += QStringLiteral("<tr><th>%1</th><th>%2</th><th>%3</th><th class='num'>%4</th><th class='num'>%5</th>"
+                        "<th class='num'>%6</th><th class='num'>%7</th><th class='num'>%8</th>%9</tr>")
+             .arg(tr("Image"), tr("Objective"), tr("Region"), tr("Tissue"), tr("DAB+ %"), tr("Weak / mod. / strong %"),
+                  tr("H-score"), tr("Mean DAB OD"), anyNote ? QStringLiteral("<th>%1</th>").arg(tr("Note")) : QString());
+    for (const auto &r : m_rows) {
+        const QString tissue = r.umPerPixel > 0 ? formatArea(r.tissueArea) : tr("%1 px").arg(qint64(r.tissueArea));
+        h += QStringLiteral("<tr><td style='white-space:nowrap'>%1</td><td style='white-space:nowrap'>%2</td><td style='white-space:nowrap'>%3</td><td class='num' style='white-space:nowrap'>%4</td><td class='num'><b>%5</b></td>"
+                            "<td class='num' style='white-space:nowrap'>%6 / %7 / %8</td><td class='num'><b>%9</b></td><td class='num'>%10</td>%11</tr>")
+                 .arg(r.file.toHtmlEscaped(), shortObjective(r.objective).toHtmlEscaped(), r.region.toHtmlEscaped(),
+                      tissue.toHtmlEscaped())
+                 .arg(r.positivePct, 0, 'f', 1)
+                 .arg(r.weakPct, 0, 'f', 1)
+                 .arg(r.moderatePct, 0, 'f', 1)
+                 .arg(r.strongPct, 0, 'f', 1)
+                 .arg(r.hScore, 0, 'f', 0)
+                 .arg(r.meanDabPositive, 0, 'f', 3)
+                 .arg(anyNote ? QStringLiteral("<td>%1</td>").arg(r.error.toHtmlEscaped()) : QString());
+    }
+    h += QStringLiteral("</table>");
+
+    QPdfWriter pdf(path);
+    pdf.setTitle(tr("IHC quantification report"));
+    pdf.setCreator(QStringLiteral("DM Imaging"));
+    pdf.setPageSize(QPageSize(QPageSize::A4));
+    pdf.setPageMargins(QMarginsF(15, 15, 15, 12), QPageLayout::Millimeter);
+    pdf.setResolution(300);
+    QPainter p(&pdf);
+    const double mm = pdf.resolution() / 25.4;
+    const double footer = 6 * mm;
+    const QRectF content(0, 0, pdf.width(), pdf.height() - footer);
+    int pageNo = 1;
+    auto drawFooter = [&] {
+        p.save();
+        QFont f(QStringLiteral("Segoe UI"), 7);
+        p.setFont(f);
+        p.setPen(QColor(120, 120, 120));
+        p.drawText(QRectF(0, content.bottom() + 2 * mm, content.width(), footer - 2 * mm), Qt::AlignLeft | Qt::AlignVCenter,
+                   tr("DM Imaging — IHC quantification report"));
+        p.drawText(QRectF(0, content.bottom() + 2 * mm, content.width(), footer - 2 * mm), Qt::AlignRight | Qt::AlignVCenter,
+                   tr("Page %1").arg(pageNo));
+        p.restore();
+    };
+    auto newPage = [&] {
+        drawFooter();
+        pdf.newPage();
+        ++pageNo;
+    };
+
+    // text part: laid out by QTextDocument at the printer resolution, painted page by page
+    doc.documentLayout()->setPaintDevice(&pdf);
+    doc.setPageSize(content.size());
+    doc.setHtml(QStringLiteral("<html><body>") + h + QStringLiteral("</body></html>"));
+    const int textPages = doc.pageCount();
+    double y = 0;
+    for (int i = 0; i < textPages; ++i) {
+        if (i)
+            newPage();
+        p.save();
+        p.translate(0, -i * content.height());
+        doc.drawContents(&p, QRectF(0, i * content.height(), content.width(), content.height()));
+        p.restore();
+    }
+    // space used on the last text page
+    y = doc.documentLayout()->documentSize().height() - (textPages - 1) * content.height() + 6 * mm;
+
+    // image part: each block (title + image + overlay) is kept on one page
+    QFont titleFont(QStringLiteral("Segoe UI"), 10, QFont::Bold), infoFont(QStringLiteral("Segoe UI"), 8);
+    const double gap = 4 * mm, imgW = (content.width() - gap) / 2;
+    const double titleH = 7 * mm;
+    auto sectionTitle = [&] {
+        p.setFont(QFont(QStringLiteral("Segoe UI"), 12, QFont::Bold));
+        p.setPen(QColor(0x1b, 0x4f, 0x8a));
+        p.drawText(QRectF(0, y, content.width(), 8 * mm), Qt::AlignLeft | Qt::AlignVCenter, tr("Images"));
+        y += 8 * mm;
+        p.setFont(infoFont);
+        p.setPen(QColor(110, 110, 110));
+        p.drawText(QRectF(0, y, content.width(), 6 * mm), Qt::AlignLeft | Qt::AlignVCenter,
+                   tr("Left: image. Right: analysis overlay (red = DAB positive, blue = negative tissue, yellow = analysed regions)."));
+        y += 8 * mm;
+    };
+    bool titled = false;
+    for (const auto &r : m_rows) {
+        if (r.thumb.isNull())
+            continue;
+        const double imgH = imgW * double(r.thumb.height()) / std::max(1, r.thumb.width());
+        const double blockH = titleH + imgH + 5 * mm;
+        const double need = blockH + (titled ? 0 : 16 * mm);
+        if (y + need > content.height()) {
+            newPage();
+            y = 0;
+        }
+        if (!titled) {
+            sectionTitle();
+            titled = true;
+        }
+        p.setFont(titleFont);
+        p.setPen(QColor(30, 30, 30));
+        const QString title = r.file;
+        p.drawText(QRectF(0, y, content.width(), titleH), Qt::AlignLeft | Qt::AlignVCenter, title);
+        const double tw = QFontMetricsF(titleFont, &pdf).horizontalAdvance(title);
+        p.setFont(infoFont);
+        p.setPen(QColor(110, 110, 110));
+        p.drawText(QRectF(tw + 3 * mm, y, content.width() - tw - 3 * mm, titleH), Qt::AlignLeft | Qt::AlignVCenter,
+                   tr("%1 · DAB+ %2 % · H-score %3%4")
+                       .arg(r.objective)
+                       .arg(r.positivePct, 0, 'f', 1)
+                       .arg(r.hScore, 0, 'f', 0)
+                       .arg(r.region.isEmpty() ? QString() : QStringLiteral(" · ") + r.region));
+        y += titleH;
+        p.setRenderHint(QPainter::SmoothPixmapTransform);
+        p.drawImage(QRectF(0, y, imgW, imgH), r.thumb);
+        p.drawImage(QRectF(imgW + gap, y, imgW, imgH), r.overlayThumb);
+        p.setPen(QPen(QColor(200, 200, 200), 0.3 * mm));
+        p.setBrush(Qt::NoBrush);
+        p.drawRect(QRectF(0, y, imgW, imgH));
+        p.drawRect(QRectF(imgW + gap, y, imgW, imgH));
+        y += imgH + 5 * mm;
+    }
+    drawFooter();
+    p.end();
+    QApplication::restoreOverrideCursor();
+    if (!QFileInfo(path).exists() || QFileInfo(path).size() == 0) {
+        m_status->setText(tr("Cannot write %1").arg(path));
+        return;
+    }
+    m_status->setTextFormat(Qt::RichText);
+    m_status->setText(tr("Report saved: <a href=\"%1\">%2</a>")
+                          .arg(QUrl::fromLocalFile(path).toString(), QDir::toNativeSeparators(path).toHtmlEscaped()));
 }
 
 void BatchIhcDialog::exportCsv()
