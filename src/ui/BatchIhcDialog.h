@@ -65,6 +65,7 @@ private:
     std::vector<Row> m_rows;
     bool m_cancel = false;
     bool m_running = false;
+    bool m_exported = false; // results saved / copied since the last run
     // settings of the last run (exports report these, not the current widget values)
     double m_runThreshold = 0.15;
     bool m_runUseRegions = true;

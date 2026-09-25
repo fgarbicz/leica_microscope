@@ -53,6 +53,23 @@ The list in Settings previews each size as it is selected.
   "20 ms · 2.0×" for the exposure.
 - The Browse and Process tool bars show a label beside each icon.
 
+**Safer acquisition and analysis.**
+- *Help → User guide* (F1) opens the user guide on every platform.
+- Exposure and gain are locked while a capture collects its frames or pixel-shift shots, and
+  auto exposure pauses, so a capture is never taken at a changing exposure.
+- A capture that receives no frames from the camera gives up with a message instead of
+  waiting forever.
+- Multifocus and live stitching build a new preview only when the display has taken the
+  previous one, so they no longer fall behind on slower PCs; thumbnails in Browse load on
+  their own threads and no longer delay saving a capture.
+- Process asks before an unsaved multifocus or stitched result is replaced or the program is
+  closed, and a new capture is not opened over it.
+- Counting nuclei on an image without a pixel size asks to set it first.
+- The batch IHC results ask before closing when nothing was exported or copied.
+- Annotations that cannot be saved next to the image (read-only folder) are reported
+  instead of silently lost.
+- The IHC panel is split into *Stained area and H-score* and *Cell counting*.
+
 **Fixes**
 - The file browser no longer reads the image folder at startup; on macOS that asked for
   permission to the Pictures folder before the user had done anything.

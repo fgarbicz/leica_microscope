@@ -102,6 +102,7 @@ private:
     int m_timelapseDone = 0;
     bool m_multifocus = false, m_mosaic = false;
     bool m_capturing = false;
+    int m_captureSerial = 0; // identifies the capture a watchdog timer belongs to
     QList<QPoint> m_calibPoints;
     QSet<QString> m_pendingSaves; // images being written in the background
     LiveStats m_lastStats;

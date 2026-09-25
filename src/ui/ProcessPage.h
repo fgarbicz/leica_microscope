@@ -31,6 +31,10 @@ public:
     void openImage(const Image16 &img, const ImageMetadata &meta, const QString &path);
     QString currentPath() const { return m_path; }
     bool hasImage() const { return !m_data.empty(); }
+    // a result built here (multifocus / stitching from files) that has no file yet
+    bool hasUnsavedResult() const { return !m_data.empty() && m_path.isEmpty(); }
+    // asks Save / Discard / Cancel for an unsaved result; true = go ahead
+    bool maybeDiscardUnsaved();
 
 public slots:
     void openDialog();

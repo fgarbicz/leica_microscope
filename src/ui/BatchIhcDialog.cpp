@@ -23,6 +23,7 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPdfWriter>
 #include <QTextDocument>
@@ -183,7 +184,11 @@ BatchIhcDialog::BatchIhcDialog(const QStringList &files, QWidget *parent) : QDia
     connect(m_pdf, &QPushButton::clicked, this, &BatchIhcDialog::exportPdf);
     connect(m_status, &QLabel::linkActivated, this, [](const QString &url) { QDesktopServices::openUrl(QUrl(url)); });
     // tab separated for pasting into Excel
-    connect(m_copy, &QPushButton::clicked, this, [this] { QApplication::clipboard()->setText(csv(QLatin1Char('\t'))); });
+    connect(m_copy, &QPushButton::clicked, this, [this] {
+        QApplication::clipboard()->setText(csv(QLatin1Char('\t')));
+        m_exported = true;
+        m_status->setText(tr("Table copied to the clipboard (paste into Excel)"));
+    });
     connect(bb, &QDialogButtonBox::rejected, this, &BatchIhcDialog::reject);
 }
 
@@ -204,6 +209,7 @@ void BatchIhcDialog::run()
     m_copy->setEnabled(false);
     m_pdf->setEnabled(false);
     m_rows.clear();
+    m_exported = false;
     m_table->setRowCount(0);
     m_progress->setValue(0);
     StainOptions opt;
@@ -309,16 +315,8 @@ void BatchIhcDialog::run()
                     AnnotationLayer layer;
                     layer.setImageSize(QSize(img.width, img.height));
                     if (layer.loadSidecar(src))
-                        for (const auto &a : layer.annotations()) {
-                            if (!isRegion(a))
-                                continue;
-                            if (a.type == Annotation::Rectangle)
-                                p.drawRect(QRectF(a.pts[0], a.pts[1]).normalized());
-                            else if (a.type == Annotation::Ellipse)
-                                p.drawEllipse(QRectF(a.pts[0], a.pts[1]).normalized());
-                            else
-                                p.drawPolygon(QPolygonF(a.pts));
-                        }
+                        for (const auto &a : layer.annotations())
+                            drawRegionShape(p, a);
                 }
                 // thumbnails for the PDF report
                 auto jpeg = [](const QImage &im) {
@@ -435,10 +433,17 @@ void BatchIhcDialog::addRow(const Row &r)
 void BatchIhcDialog::reject()
 {
     // Esc / window close during a run cancels it instead of hiding a running dialog
-    if (m_running)
+    if (m_running) {
         m_cancel = true;
-    else
-        QDialog::reject();
+        return;
+    }
+    if (!m_rows.empty() && !m_exported
+        && QMessageBox::question(this, tr("IHC quantification"),
+                                 tr("Close without saving the results? Use Export CSV…, PDF report… or Copy table to keep them."),
+                                 QMessageBox::Close | QMessageBox::Cancel, QMessageBox::Cancel)
+               != QMessageBox::Close)
+        return;
+    QDialog::reject();
 }
 
 QString BatchIhcDialog::csv(QChar sep) const
@@ -766,6 +771,7 @@ void BatchIhcDialog::exportPdf()
         return;
     }
     m_status->setTextFormat(Qt::RichText);
+    m_exported = true;
     m_status->setText(tr("Report saved: <a href=\"%1\">%2</a>")
                           .arg(QUrl::fromLocalFile(path).toString(), QDir::toNativeSeparators(path).toHtmlEscaped()));
 }
@@ -787,6 +793,7 @@ void BatchIhcDialog::exportCsv()
         m_status->setText(tr("Cannot write %1").arg(path));
         return;
     }
+    m_exported = true;
     m_status->setText(tr("Saved %1").arg(QDir::toNativeSeparators(path)));
 }
 

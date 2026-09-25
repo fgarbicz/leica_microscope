@@ -444,6 +444,9 @@ void CameraPanel::setBusy(bool busy)
 void CameraPanel::updateEnabled()
 {
     const bool open = m_engine->camera() != nullptr;
+    // exposure / gain must not change while a capture collects its frames or shots
+    for (QWidget *w : std::initializer_list<QWidget *>{m_exposure, m_gain, m_autoExposure, m_aeTarget, m_aeOnce, m_aeGain})
+        w->setEnabled(!m_busy);
     if (m_busy) {
         m_connect->setEnabled(false);
         m_live->setEnabled(false);

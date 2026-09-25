@@ -221,6 +221,12 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     ihcHint->setObjectName(QStringLiteral("Hint"));
     ihcHint->setWordWrap(true);
     ihc->contentLayout()->addWidget(ihcHint);
+    auto subHeading = [&](const QString &text) {
+        auto *l = new QLabel(QStringLiteral("<b>%1</b>").arg(text.toHtmlEscaped()), sideContent);
+        l->setContentsMargins(0, 6, 0, 0);
+        ihc->contentLayout()->addWidget(l);
+    };
+    subHeading(tr("Stained area and H-score"));
     m_dabThreshold = new SliderSpin(tr("DAB threshold (optical density)"), 0.05, 1.0, 2, sideContent);
     m_dabThreshold->setToolTip(tr("How brown a pixel must be to count as DAB-positive (optical density). Lower = more pixels positive. Default 0.15. Use the same value for all slides of a study."));
     m_dabThreshold->setValue(AppSettings::instance().ihc.dabThreshold);
@@ -285,6 +291,7 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     ihcRow->addWidget(ihcSel);
     ihc->contentLayout()->addLayout(ihcRow);
     // nucleus counting (nuclear markers such as Ki-67, p53, ER/PR)
+    subHeading(tr("Cell counting (labelling index)"));
     m_nucleusDiameter = new SliderSpin(tr("Nucleus diameter (µm)"), 3.0, 20.0, 1, sideContent);
     m_nucleusDiameter->setToolTip(tr("Typical nucleus size: about 7 µm for lymphocytes, larger for tumour cells"));
     m_nucleusDiameter->setValue(AppSettings::instance().ihc.nucleusDiameterUm);
@@ -423,8 +430,25 @@ void ProcessPage::openDialog()
         openFile(f);
 }
 
+bool ProcessPage::maybeDiscardUnsaved()
+{
+    if (!hasUnsavedResult())
+        return true;
+    const auto answer = QMessageBox::question(
+        this, tr("Unsaved image"),
+        tr("The image in Process (a multifocus or stitched result) has not been saved. Save it first?"),
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+    if (answer == QMessageBox::Save) {
+        saveAs();
+        return !m_path.isEmpty(); // saved (Save as sets the path) or cancelled
+    }
+    return answer == QMessageBox::Discard;
+}
+
 bool ProcessPage::openFile(const QString &path)
 {
+    if (!maybeDiscardUnsaved())
+        return false;
     LoadedImage li;
     QString err;
     if (!loadImage(path, li, &err)) {
@@ -499,8 +523,14 @@ void ProcessPage::updateInfo()
 void ProcessPage::saveAnnotations()
 {
     if (!m_path.isEmpty() && m_dirtyAnnotations) {
-        m_layer->saveSidecar(m_path);
-        m_dirtyAnnotations = false;
+        // on failure (read-only or network folder) keep them marked unsaved and say so
+        if (m_layer->saveSidecar(m_path))
+            m_dirtyAnnotations = false;
+        else
+            emit message(tr("Annotations could not be saved next to %1 (is the folder read-only?). "
+                            "Use Save as… to keep them with a copy of the image.")
+                             .arg(QFileInfo(m_path).fileName()),
+                         12000);
     }
 }
 
@@ -521,6 +551,24 @@ void ProcessPage::analyzeIhcImpl(bool regionOnly, bool nuclei)
 {
     if (m_data.empty())
         return;
+    if (nuclei && m_meta.umPerPixel <= 0) {
+        QMessageBox box(QMessageBox::Question, tr("Count nuclei"),
+                        tr("This image has no pixel size, so the nucleus size can only be guessed "
+                           "(0.25 µm/pixel) and the counts may be wrong."),
+                        QMessageBox::NoButton, this);
+        auto *setSize = box.addButton(tr("Set pixel size…"), QMessageBox::AcceptRole);
+        auto *anyway = box.addButton(tr("Count anyway"), QMessageBox::DestructiveRole);
+        box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(setSize);
+        box.exec();
+        if (box.clickedButton() == setSize) {
+            setCalibration();
+            if (m_meta.umPerPixel <= 0)
+                return;
+        } else if (box.clickedButton() != anyway) {
+            return;
+        }
+    }
     // region mask from the selected annotation
     QImage region;
     QString regionName = tr("whole image");
@@ -574,14 +622,8 @@ void ProcessPage::analyzeIhcImpl(bool regionOnly, bool nuclei)
                 // outline of the counted region
                 p.setPen(QPen(QColor(255, 220, 0, 200), lw));
                 for (const auto &a : m_layer->annotations())
-                    if (a.id == m_layer->selectedId() && isRegion(a)) {
-                        if (a.type == Annotation::Rectangle)
-                            p.drawRect(QRectF(a.pts[0], a.pts[1]).normalized());
-                        else if (a.type == Annotation::Ellipse)
-                            p.drawEllipse(QRectF(a.pts[0], a.pts[1]).normalized());
-                        else
-                            p.drawPolygon(QPolygonF(a.pts));
-                    }
+                    if (a.id == m_layer->selectedId())
+                        drawRegionShape(p, a);
             }
         }
         QApplication::restoreOverrideCursor();
@@ -776,6 +818,8 @@ void ProcessPage::print()
 
 void ProcessPage::multifocusFromFiles()
 {
+    if (!maybeDiscardUnsaved())
+        return;
     const QStringList files = QFileDialog::getOpenFileNames(this, tr("Select images of a focus series"),
                                                             AppSettings::instance().browseFolder, tr(kFileFilter));
     if (files.size() < 2)
@@ -807,6 +851,8 @@ void ProcessPage::multifocusFromFiles()
 
 void ProcessPage::stitchFromFiles()
 {
+    if (!maybeDiscardUnsaved())
+        return;
     const QStringList files = QFileDialog::getOpenFileNames(this, tr("Select overlapping images in acquisition order"),
                                                             AppSettings::instance().browseFolder, tr(kFileFilter));
     if (files.size() < 2)

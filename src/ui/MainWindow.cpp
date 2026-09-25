@@ -704,6 +704,25 @@ void MainWindow::buildMenus()
 
     // ---- Help
     QMenu *help = menuBar()->addMenu(tr("&Help"));
+    help->addAction(tr("&User guide"), QKeySequence(Qt::Key_F1), this, [this] {
+        // installed: <app>/docs/USER_GUIDE.html (Windows), <bundle>/Contents/Resources (macOS),
+        // <prefix>/share/doc/DMImaging (Linux); development tree: <repo>/docs/USER_GUIDE.md
+        QDir d(QCoreApplication::applicationDirPath());
+        for (int i = 0; i < 5; ++i) {
+            for (const char *name : {"docs/USER_GUIDE.html", "docs/USER_GUIDE.md", "Resources/USER_GUIDE.md",
+                                     "share/doc/DMImaging/USER_GUIDE.md"}) {
+                const QString p = d.filePath(QString::fromLatin1(name));
+                if (QFileInfo::exists(p)) {
+                    QDesktopServices::openUrl(QUrl::fromLocalFile(p));
+                    return;
+                }
+            }
+            if (!d.cdUp())
+                break;
+        }
+        QMessageBox::information(this, tr("User guide"), tr("The user guide was not found. Reinstall DM Imaging."));
+    });
+    help->addSeparator();
     help->addAction(icon(Icon::Help), tr("&Keyboard shortcuts"), this, [this] {
         // Qt maps Ctrl to Command on macOS; name the key the user's keyboard has.
 #ifdef Q_OS_MACOS
@@ -715,7 +734,7 @@ void MainWindow::buildMenus()
                         tr("<b>Camera</b><br>"
                            "F5 — live on/off · F6 — freeze<br>"
                            "F7 — auto white balance · F8 — auto exposure once<br>"
-                           "F9 or Space — capture image<br>"
+                           "F9 or Space — capture image · F1 — user guide<br>"
                            "%1+1, %1+2, … — select objective<br><br>"
                            "<b>Workspaces</b><br>"
                            "Alt+1 / Alt+2 / Alt+3 — Acquire / Browse / Process · F11 — full screen<br><br>"
@@ -1100,6 +1119,16 @@ void MainWindow::capture()
     } else {
         m_capturePanel->setBusy(true);
         m_engine->capture(c.averageFrames);
+        // watchdog: if the camera stops delivering frames the capture would wait forever
+        // (pixel-shift captures have their own per-shot timeouts)
+        const int serial = ++m_captureSerial;
+        const double frameMs = std::max(40.0, m_engine->camera()->exposure());
+        const int timeoutMs = int(std::max(1, c.averageFrames) * frameMs) + 5000;
+        QTimer::singleShot(timeoutMs, this, [this, serial] {
+            if (m_capturing && serial == m_captureSerial && !m_engine->isBusy())
+                m_engine->cancelPendingCapture(tr("No image from the camera. Check that the live image is running "
+                                                  "(F5) and try again."));
+        });
     }
 }
 
@@ -1270,8 +1299,14 @@ void MainWindow::onCaptureFinished(std::shared_ptr<CaptureResult> r)
         m_gallery->addImage(path, thumbSrc);
         showMessage(tr("Saved %1 (%2 × %3)").arg(QDir::toNativeSeparators(path)).arg(r->rendered16.width).arg(r->rendered16.height), 6000);
         if (AppSettings::instance().capture.openInProcess && !m_timelapse.isActive()) {
-            m_process->openImage(r->rendered16, meta, path);
-            m_tabs->setCurrentIndex(2);
+            if (m_process->hasUnsavedResult()) { // don't replace an unsaved result without asking
+                showMessage(tr("Saved %1 (not opened in Process: the image there has not been saved)")
+                                .arg(QFileInfo(path).fileName()),
+                            8000);
+            } else {
+                m_process->openImage(r->rendered16, meta, path);
+                m_tabs->setCurrentIndex(2);
+            }
         }
     });
 }
@@ -1374,6 +1409,10 @@ bool MainWindow::eventFilter(QObject *o, QEvent *e)
 
 void MainWindow::closeEvent(QCloseEvent *e)
 {
+    if (!m_process->maybeDiscardUnsaved()) {
+        e->ignore();
+        return;
+    }
     if (m_capturing || m_engine->isBusy()) {
         if (QMessageBox::question(this, tr("Quit"), tr("A capture is in progress. Quit anyway?")) != QMessageBox::Yes) {
             e->ignore();
