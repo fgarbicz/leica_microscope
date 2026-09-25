@@ -9,6 +9,7 @@
 
 #include <QAbstractTextDocumentLayout>
 #include <QApplication>
+#include <QBuffer>
 #include <QCheckBox>
 #include <QClipboard>
 #include <QDesktopServices>
@@ -316,8 +317,15 @@ void BatchIhcDialog::run()
                         }
                 }
                 // thumbnails for the PDF report
-                row.overlayThumb = ov.scaledToWidth(std::min(900, ov.width()), Qt::SmoothTransformation);
-                row.thumb = toQImage8(img).scaledToWidth(std::min(900, img.width), Qt::SmoothTransformation);
+                auto jpeg = [](const QImage &im) {
+                    QByteArray b;
+                    QBuffer buf(&b);
+                    buf.open(QIODevice::WriteOnly);
+                    im.scaledToWidth(std::min(900, im.width()), Qt::SmoothTransformation).save(&buf, "JPG", 88);
+                    return b;
+                };
+                row.overlayJpeg = jpeg(ov);
+                row.thumbJpeg = jpeg(toQImage8(img));
                 if (!saveOverlays)
                     return row;
                 SaveOptions so;
@@ -657,9 +665,10 @@ void BatchIhcDialog::exportPdf()
     };
     bool titled = false;
     for (const auto &r : m_rows) {
-        if (r.thumb.isNull())
+        const QImage thumb = QImage::fromData(r.thumbJpeg, "JPG"), overlayThumb = QImage::fromData(r.overlayJpeg, "JPG");
+        if (thumb.isNull())
             continue;
-        const double imgH = imgW * double(r.thumb.height()) / std::max(1, r.thumb.width());
+        const double imgH = imgW * double(thumb.height()) / std::max(1, thumb.width());
         const double blockH = titleH + imgH + 5 * mm;
         const double need = blockH + (titled ? 0 : 16 * mm);
         if (y + need > content.height()) {
@@ -687,8 +696,8 @@ void BatchIhcDialog::exportPdf()
                        .arg(r.region.isEmpty() ? QString() : QStringLiteral(" · ") + r.region));
         y += titleH;
         p.setRenderHint(QPainter::SmoothPixmapTransform);
-        p.drawImage(QRectF(0, y, imgW, imgH), r.thumb);
-        p.drawImage(QRectF(imgW + gap, y, imgW, imgH), r.overlayThumb);
+        p.drawImage(QRectF(0, y, imgW, imgH), thumb);
+        p.drawImage(QRectF(imgW + gap, y, imgW, imgH), overlayThumb);
         p.setPen(QPen(QColor(200, 200, 200), 0.3 * mm));
         p.setBrush(Qt::NoBrush);
         p.drawRect(QRectF(0, y, imgW, imgH));

@@ -3,7 +3,7 @@
 // one table row per image, exported as CSV for statistics.
 
 #include <QDialog>
-#include <QImage>
+#include <QByteArray>
 #include <QStringList>
 
 #include <vector>
@@ -31,7 +31,9 @@ public:
         double hScore = 0, meanDabPositive = 0;
         int cells = -1, positiveCells = 0;  // -1 = not counted
         double positiveCellPct = 0, cellDensity = 0;
-        QImage thumb, overlayThumb; // for the PDF report
+        // image and overlay for the PDF report, JPEG compressed (~100 KB instead of
+        // ~2 MB each, so large batches stay small in memory)
+        QByteArray thumbJpeg, overlayJpeg;
     };
 
 private:
