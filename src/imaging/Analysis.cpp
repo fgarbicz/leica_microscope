@@ -64,6 +64,99 @@ Histogram computeHistogram(const Image16 &img, int step)
     return histImpl<Image16, 8>(img, step);
 }
 
+Histogram computeHistogram32(const uint32_t *px, int width, int height, int stride, int step)
+{
+    Histogram h;
+    if (!px || width <= 0 || height <= 0)
+        return h;
+    step = std::max(1, step);
+    uint64_t sum[4] = {0, 0, 0, 0};
+    uint64_t hi = 0, lo = 0, n = 0;
+    for (int c = 0; c < 4; ++c) {
+        h.minV[c] = 255;
+        h.maxV[c] = 0;
+    }
+    for (int y = 0; y < height; y += step) {
+        const uint32_t *row = px + size_t(y) * stride;
+        for (int x = 0; x < width; x += step) {
+            const uint32_t p = row[x];
+            int v[4] = {int((p >> 16) & 0xFF), int((p >> 8) & 0xFF), int(p & 0xFF), 0};
+            v[3] = (v[0] * 54 + v[1] * 183 + v[2] * 19) >> 8;
+            for (int c = 0; c < 4; ++c) {
+                h.bins[c][v[c]]++;
+                sum[c] += v[c];
+                h.minV[c] = std::min(h.minV[c], v[c]);
+                h.maxV[c] = std::max(h.maxV[c], v[c]);
+            }
+            if (v[0] >= 254 || v[1] >= 254 || v[2] >= 254)
+                ++hi;
+            if (v[0] <= 1 && v[1] <= 1 && v[2] <= 1)
+                ++lo;
+            ++n;
+        }
+    }
+    h.count = n;
+    for (int c = 0; c < 4; ++c)
+        h.mean[c] = n ? double(sum[c]) / n : 0.0;
+    h.clippedHigh = n ? double(hi) / n : 0.0;
+    h.clippedLow = n ? double(lo) / n : 0.0;
+    return h;
+}
+
+double focusMeasureRaw(const RawFrame &raw, Rect r)
+{
+    if (raw.width < 16 || raw.height < 16)
+        return 0.0;
+    if (r.empty())
+        r = {raw.width / 4, raw.height / 4, raw.width / 2, raw.height / 2};
+    r.x = std::clamp(r.x, 2, raw.width - 3);
+    r.y = std::clamp(r.y, 2, raw.height - 3);
+    r.w = std::clamp(r.w, 1, raw.width - 2 - r.x);
+    r.h = std::clamp(r.h, 1, raw.height - 2 - r.y);
+    const bool wide = is16Bit(raw.format);
+    const int bpp = bytesPerPixel(raw.format);
+    auto at = [&](int x, int y) -> double {
+        const uint8_t *row = raw.data.data() + size_t(y) * raw.stride;
+        if (isBayer(raw.format) || isMono(raw.format))
+            return wide ? reinterpret_cast<const uint16_t *>(row)[x] : row[x];
+        // packed colour: use the green component
+        if (raw.format == PixelFormat::RGB16)
+            return reinterpret_cast<const uint16_t *>(row)[x * 3 + 1];
+        return row[x * bpp + 1];
+    };
+    // green sites of a Bayer mosaic form a quincunx; use diagonal neighbours
+    int gPhase = 0; // (x + y) parity of green sites
+    if (raw.format == PixelFormat::BayerRG8 || raw.format == PixelFormat::BayerRG16 || raw.format == PixelFormat::BayerBG8
+        || raw.format == PixelFormat::BayerBG16)
+        gPhase = 1;
+    const bool bayer = isBayer(raw.format);
+    double sum = 0, sum2 = 0, mean = 0;
+    uint64_t n = 0;
+    const int stepY = std::max(2, r.h / 240), stepX = std::max(2, r.w / 360);
+    for (int y = r.y; y < r.y + r.h; y += stepY) {
+        for (int x = r.x; x < r.x + r.w; x += stepX) {
+            int xx = x;
+            if (bayer && ((xx + y) & 1) != gPhase)
+                ++xx;
+            const double c = at(xx, y);
+            double lap;
+            if (bayer)
+                lap = 4.0 * c - at(xx - 1, y - 1) - at(xx + 1, y - 1) - at(xx - 1, y + 1) - at(xx + 1, y + 1);
+            else
+                lap = 4.0 * c - at(xx - 1, y) - at(xx + 1, y) - at(xx, y - 1) - at(xx, y + 1);
+            sum += lap;
+            sum2 += lap * lap;
+            mean += c;
+            ++n;
+        }
+    }
+    if (!n)
+        return 0.0;
+    mean /= n;
+    const double var = sum2 / n - (sum / n) * (sum / n);
+    return mean > 1.0 ? var / (mean * mean) * 1000.0 : 0.0;
+}
+
 double focusMeasure(const Image16 &img, Rect r)
 {
     if (img.width < 8 || img.height < 8)

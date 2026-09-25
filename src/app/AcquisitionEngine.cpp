@@ -1,6 +1,7 @@
 #include "AcquisitionEngine.h"
 
 #include "imaging/Debayer.h"
+#include "imaging/PixelShift.h"
 
 #include <QtConcurrent/QtConcurrentRun>
 
@@ -19,7 +20,7 @@ double secondsSince(Clock::time_point t)
 
 // Averages several raw frames of identical geometry into one 16-bit frame
 // (gaining up to log2(n)/2 bits of precision).
-RawFramePtr averageFrames(const std::deque<RawFramePtr> &frames)
+RawFramePtr averageRawFrames(const std::deque<RawFramePtr> &frames)
 {
     if (frames.empty())
         return nullptr;
@@ -250,6 +251,11 @@ void AcquisitionEngine::requestAutoExposureOnce()
     m_aeOnce = true;
 }
 
+void AcquisitionEngine::requestAutoLevels()
+{
+    m_levelsRequest = true;
+}
+
 void AcquisitionEngine::setLiveMode(LiveMode m)
 {
     if (m == LiveMode::Multifocus)
@@ -282,7 +288,7 @@ void AcquisitionEngine::capture(int averageFrames)
                 // reuse the same path as live captures
                 auto pipeline = [this] { QMutexLocker k(&m_mutex); return m_pipeline; }();
                 auto res = std::make_shared<CaptureResult>();
-                auto raw = averageFrames(frames);
+                auto raw = averageRawFrames(frames);
                 res->linear = toLinearRGB(*raw, DemosaicMethod::MalvarHeCutler);
                 pipeline->applyLinear(res->linear);
                 const auto &cs = pipeline->settings();
@@ -343,7 +349,7 @@ void AcquisitionEngine::onRawFrame(RawFramePtr f)
         // full quality processing off the camera thread
         QtConcurrent::run([this, captureFrames = std::move(captureFrames), pipeline] {
             try {
-                auto raw = averageFrames(captureFrames);
+                auto raw = averageRawFrames(captureFrames);
                 auto res = std::make_shared<CaptureResult>();
                 res->averagedFrames = int(captureFrames.size());
                 res->exposureMs = raw->exposureMs;
@@ -462,6 +468,73 @@ void AcquisitionEngine::processingLoop()
             }
             const auto &cs = pipeline->settings();
             const bool hq = m_previewHighQuality;
+
+            // --- fast live path: fused demosaic + colour + tone into a display buffer
+            const bool requests = m_wbRequest || m_blackRequest || m_levelsRequest || m_shadingFramesWanted > 0;
+            const bool fastFormat = raw->format != PixelFormat::YUYV && raw->format != PixelFormat::NV12;
+            if (m_mode == LiveMode::Normal && !requests && !hq && fastFormat) {
+                if (m_frozen)
+                    continue;
+                // UI still busy with the previous image: skip (unless it seems stuck)
+                if (m_uiBusy && secondsSince(m_uiBusySince) < 0.5)
+                    continue;
+                static const bool profile = qEnvironmentVariableIsSet("DMI_PROFILE");
+                const auto tp0 = Clock::now();
+                const bool half = m_previewHalf && isBayer(raw->format);
+                int w, h;
+                ColorPipeline::previewSize(*raw, cs.rotation, w, h, half);
+                QImage q(w, h, QImage::Format_RGB32);
+                if (half)
+                    pipeline->renderPreviewHalf32(*raw, reinterpret_cast<uint32_t *>(q.bits()), int(q.bytesPerLine() / 4),
+                                                  m_showClipping);
+                else
+                    pipeline->renderPreview32(*raw, reinterpret_cast<uint32_t *>(q.bits()), int(q.bytesPerLine() / 4),
+                                              m_showClipping);
+                const auto tp1 = Clock::now();
+                if (cs.sharpenAmount > 0.0)
+                    unsharpMask32(reinterpret_cast<uint32_t *>(q.bits()), w, h, int(q.bytesPerLine() / 4),
+                                  cs.sharpenAmount, cs.sharpenRadius);
+                const auto tp2 = Clock::now();
+                LiveStats st;
+                st.width = raw->width;
+                st.height = raw->height;
+                st.frames = m_received;
+                st.dropped = m_dropped;
+                st.fps = m_fps;
+                st.displayScale = half ? 0.5 : 1.0;
+                const ExposureStats es = exposureStats(*raw, 16);
+                st.meanLevel = es.meanLevel;
+                st.saturated = es.saturatedFraction;
+                st.histogram = computeHistogram32(reinterpret_cast<const uint32_t *>(q.constBits()), w, h,
+                                                  int(q.bytesPerLine() / 4), 3);
+                const bool identityGeometry = !cs.flipHorizontal && !cs.flipVertical && cs.rotation % 360 == 0;
+                st.focus = focusMeasureRaw(*raw, identityGeometry ? focusRegion : Rect{});
+                const auto now = Clock::now();
+                if (profile) {
+                    static double a = 0, b = 0, c = 0;
+                    static int n = 0;
+                    a += std::chrono::duration<double, std::milli>(tp1 - tp0).count();
+                    b += std::chrono::duration<double, std::milli>(tp2 - tp1).count();
+                    c += std::chrono::duration<double, std::milli>(now - tp2).count();
+                    if (++n == 50) {
+                        qInfo("engine: %dx%d render %.2f ms, sharpen %.2f ms, stats %.2f ms", w, h, a / n, b / n, c / n);
+                        a = b = c = 0;
+                        n = 0;
+                    }
+                }
+                if (m_lastDisplayTime.time_since_epoch().count() != 0) {
+                    const double dt = std::chrono::duration<double>(now - m_lastDisplayTime).count();
+                    if (dt > 0)
+                        m_displayFps = m_displayFps == 0 ? 1.0 / dt : 0.9 * m_displayFps + 0.1 / dt;
+                }
+                m_lastDisplayTime = now;
+                st.displayFps = m_displayFps;
+                m_uiBusy = true;
+                m_uiBusySince = Clock::now();
+                emit frameReady(q, st);
+                continue;
+            }
+
             Image16 lin = toLinearRGB(*raw, hq ? DemosaicMethod::MalvarHeCutler : DemosaicMethod::Bilinear);
 
             // --- one shot calibrations (operate on data before WB/colour) ---
@@ -479,6 +552,8 @@ void AcquisitionEngine::processingLoop()
                 if (m_wbRequest.exchange(false)) {
                     Image16 tmp = lin;
                     pre.applyLinear(tmp);
+                    // the region was picked on the displayed (rotated/flipped) image
+                    tmp = applyGeometry(tmp, cs.flipHorizontal, cs.flipVertical, cs.rotation);
                     auto g = computeWhiteBalance(tmp, wbRegion);
                     QMetaObject::invokeMethod(this, [this, g] { emit whiteBalanceComputed(g[0], g[1], g[2]); },
                                               Qt::QueuedConnection);
@@ -515,6 +590,29 @@ void AcquisitionEngine::processingLoop()
 
             pipeline->applyLinear(lin);
             lin = applyGeometry(lin, cs.flipHorizontal, cs.flipVertical, cs.rotation);
+            if (m_levelsRequest.exchange(false)) {
+                // 0.1% / 99.9% luminance percentiles of the linear image
+                std::vector<uint32_t> hist(4096, 0);
+                uint64_t n = 0;
+                for (int y = 0; y < lin.height; y += 2) {
+                    const uint16_t *p = lin.row(y);
+                    for (int x = 0; x < lin.width; x += 2, p += 6) {
+                        hist[(p[0] + 2u * p[1] + p[2]) >> 6]++;
+                        ++n;
+                    }
+                }
+                uint64_t acc = 0;
+                int lo = 0, hi = 4095;
+                for (int i = 0; i < 4096; ++i) {
+                    acc += hist[i];
+                    if (acc <= n / 1000)
+                        lo = i;
+                    if (acc < n - n / 1000)
+                        hi = i;
+                }
+                const double bp = std::clamp(lo / 4095.0, 0.0, 0.8), wp = std::clamp((hi + 1) / 4095.0, bp + 0.05, 1.0);
+                QMetaObject::invokeMethod(this, [this, bp, wp] { emit levelsComputed(bp, wp); }, Qt::QueuedConnection);
+            }
 
             LiveStats st;
             st.width = raw->width;
@@ -546,6 +644,7 @@ void AcquisitionEngine::processingLoop()
                 QMetaObject::invokeMethod(this, [this, status] { emit mosaicStatus(status); }, Qt::QueuedConnection);
                 double scale = 1.0;
                 Image16 prev = m_mosaic.preview(2400, scale);
+                st.displayScale = scale;
                 Image8 out = pipeline->toDisplay8(prev);
                 display = toQImage(out, false, nullptr);
                 st.histogram = computeHistogram(out, 4);
@@ -571,6 +670,70 @@ void AcquisitionEngine::processingLoop()
             emit cameraError(QString::fromUtf8(e.what()));
         }
     }
+}
+
+std::shared_ptr<const ColorPipeline> AcquisitionEngine::pipeline() const
+{
+    QMutexLocker l(&m_mutex);
+    return m_pipeline;
+}
+
+void AcquisitionEngine::captureShots(int modeIndex)
+{
+    if (!m_camera) {
+        emit captureFailed(tr("No camera open"));
+        return;
+    }
+    const auto modes = m_camera->shotModes();
+    if (modeIndex < 0 || modeIndex >= int(modes.size())) {
+        emit captureFailed(tr("This camera does not support the selected capture mode"));
+        return;
+    }
+    if (m_busy.exchange(true)) {
+        emit captureFailed(tr("Another capture is in progress"));
+        return;
+    }
+    const Camera::ShotMode mode = modes[size_t(modeIndex)];
+    Camera *cam = m_camera.get();
+    auto pipe = pipeline();
+    QtConcurrent::run([this, cam, mode, modeIndex, pipe] {
+        std::vector<RawFramePtr> shots;
+        std::string err;
+        const bool ok = cam->captureShots(modeIndex, shots, err, [this, &mode](int done, int total) {
+            QMetaObject::invokeMethod(this, [this, done, total, name = mode.name] {
+                emit captureProgress(done, total, QString::fromStdString(name));
+            }, Qt::QueuedConnection);
+        });
+        if (!ok) {
+            m_busy = false;
+            QMetaObject::invokeMethod(this, [this, err] { emit captureFailed(QString::fromStdString(err)); },
+                                      Qt::QueuedConnection);
+            return;
+        }
+        QMetaObject::invokeMethod(this, [this, total = int(shots.size())] {
+            emit captureProgress(total, total, tr("Reconstructing…"));
+        }, Qt::QueuedConnection);
+        auto res = std::make_shared<CaptureResult>();
+        PixelShiftOptions opt;
+        opt.upscale = mode.upscale;
+        opt.signX = -1; // sensor motion moves the image in the opposite direction
+        opt.signY = -1;
+        res->linear = reconstructPixelShift(shots, mode.offsets, opt);
+        pipe->applyLinear(res->linear);
+        const auto &cs = pipe->settings();
+        res->linear = applyGeometry(res->linear, cs.flipHorizontal, cs.flipVertical, cs.rotation);
+        res->rendered16 = pipe->toDisplay16(res->linear);
+        unsharpMask(res->rendered16, cs.sharpenAmount, cs.sharpenRadius * mode.upscale);
+        res->rendered8 = pipe->toDisplay8(res->linear);
+        unsharpMask(res->rendered8, cs.sharpenAmount, cs.sharpenRadius * mode.upscale);
+        res->exposureMs = shots.empty() ? 0 : shots[0]->exposureMs;
+        res->gain = shots.empty() ? 1 : shots[0]->gain;
+        res->averagedFrames = int(shots.size());
+        res->upscale = mode.upscale;
+        res->kind = "pixelshift-" + std::to_string(mode.shots);
+        m_busy = false;
+        emit captureFinished(res);
+    });
 }
 
 void AcquisitionEngine::finishMultifocus()

@@ -2,6 +2,38 @@
 
 namespace lm {
 
+std::shared_ptr<RawFrame> FramePool::acquire(size_t bytes)
+{
+    std::unique_ptr<RawFrame> f;
+    {
+        std::lock_guard<std::mutex> l(m_mutex);
+        if (!m_free.empty()) {
+            f = std::move(m_free.back());
+            m_free.pop_back();
+        }
+    }
+    if (!f)
+        f = std::make_unique<RawFrame>();
+    if (f->data.size() != bytes)
+        f->data.resize(bytes); // only on the first use (or a size change)
+    std::weak_ptr<FramePool> weak = weak_from_this();
+    return std::shared_ptr<RawFrame>(f.release(), [weak](RawFrame *p) {
+        if (auto pool = weak.lock())
+            pool->release(p);
+        else
+            delete p;
+    });
+}
+
+void FramePool::release(RawFrame *f)
+{
+    std::lock_guard<std::mutex> l(m_mutex);
+    if (m_free.size() < m_maxFree)
+        m_free.emplace_back(f);
+    else
+        delete f;
+}
+
 const char *pixelFormatName(PixelFormat f)
 {
     switch (f) {

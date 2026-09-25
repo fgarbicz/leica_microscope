@@ -41,7 +41,7 @@ target_link_libraries(lmcore PUBLIC winusb cfgmgr32 setupapi mfplat mf mfreadwri
 
 # ---------------------------------------------------------------- application
 if(BUILD_APP)
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Concurrent Svg)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Concurrent Svg PrintSupport)
 add_executable(DMImaging WIN32
     src/app/main.cpp
     src/app/AcquisitionEngine.cpp
@@ -66,11 +66,10 @@ add_executable(DMImaging WIN32
     src/ui/Annotations.cpp
     src/ui/Theme.cpp
     src/ui/SettingsDialog.cpp
-    src/ui/AboutDialog.cpp
     resources/resources.qrc
     resources/app.rc
 )
-target_link_libraries(DMImaging PRIVATE lmcore Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Svg)
+target_link_libraries(DMImaging PRIVATE lmcore Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Svg Qt6::PrintSupport)
 install(TARGETS DMImaging RUNTIME DESTINATION .)
 endif()
 

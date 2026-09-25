@@ -1,0 +1,115 @@
+#include "Calibration.h"
+
+#include <QSettings>
+
+#include <algorithm>
+
+namespace lm {
+
+MicroscopeConfig::MicroscopeConfig() : objectives(defaultObjectives()) {}
+
+QList<Objective> MicroscopeConfig::defaultObjectives()
+{
+    // Typical Leica DM2000 turret (HI PLAN / N PLAN series)
+    auto o = [](const char *name, double mag, double na, const char *imm = "Dry") {
+        Objective ob;
+        ob.name = QString::fromLatin1(name);
+        ob.magnification = mag;
+        ob.na = na;
+        ob.immersion = QString::fromLatin1(imm);
+        return ob;
+    };
+    return {o("HI PLAN 4x/0.10", 4, 0.10),   o("HI PLAN 10x/0.25", 10, 0.25), o("HI PLAN 20x/0.40", 20, 0.40),
+            o("HI PLAN 40x/0.65", 40, 0.65), o("HI PLAN 63x/0.75", 63, 0.75), o("HI PLAN 100x/1.25 Oil", 100, 1.25, "Oil")};
+}
+
+const Objective &MicroscopeConfig::currentObjective() const
+{
+    return objectives[std::clamp(current, 0, int(objectives.size()) - 1)];
+}
+
+Objective &MicroscopeConfig::currentObjective()
+{
+    return objectives[std::clamp(current, 0, int(objectives.size()) - 1)];
+}
+
+double MicroscopeConfig::nominalUmPerPixel(const Objective &o) const
+{
+    return sensorPixelUm / std::max(1e-6, o.magnification * adapterFactor);
+}
+
+double MicroscopeConfig::umPerPixel(double sensorPixelScale) const
+{
+    if (objectives.isEmpty())
+        return 0.0;
+    const Objective &o = currentObjective();
+    const double base = o.calibratedUmPerPixel > 0 ? o.calibratedUmPerPixel : nominalUmPerPixel(o);
+    return base * sensorPixelScale;
+}
+
+QString MicroscopeConfig::objectiveLabel(const Objective &o) const
+{
+    return o.name.isEmpty() ? QStringLiteral("%1x / %2").arg(o.magnification).arg(o.na) : o.name;
+}
+
+double MicroscopeConfig::resolutionLimitUm() const
+{
+    if (objectives.isEmpty())
+        return 0.0;
+    return 0.61 * 0.55 / std::max(0.01, currentObjective().na);
+}
+
+void MicroscopeConfig::load()
+{
+    QSettings s;
+    s.beginGroup(QStringLiteral("microscope"));
+    microscopeName = s.value(QStringLiteral("name"), microscopeName).toString();
+    adapterFactor = s.value(QStringLiteral("adapter"), adapterFactor).toDouble();
+    sensorPixelUm = s.value(QStringLiteral("sensorPixel"), sensorPixelUm).toDouble();
+    current = s.value(QStringLiteral("current"), current).toInt();
+    const int n = s.beginReadArray(QStringLiteral("objectives"));
+    if (n > 0) {
+        objectives.clear();
+        for (int i = 0; i < n; ++i) {
+            s.setArrayIndex(i);
+            Objective o;
+            o.name = s.value(QStringLiteral("name")).toString();
+            o.magnification = s.value(QStringLiteral("mag"), 10.0).toDouble();
+            o.na = s.value(QStringLiteral("na"), 0.25).toDouble();
+            o.immersion = s.value(QStringLiteral("immersion"), QStringLiteral("Dry")).toString();
+            o.calibratedUmPerPixel = s.value(QStringLiteral("umpp"), 0.0).toDouble();
+            o.shadingFile = s.value(QStringLiteral("shading")).toString();
+            objectives.append(o);
+        }
+    }
+    s.endArray();
+    s.endGroup();
+    if (objectives.isEmpty())
+        objectives = defaultObjectives();
+    current = std::clamp(current, 0, int(objectives.size()) - 1);
+}
+
+void MicroscopeConfig::save() const
+{
+    QSettings s;
+    s.beginGroup(QStringLiteral("microscope"));
+    s.setValue(QStringLiteral("name"), microscopeName);
+    s.setValue(QStringLiteral("adapter"), adapterFactor);
+    s.setValue(QStringLiteral("sensorPixel"), sensorPixelUm);
+    s.setValue(QStringLiteral("current"), current);
+    s.beginWriteArray(QStringLiteral("objectives"), int(objectives.size()));
+    for (int i = 0; i < objectives.size(); ++i) {
+        s.setArrayIndex(i);
+        const Objective &o = objectives[i];
+        s.setValue(QStringLiteral("name"), o.name);
+        s.setValue(QStringLiteral("mag"), o.magnification);
+        s.setValue(QStringLiteral("na"), o.na);
+        s.setValue(QStringLiteral("immersion"), o.immersion);
+        s.setValue(QStringLiteral("umpp"), o.calibratedUmPerPixel);
+        s.setValue(QStringLiteral("shading"), o.shadingFile);
+    }
+    s.endArray();
+    s.endGroup();
+}
+
+} // namespace lm

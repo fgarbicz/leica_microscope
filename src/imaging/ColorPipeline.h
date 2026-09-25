@@ -71,6 +71,18 @@ public:
     Image8 render8(Image16 linear) const;
     Image16 render16(Image16 linear) const;
 
+    // Fast live preview: raw Bayer/mono/RGB frame -> 32-bit 0xffRRGGBB pixels
+    // (bilinear demosaic, black level, shading, colour matrix and tone curve
+    // fused into one pass, geometry applied). `out` must hold the output size
+    // (swapped for 90/270 degree rotation), `stride` in pixels.
+    // showClipping paints saturated pixels red and black pixels blue.
+    void renderPreview32(const RawFrame &raw, uint32_t *out, int stride, bool showClipping) const;
+    // Half resolution variant for Bayer data: every 2x2 cell becomes one RGB
+    // pixel (no interpolation). 4x less work; used when the view is zoomed out.
+    void renderPreviewHalf32(const RawFrame &raw, uint32_t *out, int stride, bool showClipping) const;
+    // Output size of renderPreview32 (half = renderPreviewHalf32) for a frame.
+    static void previewSize(const RawFrame &raw, int rotation, int &w, int &h, bool half = false);
+
 private:
     void buildTables();
 
@@ -88,6 +100,9 @@ Image16 applyGeometry(const Image16 &in, bool flipH, bool flipV, int rotation);
 Image8 applyGeometry(const Image8 &in, bool flipH, bool flipV, int rotation);
 void unsharpMask(Image16 &img, double amount, double radius);
 void unsharpMask(Image8 &img, double amount, double radius);
+
+// Fast unsharp mask for 0xffRRGGBB preview buffers (box blur approximation).
+void unsharpMask32(uint32_t *px, int width, int height, int stride, double amount, double radius);
 
 // Downscale by an integer factor with box filtering (fast preview path).
 Image16 downscale(const Image16 &in, int factor);

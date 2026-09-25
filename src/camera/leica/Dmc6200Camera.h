@@ -77,6 +77,7 @@ private:
     int m_piezoRestX = 46, m_piezoRestY = 46;
     std::string m_serial, m_sensor, m_board;
     uint64_t m_seq = 0;
+    std::shared_ptr<FramePool> m_pool = FramePool::create(12);
 };
 
 } // namespace lm

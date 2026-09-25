@@ -203,14 +203,13 @@ RawFramePtr Dmc6200Camera::readOneFrame(unsigned timeoutMs, dmc::FrameEvent *evO
         return nullptr;
     if (ev.bytes != uint32_t(ev.width) * ev.height * 2)
         return nullptr;
-    auto f = std::make_shared<RawFrame>();
+    auto f = m_pool->acquire(ev.bytes);
     f->width = ev.width;
     f->height = ev.height;
     f->stride = ev.width * 2;
     f->bitDepth = ev.bits ? ev.bits : m_adcBits;
     // sensor mosaic is GBRG at (0,0); ROIs are 8-aligned so the phase is kept
     f->format = PixelFormat::BayerGB16;
-    f->data.resize(ev.bytes);
     long long n = m_proto.readFrame(f->data.data(), ev.bytes, timeoutMs);
     if (n != (long long)ev.bytes)
         return nullptr;

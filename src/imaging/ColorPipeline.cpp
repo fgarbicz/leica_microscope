@@ -1,10 +1,11 @@
-#include "ColorPipeline.h"
+﻿#include "ColorPipeline.h"
 
 #include "ShadingCorrection.h"
 #include "core/Parallel.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace lm {
 
@@ -291,6 +292,229 @@ Image16 ColorPipeline::render16(Image16 linear) const
     return out;
 }
 
+void ColorPipeline::previewSize(const RawFrame &raw, int rotation, int &w, int &h, bool half)
+{
+    rotation = ((rotation % 360) + 360) % 360;
+    const bool swap = rotation == 90 || rotation == 270;
+    const int rw = half ? raw.width / 2 : raw.width, rh = half ? raw.height / 2 : raw.height;
+    w = swap ? rh : rw;
+    h = swap ? rw : rh;
+}
+
+void ColorPipeline::renderPreviewHalf32(const RawFrame &raw, uint32_t *out, int stride, bool showClipping) const
+{
+    int rx = -1, ry = -1;
+    switch (raw.format) {
+    case PixelFormat::BayerRG8: case PixelFormat::BayerRG16: rx = 0; ry = 0; break;
+    case PixelFormat::BayerGR8: case PixelFormat::BayerGR16: rx = 1; ry = 0; break;
+    case PixelFormat::BayerGB8: case PixelFormat::BayerGB16: rx = 0; ry = 1; break;
+    case PixelFormat::BayerBG8: case PixelFormat::BayerBG16: rx = 1; ry = 1; break;
+    default: break;
+    }
+    if (rx < 0 || raw.width < 2 || raw.height < 2) {
+        renderPreview32(raw, out, stride, showClipping);
+        return;
+    }
+    const int W = raw.width / 2, H = raw.height / 2;
+    const int rot = ((m_settings.rotation % 360) + 360) % 360;
+    const bool flipH = m_settings.flipHorizontal, flipV = m_settings.flipVertical;
+    const bool wide = is16Bit(raw.format);
+    const float scaleIn = 65535.f / float((1 << std::clamp(raw.bitDepth, 1, 16)) - 1);
+    const float black = float(m_black), bscale = m_blackScale;
+    const auto &m = m_matrix;
+    const uint8_t *lut = m_lut8.data();
+    std::shared_ptr<const ShadingCorrection::GainMap> gains;
+    if (m_shading && m_shading->valid())
+        gains = m_shading->gainsFor(W, H);
+    // offsets of R, G1, G2, B inside the 2x2 cell
+    const int bx = 1 - rx, by = 1 - ry;
+    parallelRows(H, [&](int y0, int y1) {
+        for (int y = y0; y < y1; ++y) {
+            const uint8_t *row[2] = {raw.data.data() + size_t(2 * y) * raw.stride,
+                                     raw.data.data() + size_t(2 * y + 1) * raw.stride};
+            auto at = [&](int x, int yy) -> float {
+                return wide ? float(reinterpret_cast<const uint16_t *>(row[yy])[x]) : float(row[yy][x]);
+            };
+            const float *g = gains ? gains->row(y) : nullptr;
+            // destination row mapping for the simple (no rotation) case
+            for (int x = 0; x < W; ++x) {
+                float r = at(2 * x + rx, ry) * scaleIn;
+                float b = at(2 * x + bx, by) * scaleIn;
+                float gg = 0.5f * (at(2 * x + bx, ry) + at(2 * x + rx, by)) * scaleIn;
+                const bool clipHi = showClipping && (r >= 65000.f || gg >= 65000.f || b >= 65000.f);
+                r = std::max(0.f, r - black) * bscale;
+                gg = std::max(0.f, gg - black) * bscale;
+                b = std::max(0.f, b - black) * bscale;
+                if (g) {
+                    r *= g[x * 3];
+                    gg *= g[x * 3 + 1];
+                    b *= g[x * 3 + 2];
+                }
+                const float R = m[0] * r + m[1] * gg + m[2] * b;
+                const float G = m[3] * r + m[4] * gg + m[5] * b;
+                const float B = m[6] * r + m[7] * gg + m[8] * b;
+                uint32_t px;
+                if (clipHi)
+                    px = 0xFFFF0000u;
+                else if (showClipping && R < 200.f && G < 200.f && B < 200.f)
+                    px = 0xFF0040FFu;
+                else
+                    px = 0xFF000000u | uint32_t(lut[sat16(R)]) << 16 | uint32_t(lut[sat16(G)]) << 8 | lut[sat16(B)];
+                const int sx = flipH ? W - 1 - x : x, sy = flipV ? H - 1 - y : y;
+                int ox, oy;
+                switch (rot) {
+                case 90: ox = H - 1 - sy; oy = sx; break;
+                case 180: ox = W - 1 - sx; oy = H - 1 - sy; break;
+                case 270: ox = sy; oy = W - 1 - sx; break;
+                default: ox = sx; oy = sy; break;
+                }
+                out[size_t(oy) * stride + ox] = px;
+            }
+        }
+    });
+}
+
+void ColorPipeline::renderPreview32(const RawFrame &raw, uint32_t *out, int stride, bool showClipping) const
+{
+    if (raw.empty())
+        return;
+    const int W = raw.width, H = raw.height;
+    const int rot = ((m_settings.rotation % 360) + 360) % 360;
+    const bool flipH = m_settings.flipHorizontal, flipV = m_settings.flipVertical;
+    const bool wide = is16Bit(raw.format);
+    const int bd = std::clamp(raw.bitDepth, 1, 16);
+    const float scaleIn = 65535.f / float((1 << bd) - 1);
+    const float black = float(m_black), bscale = m_blackScale;
+    const auto &m = m_matrix;
+    const uint8_t *lut = m_lut8.data();
+    std::shared_ptr<const ShadingCorrection::GainMap> gains;
+    if (m_shading && m_shading->valid())
+        gains = m_shading->gainsFor(W, H);
+
+    // Bayer layout: position of red in the 2x2 cell (or -1 for non-Bayer)
+    int rx = -1, ry = -1;
+    switch (raw.format) {
+    case PixelFormat::BayerRG8: case PixelFormat::BayerRG16: rx = 0; ry = 0; break;
+    case PixelFormat::BayerGR8: case PixelFormat::BayerGR16: rx = 1; ry = 0; break;
+    case PixelFormat::BayerGB8: case PixelFormat::BayerGB16: rx = 0; ry = 1; break;
+    case PixelFormat::BayerBG8: case PixelFormat::BayerBG16: rx = 1; ry = 1; break;
+    default: break;
+    }
+    const bool bayer = rx >= 0;
+
+    auto sample = [&](int x, int y) -> float {
+        x = x < 0 ? -x : (x >= W ? 2 * W - 2 - x : x);
+        y = y < 0 ? -y : (y >= H ? 2 * H - 2 - y : y);
+        const uint8_t *row = raw.data.data() + size_t(y) * raw.stride;
+        return wide ? float(reinterpret_cast<const uint16_t *>(row)[x]) : float(row[x]);
+    };
+
+    auto dest = [&](int x, int y) -> uint32_t * {
+        int sx = flipH ? W - 1 - x : x;
+        int sy = flipV ? H - 1 - y : y;
+        int ox, oy;
+        switch (rot) {
+        case 90: ox = H - 1 - sy; oy = sx; break;
+        case 180: ox = W - 1 - sx; oy = H - 1 - sy; break;
+        case 270: ox = sy; oy = W - 1 - sx; break;
+        default: ox = sx; oy = sy; break;
+        }
+        return out + size_t(oy) * stride + ox;
+    };
+
+    const bool identity = !flipH && !flipV && rot == 0;
+    parallelRows(H, [&](int y0, int y1) {
+        // local copies: MSVC reloads captured values after every pixel store
+        const float m0 = m[0], m1 = m[1], m2 = m[2], m3 = m[3], m4 = m[4], m5 = m[5], m6 = m[6], m7 = m[7], m8 = m[8];
+        const float sIn = scaleIn, blk = black, bsc = bscale;
+        const uint8_t *const lt = lut;
+        const bool clip = showClipping;
+        std::vector<uint32_t> rowBuf(static_cast<size_t>(W));
+        uint32_t *const rb = rowBuf.data();
+        for (int y = y0; y < y1; ++y) {
+            const float *g = gains ? gains->row(y) : nullptr;
+            const bool interiorRow = y > 0 && y < H - 1;
+            const uint8_t *rm = raw.data.data() + size_t(interiorRow ? y - 1 : y) * raw.stride;
+            const uint8_t *r0 = raw.data.data() + size_t(y) * raw.stride;
+            const uint8_t *rp = raw.data.data() + size_t(interiorRow ? y + 1 : y) * raw.stride;
+            const bool redRow = bayer && ((y & 1) == ry);
+            for (int x = 0; x < W; ++x) {
+                float r, gg, b;
+                if (bayer) {
+                    const bool redCol = (x & 1) == rx;
+                    float C, N, S, Wv, E, D;
+                    if (interiorRow && x > 0 && x < W - 1) {
+                        if (wide) {
+                            const uint16_t *pm = reinterpret_cast<const uint16_t *>(rm);
+                            const uint16_t *p0 = reinterpret_cast<const uint16_t *>(r0);
+                            const uint16_t *pp = reinterpret_cast<const uint16_t *>(rp);
+                            C = p0[x]; N = pm[x]; S = pp[x]; Wv = p0[x - 1]; E = p0[x + 1];
+                            D = float(pm[x - 1]) + pm[x + 1] + pp[x - 1] + pp[x + 1];
+                        } else {
+                            C = r0[x]; N = rm[x]; S = rp[x]; Wv = r0[x - 1]; E = r0[x + 1];
+                            D = float(rm[x - 1]) + rm[x + 1] + rp[x - 1] + rp[x + 1];
+                        }
+                    } else {
+                        C = sample(x, y); N = sample(x, y - 1); S = sample(x, y + 1);
+                        Wv = sample(x - 1, y); E = sample(x + 1, y);
+                        D = sample(x - 1, y - 1) + sample(x + 1, y - 1) + sample(x - 1, y + 1) + sample(x + 1, y + 1);
+                    }
+                    if (redRow && redCol) { r = C; gg = 0.25f * (N + S + Wv + E); b = 0.25f * D; }
+                    else if (!redRow && !redCol) { b = C; gg = 0.25f * (N + S + Wv + E); r = 0.25f * D; }
+                    else if (redRow) { gg = C; r = 0.5f * (Wv + E); b = 0.5f * (N + S); }
+                    else { gg = C; r = 0.5f * (N + S); b = 0.5f * (Wv + E); }
+                } else {
+                    // packed formats
+                    const uint8_t *p = r0;
+                    switch (raw.format) {
+                    case PixelFormat::Mono8: r = gg = b = p[x]; break;
+                    case PixelFormat::Mono16: r = gg = b = reinterpret_cast<const uint16_t *>(p)[x]; break;
+                    case PixelFormat::RGB8: r = p[3 * x]; gg = p[3 * x + 1]; b = p[3 * x + 2]; break;
+                    case PixelFormat::BGR8: b = p[3 * x]; gg = p[3 * x + 1]; r = p[3 * x + 2]; break;
+                    case PixelFormat::BGRA8: b = p[4 * x]; gg = p[4 * x + 1]; r = p[4 * x + 2]; break;
+                    case PixelFormat::RGB16: {
+                        const uint16_t *q = reinterpret_cast<const uint16_t *>(p) + 3 * x;
+                        r = q[0]; gg = q[1]; b = q[2];
+                        break;
+                    }
+                    default: r = gg = b = 0; break;
+                    }
+                }
+                r *= sIn;
+                gg *= sIn;
+                b *= sIn;
+                const bool clipHi = clip && (r >= 65000.f || gg >= 65000.f || b >= 65000.f);
+                r = std::max(0.f, r - blk) * bsc;
+                gg = std::max(0.f, gg - blk) * bsc;
+                b = std::max(0.f, b - blk) * bsc;
+                if (g) {
+                    r *= g[x * 3];
+                    gg *= g[x * 3 + 1];
+                    b *= g[x * 3 + 2];
+                }
+                const float R = m0 * r + m1 * gg + m2 * b;
+                const float G = m3 * r + m4 * gg + m5 * b;
+                const float B = m6 * r + m7 * gg + m8 * b;
+                uint32_t px;
+                if (clipHi) {
+                    px = 0xFFFF0000u;
+                } else if (clip && R < 200.f && G < 200.f && B < 200.f) {
+                    px = 0xFF0040FFu;
+                } else {
+                    const uint32_t lr = lt[sat16(R)], lg = lt[sat16(G)], lb = lt[sat16(B)];
+                    px = 0xFF000000u | (lr << 16) | (lg << 8) | lb;
+                }
+                rb[x] = px;
+            }
+            if (identity)
+                std::memcpy(out + size_t(y) * stride, rb, size_t(W) * sizeof(uint32_t));
+            else
+                for (int x = 0; x < W; ++x)
+                    *dest(x, y) = rb[x];
+        }
+    });
+}
+
 Image16 applyGeometry(const Image16 &in, bool flipH, bool flipV, int rotation)
 {
     return geometryImpl(in, flipH, flipV, rotation);
@@ -309,6 +533,100 @@ void unsharpMask(Image16 &img, double amount, double radius)
 void unsharpMask(Image8 &img, double amount, double radius)
 {
     unsharpImpl(img, amount, radius, uint8_t(255));
+}
+
+void unsharpMask32(uint32_t *px, int w, int h, int stride, double amount, double radius)
+{
+    if (amount <= 0 || w < 4 || h < 4)
+        return;
+    if (radius <= 1.5) {
+        // single pass 3x3 unsharp mask; each chunk keeps copies of the
+        // original rows it needs (the image is modified in place)
+        const int amt = int(amount * 256);
+        parallelRows(h, [&](int y0, int y1) {
+            const size_t n = static_cast<size_t>(w);
+            std::vector<uint32_t> prev(n), cur(n), next(n);
+            auto load = [&](std::vector<uint32_t> &dst, int y) {
+                std::copy_n(px + size_t(std::clamp(y, 0, h - 1)) * stride, w, dst.data());
+            };
+            load(prev, y0 - 1);
+            load(cur, y0);
+            for (int y = y0; y < y1; ++y) {
+                load(next, y + 1);
+                uint32_t *const out = px + size_t(y) * stride;
+                const uint32_t *const P = prev.data(), *const Cr = cur.data(), *const N = next.data();
+                const int a = amt, ww = w;
+                for (int x = 0; x < ww; ++x) {
+                    const int xl = x > 0 ? x - 1 : 0, xr = x < ww - 1 ? x + 1 : ww - 1;
+                    const uint32_t c0 = Cr[x];
+                    uint32_t res = c0 & 0xFF000000u;
+                    for (int sh = 0; sh <= 16; sh += 8) {
+                        const int sum = int((P[xl] >> sh) & 0xFF) + int((P[x] >> sh) & 0xFF) + int((P[xr] >> sh) & 0xFF)
+                                        + int((Cr[xl] >> sh) & 0xFF) + int((c0 >> sh) & 0xFF) + int((Cr[xr] >> sh) & 0xFF)
+                                        + int((N[xl] >> sh) & 0xFF) + int((N[x] >> sh) & 0xFF) + int((N[xr] >> sh) & 0xFF);
+                        const int o = int((c0 >> sh) & 0xFF) * 9;
+                        const int v = std::clamp((o + ((o - sum) * a >> 8)) / 9, 0, 255);
+                        res |= uint32_t(v) << sh;
+                    }
+                    out[x] = res;
+                }
+                std::swap(prev, cur);
+                std::swap(cur, next);
+            }
+        });
+        return;
+    }
+    const int r = std::clamp(int(std::lround(radius * 1.3)), 1, 10); // box ~ gaussian sigma
+    // 1) horizontal box blur via prefix sums -> tmp (interleaved, value * 64)
+    std::vector<uint16_t> tmp(size_t(w) * h * 3);
+    parallelRows(h, [&](int y0, int y1) {
+        std::vector<int> pre(size_t(w + 1) * 3, 0);
+        for (int y = y0; y < y1; ++y) {
+            const uint32_t *row = px + size_t(y) * stride;
+            for (int x = 0; x < w; ++x) {
+                const uint32_t p = row[x];
+                pre[(x + 1) * 3] = pre[x * 3] + int((p >> 16) & 0xFF);
+                pre[(x + 1) * 3 + 1] = pre[x * 3 + 1] + int((p >> 8) & 0xFF);
+                pre[(x + 1) * 3 + 2] = pre[x * 3 + 2] + int(p & 0xFF);
+            }
+            uint16_t *o = tmp.data() + size_t(y) * w * 3;
+            for (int x = 0; x < w; ++x) {
+                const int a = std::max(0, x - r), b = std::min(w, x + r + 1);
+                const int n = b - a;
+                for (int c = 0; c < 3; ++c)
+                    o[x * 3 + c] = uint16_t((pre[b * 3 + c] - pre[a * 3 + c]) * 64 / n);
+            }
+        }
+    });
+    // 2) vertical box blur with a sliding row window, combined with the
+    //    unsharp step (row-major, cache friendly)
+    const int amt = int(amount * 256);
+    parallelRows(h, [&](int y0, int y1) {
+        std::vector<int> col(size_t(w) * 3, 0);
+        auto addRow = [&](int y, int sign) {
+            const uint16_t *t = tmp.data() + size_t(std::clamp(y, 0, h - 1)) * w * 3;
+            for (int i = 0; i < w * 3; ++i)
+                col[i] += sign * t[i];
+        };
+        for (int k = -r; k <= r; ++k)
+            addRow(y0 + k, 1);
+        const int n = 2 * r + 1;
+        for (int y = y0; y < y1; ++y) {
+            uint32_t *row = px + size_t(y) * stride;
+            for (int x = 0; x < w; ++x) {
+                const uint32_t p = row[x];
+                int v[3];
+                for (int c = 0; c < 3; ++c) {
+                    const int orig = int((p >> (16 - 8 * c)) & 0xFF) * 64;
+                    const int blur = col[x * 3 + c] / n;
+                    v[c] = std::clamp((orig + ((orig - blur) * amt >> 8)) >> 6, 0, 255);
+                }
+                row[x] = (p & 0xFF000000u) | uint32_t(v[0]) << 16 | uint32_t(v[1]) << 8 | uint32_t(v[2]);
+            }
+            addRow(y + r + 1, 1);
+            addRow(y - r, -1);
+        }
+    }, 32);
 }
 
 Image16 downscale(const Image16 &in, int f)

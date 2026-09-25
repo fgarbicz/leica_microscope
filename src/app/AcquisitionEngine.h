@@ -34,6 +34,7 @@ struct LiveStats {
     int width = 0, height = 0;
     uint64_t frames = 0;
     uint64_t dropped = 0;
+    double displayScale = 1.0; // displayed pixels per sensor pixel (mosaic preview < 1)
 };
 
 enum class LiveMode { Normal, Multifocus, Mosaic };
@@ -53,7 +54,8 @@ struct CaptureResult {
     double exposureMs = 0;
     double gain = 1;
     int averagedFrames = 1;
-    std::string kind;          // "single", "multifocus", "mosaic", "timelapse"
+    int upscale = 1;           // output pixels per sensor pixel (pixel shift)
+    std::string kind;          // "single", "multifocus", "mosaic", "pixelshift-N"
 };
 
 class AcquisitionEngine : public QObject {
@@ -84,6 +86,8 @@ public:
     AutoExposureSettings autoExposure() const;
     void setShowClipping(bool on) { m_showClipping = on; }
     void setPreviewQuality(bool high) { m_previewHighQuality = high; }
+    // half resolution live preview (view zoomed out)
+    void setPreviewHalf(bool half) { m_previewHalf = half; }
     void setFocusRegion(Rect r) { QMutexLocker l(&m_mutex); m_focusRegion = r; }
 
     // one-shot operations executed on the next live frame
@@ -91,9 +95,14 @@ public:
     void requestBlackBalance();
     void requestShadingReference(int frames = 8);
     void requestAutoExposureOnce();
+    void requestAutoLevels();
 
     // capture: averages `frames` raw frames, full quality demosaic
     void capture(int averageFrames = 1);
+    // multi-shot sensor-shift capture (camera shot mode index)
+    void captureShots(int modeIndex);
+    bool isBusy() const { return m_busy; }
+    std::shared_ptr<const ColorPipeline> pipeline() const;
 
     // multifocus / live image builder
     void setLiveMode(LiveMode m);
@@ -107,15 +116,21 @@ public:
     // Last raw frame (for pixel readout etc.)
     RawFramePtr lastRaw() const;
 
+    // The UI calls this after it has displayed a frame (back-pressure: the
+    // engine renders a new display image only when the previous one was taken).
+    void frameConsumed() { m_uiBusy = false; }
+
 signals:
     void frameReady(const QImage &display, const lm::LiveStats &stats);
     void cameraError(const QString &message);
     void whiteBalanceComputed(double r, double g, double b);
     void blackLevelComputed(double level);
+    void levelsComputed(double blackPoint, double whitePoint);
     void shadingReferenceReady(std::shared_ptr<lm::ShadingCorrection> sc);
     void exposureChanged(double ms, double gain);
     void captureFinished(std::shared_ptr<lm::CaptureResult> result);
     void captureFailed(const QString &message);
+    void captureProgress(int done, int total, const QString &what);
     void multifocusProgress(int frames, double improvedFraction);
     void mosaicStatus(const lm::MosaicBuilder::Status &status);
     void liveStateChanged(bool live);
@@ -145,12 +160,14 @@ private:
     std::atomic<bool> m_aeOnce{false};
     std::atomic<bool> m_showClipping{false};
     std::atomic<bool> m_previewHighQuality{false};
+    std::atomic<bool> m_previewHalf{false};
     std::atomic<bool> m_frozen{false};
     Rect m_focusRegion;
 
     std::atomic<bool> m_wbRequest{false};
     Rect m_wbRegion;
     std::atomic<bool> m_blackRequest{false};
+    std::atomic<bool> m_levelsRequest{false};
     std::atomic<int> m_shadingFramesWanted{0};
     std::vector<Image16> m_shadingFrames;
 
@@ -161,6 +178,9 @@ private:
 
     std::thread m_worker;
     std::atomic<bool> m_running{false};
+    std::atomic<bool> m_busy{false};
+    std::atomic<bool> m_uiBusy{false};
+    std::chrono::steady_clock::time_point m_uiBusySince{};
     std::atomic<uint64_t> m_received{0}, m_dropped{0};
     double m_fps = 0, m_displayFps = 0;
     std::chrono::steady_clock::time_point m_lastFrameTime{}, m_lastDisplayTime{};

@@ -163,6 +163,46 @@ static void testPipeline()
     CHECK(fh.row(0)[0] == 2);
 }
 
+static void testFastPreview()
+{
+    std::printf("fast preview == reference pipeline\n");
+    const double g[3] = {0.8, 0.6, 0.4};
+    auto raw = makeBayer(200, 120, PixelFormat::BayerGB16, g);
+    for (int variant = 0; variant < 3; ++variant) {
+        ColorSettings s;
+        s.wbRed = 1.3;
+        s.wbBlue = 1.7;
+        s.saturation = 1.4;
+        s.gamma = 1.2;
+        s.blackLevel = 0.01;
+        if (variant == 1)
+            s.rotation = 90;
+        if (variant == 2) {
+            s.flipHorizontal = true;
+            s.rotation = 270;
+        }
+        ColorPipeline p;
+        p.update(s);
+        Image8 ref = p.render8(toLinearRGB(*raw, DemosaicMethod::Bilinear));
+        int w, h;
+        ColorPipeline::previewSize(*raw, s.rotation, w, h);
+        CHECK(w == ref.width && h == ref.height);
+        std::vector<uint32_t> buf(size_t(w) * h);
+        p.renderPreview32(*raw, buf.data(), w, false);
+        int maxDiff = 0;
+        for (int y = 2; y < h - 2; ++y)
+            for (int x = 2; x < w - 2; ++x) {
+                const uint32_t px = buf[size_t(y) * w + x];
+                const uint8_t *r = ref.row(y) + x * 3;
+                maxDiff = std::max({maxDiff, std::abs(int((px >> 16) & 0xFF) - r[0]), std::abs(int((px >> 8) & 0xFF) - r[1]),
+                                    std::abs(int(px & 0xFF) - r[2])});
+            }
+        CHECK(maxDiff <= 2);
+        if (maxDiff > 2)
+            std::printf("  variant %d max diff %d\n", variant, maxDiff);
+    }
+}
+
 static void testRegistration()
 {
     std::printf("registration\n");
@@ -436,13 +476,55 @@ static void testHardware()
     cam->close();
 }
 
+static void bench()
+{
+    const double g[3] = {0.9, 0.7, 0.5};
+    auto raw = makeBayer(1920, 1200, PixelFormat::BayerGB16, g);
+    ColorPipeline p;
+    ColorSettings s;
+    s.wbRed = 1.2;
+    s.saturation = 1.2;
+    p.update(s);
+    auto time = [](const char *name, auto &&fn) {
+        const int n = 10;
+        auto t0 = std::chrono::steady_clock::now();
+        for (int i = 0; i < n; ++i)
+            fn();
+        const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count() / n;
+        std::printf("  %-28s %7.2f ms\n", name, ms);
+    };
+    Image16 lin;
+    time("demosaic bilinear", [&] { lin = toLinearRGB(*raw, DemosaicMethod::Bilinear); });
+    time("demosaic MHC", [&] { lin = toLinearRGB(*raw, DemosaicMethod::MalvarHeCutler); });
+    time("applyLinear", [&] { Image16 t = lin; p.applyLinear(t); });
+    time("copy Image16", [&] { Image16 t = lin; (void)t; });
+    Image8 d;
+    time("toDisplay8", [&] { d = p.toDisplay8(lin); });
+    time("histogram", [&] { auto h = computeHistogram(d, 3); (void)h; });
+    time("focusMeasure", [&] { (void)focusMeasure(lin); });
+    time("exposureStats", [&] { (void)exposureStats(*raw, 8); });
+    time("geometry (none)", [&] { auto t = applyGeometry(lin, false, false, 0); (void)t; });
+    std::vector<uint32_t> buf(size_t(1920) * 1200);
+    time("fused preview32", [&] { p.renderPreview32(*raw, buf.data(), 1920, false); });
+    time("half preview32", [&] { p.renderPreviewHalf32(*raw, buf.data(), 960, false); });
+    time("unsharpMask32", [&] { unsharpMask32(buf.data(), 1920, 1200, 1920, 0.5, 1.0); });
+    time("histogram32", [&] { auto h = computeHistogram32(buf.data(), 1920, 1200, 1920, 3); (void)h; });
+    volatile double f = 0;
+    time("focusMeasureRaw", [&] { f = f + focusMeasureRaw(*raw); });
+}
+
 int main(int argc, char **argv)
 {
+    if (argc > 1 && std::strcmp(argv[1], "--bench") == 0) {
+        bench();
+        return 0;
+    }
     const bool hw = argc > 1 && std::strcmp(argv[1], "--hw") == 0;
     const bool only = argc > 2 && std::strcmp(argv[2], "--only") == 0;
     if (!only) {
         testDemosaic();
         testPipeline();
+        testFastPreview();
         testRegistration();
         testShading();
         testFocusStack();

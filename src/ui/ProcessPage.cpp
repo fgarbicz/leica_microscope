@@ -1,0 +1,523 @@
+#include "ProcessPage.h"
+
+#include "app/AppSettings.h"
+#include "imaging/FocusStacker.h"
+#include "imaging/MosaicBuilder.h"
+#include "ui/Annotations.h"
+#include "ui/CollapsibleSection.h"
+#include "ui/ImageView.h"
+#include "ui/Overlays.h"
+#include "ui/SliderSpin.h"
+
+#include <QActionGroup>
+#include <QApplication>
+#include <QClipboard>
+#include <QColorDialog>
+#include <QDoubleSpinBox>
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QHBoxLayout>
+#include <QHeaderView>
+#include <QInputDialog>
+#include <QLabel>
+#include <QMenu>
+#include <QMessageBox>
+#include <QPainter>
+#include <QPrintDialog>
+#include <QPrinter>
+#include <QProgressDialog>
+#include <QPushButton>
+#include <QSaveFile>
+#include <QScrollArea>
+#include <QSplitter>
+#include <QTableWidget>
+#include <QTextStream>
+#include <QToolBar>
+#include <QToolButton>
+#include <QVBoxLayout>
+
+namespace lm {
+
+namespace {
+const char *kFileFilter = "Images (*.tif *.tiff *.png *.jpg *.jpeg *.bmp);;All files (*.*)";
+QString typeLabel(Annotation::Type t)
+{
+    switch (t) {
+    case Annotation::Line: return QObject::tr("Length");
+    case Annotation::Arrow: return QObject::tr("Arrow");
+    case Annotation::Polyline: return QObject::tr("Path");
+    case Annotation::Rectangle: return QObject::tr("Rectangle");
+    case Annotation::Ellipse: return QObject::tr("Ellipse");
+    case Annotation::Polygon: return QObject::tr("Area");
+    case Annotation::Angle: return QObject::tr("Angle");
+    case Annotation::Text: return QObject::tr("Text");
+    case Annotation::Count: return QObject::tr("Count");
+    }
+    return {};
+}
+} // namespace
+
+ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
+{
+    m_adjust.srgbEncode = false; // saved images are already display referred
+
+    auto *root = new QVBoxLayout(this);
+    root->setContentsMargins(0, 0, 0, 0);
+    root->setSpacing(0);
+
+    // ---- toolbar
+    auto *tb = new QToolBar(this);
+    tb->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    tb->addAction(tr("Open…"), this, &ProcessPage::openDialog);
+    tb->addAction(tr("Save as…"), this, &ProcessPage::saveAs);
+    tb->addAction(tr("Export with overlays…"), this, &ProcessPage::exportWithOverlays);
+    tb->addAction(tr("Copy"), this, &ProcessPage::copyToClipboard);
+    tb->addAction(tr("Print…"), this, &ProcessPage::print);
+    tb->addSeparator();
+
+    m_layer = new AnnotationLayer(this);
+    m_tools = new QActionGroup(this);
+    m_tools->setExclusive(true);
+    struct T { const char *label; const char *tip; AnnotationLayer::Tool tool; };
+    const T tools[] = {
+        {"Select", "Select, move and edit annotations; drag the image to pan", AnnotationLayer::SelectTool},
+        {"Line", "Measure a distance", AnnotationLayer::LineTool},
+        {"Path", "Measure a curved length (double-click to finish)", AnnotationLayer::PolylineTool},
+        {"Rect", "Rectangle with area", AnnotationLayer::RectTool},
+        {"Ellipse", "Ellipse / circle with area", AnnotationLayer::EllipseTool},
+        {"Area", "Polygon area (double-click to finish)", AnnotationLayer::PolygonTool},
+        {"Angle", "Measure an angle (3 clicks)", AnnotationLayer::AngleTool},
+        {"Count", "Count objects (click to add, right-click to remove)", AnnotationLayer::CountTool},
+        {"Arrow", "Arrow annotation", AnnotationLayer::ArrowTool},
+        {"Text", "Text label", AnnotationLayer::TextTool},
+    };
+    for (const auto &t : tools) {
+        QAction *a = tb->addAction(tr(t.label));
+        a->setToolTip(tr(t.tip));
+        a->setCheckable(true);
+        a->setData(int(t.tool));
+        m_tools->addAction(a);
+        if (t.tool == AnnotationLayer::SelectTool)
+            a->setChecked(true);
+    }
+    connect(m_tools, &QActionGroup::triggered, this, [this](QAction *a) {
+        m_layer->setTool(AnnotationLayer::Tool(a->data().toInt()));
+        m_view->setCursor(a->data().toInt() == AnnotationLayer::SelectTool ? Qt::ArrowCursor : Qt::CrossCursor);
+    });
+    tb->addSeparator();
+    m_colorBtn = new QToolButton(this);
+    m_colorBtn->setToolTip(tr("Annotation colour"));
+    auto setBtn = [this](const QColor &c) {
+        m_colorBtn->setStyleSheet(QStringLiteral("QToolButton{background:%1; min-width:22px; border-radius:3px;}").arg(c.name()));
+    };
+    setBtn(m_layer->color());
+    connect(m_colorBtn, &QToolButton::clicked, this, [this, setBtn] {
+        const QColor c = QColorDialog::getColor(m_layer->color(), this, tr("Annotation colour"));
+        if (c.isValid()) {
+            m_layer->setColor(c);
+            setBtn(c);
+        }
+    });
+    tb->addWidget(m_colorBtn);
+    auto *width = new QDoubleSpinBox(this);
+    width->setRange(0.5, 12);
+    width->setValue(2.0);
+    width->setSingleStep(0.5);
+    width->setToolTip(tr("Line width"));
+    connect(width, &QDoubleSpinBox::valueChanged, m_layer, &AnnotationLayer::setLineWidth);
+    tb->addWidget(width);
+    tb->addAction(tr("Undo"), m_layer, &AnnotationLayer::undo)->setShortcut(QKeySequence::Undo);
+    tb->addAction(tr("Redo"), m_layer, &AnnotationLayer::redo)->setShortcut(QKeySequence::Redo);
+    tb->addAction(tr("Delete"), m_layer, &AnnotationLayer::removeSelected);
+    tb->addAction(tr("Clear all"), this, [this] {
+        if (!m_layer->annotations().isEmpty()
+            && QMessageBox::question(this, tr("Clear"), tr("Remove all annotations?")) == QMessageBox::Yes)
+            m_layer->clear();
+    });
+    root->addWidget(tb);
+
+    // ---- content
+    auto *split = new QSplitter(Qt::Horizontal, this);
+    m_view = new ImageView(split);
+    m_view->setPlaceholder(tr("Open an image (Ctrl+O) or capture one in Acquire"));
+    m_view->setAnnotationLayer(m_layer);
+
+    auto *side = new QScrollArea(split);
+    side->setObjectName(QStringLiteral("PanelScroll"));
+    side->setWidgetResizable(true);
+    side->setMinimumWidth(300);
+    auto *sideContent = new QWidget(side);
+    sideContent->setObjectName(QStringLiteral("PanelContent"));
+    auto *sl = new QVBoxLayout(sideContent);
+    sl->setContentsMargins(0, 0, 0, 0);
+    sl->setSpacing(0);
+
+    auto *ms = new CollapsibleSection(tr("Measurements"), sideContent);
+    m_table = new QTableWidget(0, 2, sideContent);
+    m_table->setHorizontalHeaderLabels({tr("Type"), tr("Result")});
+    m_table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    m_table->verticalHeader()->setVisible(false);
+    m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    m_table->setMinimumHeight(180);
+    ms->contentLayout()->addWidget(m_table);
+    auto *csv = new QPushButton(tr("Export measurements (CSV)…"), sideContent);
+    ms->contentLayout()->addWidget(csv);
+    sl->addWidget(ms);
+
+    auto *adj = new CollapsibleSection(tr("Adjust"), sideContent);
+    m_brightness = new SliderSpin(tr("Brightness"), -0.5, 0.5, 3, sideContent);
+    m_contrast = new SliderSpin(tr("Contrast"), 0.3, 3.0, 2, sideContent, true);
+    m_gamma = new SliderSpin(tr("Gamma"), 0.3, 3.0, 2, sideContent, true);
+    m_saturation = new SliderSpin(tr("Saturation"), 0.0, 3.0, 2, sideContent);
+    m_sharpen = new SliderSpin(tr("Sharpen"), 0.0, 3.0, 2, sideContent);
+    const double defs[] = {0.0, 1.0, 1.0, 1.0, 0.0};
+    SliderSpin *sliders[] = {m_brightness, m_contrast, m_gamma, m_saturation, m_sharpen};
+    for (int i = 0; i < 5; ++i) {
+        sliders[i]->setValue(defs[i]);
+        sliders[i]->setDefault(defs[i]);
+        adj->contentLayout()->addWidget(sliders[i]);
+        connect(sliders[i], &SliderSpin::valueChanged, this, [this] {
+            m_adjust.brightness = m_brightness->value();
+            m_adjust.contrast = m_contrast->value();
+            m_adjust.gamma = m_gamma->value();
+            m_adjust.saturation = m_saturation->value();
+            m_adjust.sharpenAmount = m_sharpen->value();
+            rerender();
+        });
+    }
+    auto *resetAdj = new QPushButton(tr("Reset adjustments"), sideContent);
+    adj->contentLayout()->addWidget(resetAdj);
+    sl->addWidget(adj);
+
+    auto *inf = new CollapsibleSection(tr("Image information"), sideContent);
+    m_info = new QLabel(sideContent);
+    m_info->setObjectName(QStringLiteral("Hint"));
+    m_info->setWordWrap(true);
+    m_info->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    inf->contentLayout()->addWidget(m_info);
+    auto *cal = new QPushButton(tr("Set pixel size…"), sideContent);
+    inf->contentLayout()->addWidget(cal);
+    sl->addWidget(inf);
+    sl->addStretch();
+    side->setWidget(sideContent);
+    split->setStretchFactor(0, 4);
+    split->setStretchFactor(1, 1);
+    root->addWidget(split, 1);
+
+    connect(resetAdj, &QPushButton::clicked, this, [=] {
+        for (int i = 0; i < 5; ++i)
+            sliders[i]->setValue(defs[i]);
+        m_adjust = ColorSettings();
+        m_adjust.srgbEncode = false;
+        rerender();
+    });
+    connect(cal, &QPushButton::clicked, this, &ProcessPage::setCalibration);
+    connect(csv, &QPushButton::clicked, this, [this] {
+        const QString f = QFileDialog::getSaveFileName(this, tr("Export measurements"),
+                                                       QFileInfo(m_path).dir().filePath(QFileInfo(m_path).completeBaseName() + QStringLiteral("_measurements.csv")),
+                                                       tr("CSV (*.csv)"));
+        if (f.isEmpty())
+            return;
+        QSaveFile out(f);
+        if (!out.open(QIODevice::WriteOnly))
+            return;
+        QTextStream ts(&out);
+        ts << "image,index,type,length_um,area_um2,angle_deg,count,width_um,height_um,summary\n";
+        int i = 1;
+        for (const auto &a : m_layer->annotations()) {
+            const Measurement m = m_layer->measure(a);
+            ts << '"' << QFileInfo(m_path).fileName() << "\"," << i++ << ',' << typeLabel(a.type) << ',' << m.lengthUm << ','
+               << m.areaUm2 << ',' << m.angleDeg << ',' << m.count << ',' << m.widthUm << ',' << m.heightUm << ",\""
+               << QString(m.summary).replace(QLatin1Char('"'), QLatin1Char('\'')) << "\"\n";
+        }
+        out.commit();
+        emit message(tr("Measurements exported to %1").arg(f), 5000);
+    });
+    connect(m_table, &QTableWidget::cellClicked, this, [this](int row, int) {
+        if (row >= 0 && row < m_layer->annotations().size())
+            m_layer->select(m_layer->annotations()[row].id);
+    });
+    connect(m_layer, &AnnotationLayer::changed, this, [this] {
+        updateMeasurements();
+        m_dirtyAnnotations = true;
+        saveAnnotations();
+    });
+    connect(m_layer, &AnnotationLayer::textRequested, this, [this](const QPointF &pos) {
+        bool ok = false;
+        const QString t = QInputDialog::getText(this, tr("Text annotation"), tr("Text:"), QLineEdit::Normal, QString(), &ok);
+        if (ok)
+            m_layer->addText(pos, t);
+    });
+    connect(m_layer, &AnnotationLayer::editTextRequested, this, [this](int id) {
+        for (const auto &a : m_layer->annotations())
+            if (a.id == id) {
+                bool ok = false;
+                const QString t = QInputDialog::getText(this, tr("Edit text"), tr("Text:"), QLineEdit::Normal, a.text, &ok);
+                if (ok)
+                    m_layer->setAnnotationText(id, t);
+                return;
+            }
+    });
+    connect(m_view, &ImageView::contextMenuRequested, this, [this](const QPoint &gp) {
+        QMenu m(this);
+        m.addAction(tr("Fit to window"), m_view, &ImageView::zoomFit);
+        m.addAction(tr("Actual pixels (100%)"), m_view, &ImageView::zoomActual);
+        m.addSeparator();
+        m.addAction(tr("Copy image"), this, &ProcessPage::copyToClipboard);
+        m.addAction(tr("Export with overlays…"), this, &ProcessPage::exportWithOverlays);
+        m.exec(gp);
+    });
+}
+
+void ProcessPage::openDialog()
+{
+    const QString f = QFileDialog::getOpenFileName(this, tr("Open image"), AppSettings::instance().browseFolder, tr(kFileFilter));
+    if (!f.isEmpty())
+        openFile(f);
+}
+
+bool ProcessPage::openFile(const QString &path)
+{
+    LoadedImage li;
+    QString err;
+    if (!loadImage(path, li, &err)) {
+        QMessageBox::warning(this, tr("Open image"), tr("Cannot open %1:\n%2").arg(path, err));
+        return false;
+    }
+    openImage(li.data, li.meta, path);
+    return true;
+}
+
+void ProcessPage::openImage(const Image16 &img, const ImageMetadata &meta, const QString &path)
+{
+    m_data = img;
+    m_meta = meta;
+    m_path = path;
+    m_layer->blockSignals(true);
+    if (!path.isEmpty())
+        m_layer->loadSidecar(path);
+    else
+        m_layer->clear();
+    m_layer->blockSignals(false);
+    m_view->setUmPerPixel(meta.umPerPixel);
+    rerender();
+    m_view->zoomFit();
+    updateMeasurements();
+    updateInfo();
+    emit message(path.isEmpty() ? tr("New image (not saved yet)") : tr("Opened %1").arg(QFileInfo(path).fileName()), 3000);
+}
+
+void ProcessPage::rerender()
+{
+    if (m_data.empty()) {
+        m_view->clear();
+        return;
+    }
+    ColorPipeline p;
+    p.update(m_adjust);
+    m_view->setImage(toQImage8(p.render8(m_data)));
+}
+
+void ProcessPage::updateMeasurements()
+{
+    const auto &items = m_layer->annotations();
+    m_table->setRowCount(int(items.size()));
+    for (int i = 0; i < items.size(); ++i) {
+        const Measurement m = m_layer->measure(items[i]);
+        m_table->setItem(i, 0, new QTableWidgetItem(QStringLiteral("%1 %2").arg(typeLabel(items[i].type)).arg(i + 1)));
+        m_table->setItem(i, 1, new QTableWidgetItem(m.summary));
+        if (items[i].id == m_layer->selectedId())
+            m_table->selectRow(i);
+    }
+}
+
+void ProcessPage::updateInfo()
+{
+    QStringList lines;
+    if (!m_path.isEmpty())
+        lines << QFileInfo(m_path).fileName();
+    lines << tr("%1 × %2 px").arg(m_data.width).arg(m_data.height);
+    for (const auto &kv : m_meta.describe())
+        if (kv.first != tr("Image size"))
+            lines << QStringLiteral("%1: %2").arg(kv.first, kv.second);
+    if (m_meta.umPerPixel <= 0)
+        lines << tr("Not calibrated — measurements in pixels");
+    m_info->setText(lines.join(QLatin1Char('\n')));
+}
+
+void ProcessPage::saveAnnotations()
+{
+    if (!m_path.isEmpty() && m_dirtyAnnotations) {
+        m_layer->saveSidecar(m_path);
+        m_dirtyAnnotations = false;
+    }
+}
+
+void ProcessPage::setCalibration()
+{
+    bool ok = false;
+    const double v = QInputDialog::getDouble(this, tr("Pixel size"), tr("Micrometres per pixel:"),
+                                             m_meta.umPerPixel > 0 ? m_meta.umPerPixel : 0.1, 0.0001, 1000, 5, &ok);
+    if (!ok)
+        return;
+    m_meta.umPerPixel = v;
+    m_view->setUmPerPixel(v);
+    updateMeasurements();
+    updateInfo();
+}
+
+void ProcessPage::saveAs()
+{
+    if (m_data.empty())
+        return;
+    const QString start = m_path.isEmpty() ? AppSettings::instance().nextFileName(QString(), QStringLiteral("processed")) : m_path;
+    QString selected;
+    const QString f = QFileDialog::getSaveFileName(this, tr("Save image"), start,
+                                                   tr("TIFF 16-bit (*.tif);;TIFF 8-bit (*.tif);;PNG (*.png);;JPEG (*.jpg);;BMP (*.bmp)"),
+                                                   &selected);
+    if (f.isEmpty())
+        return;
+    SaveOptions opt;
+    opt.format = formatFromExtension(f);
+    opt.sixteenBit = selected.contains(QLatin1String("16")) || opt.format == FileFormat::Png;
+    ColorPipeline p;
+    p.update(m_adjust);
+    Image16 out = p.render16(m_data);
+    QString err;
+    if (!saveImage(f, out, m_meta, opt, &err)) {
+        QMessageBox::warning(this, tr("Save image"), tr("Could not save:\n%1").arg(err));
+        return;
+    }
+    m_path = f;
+    m_dirtyAnnotations = true;
+    saveAnnotations();
+    updateInfo();
+    emit fileSaved(f);
+    emit message(tr("Saved %1").arg(f), 5000);
+}
+
+void ProcessPage::exportWithOverlays()
+{
+    if (m_data.empty())
+        return;
+    const QString base = m_path.isEmpty() ? AppSettings::instance().capture.folder + QStringLiteral("/export")
+                                          : QFileInfo(m_path).dir().filePath(QFileInfo(m_path).completeBaseName() + QStringLiteral("_annotated"));
+    const QString f = QFileDialog::getSaveFileName(this, tr("Export with annotations and scale bar"), base + QStringLiteral(".png"),
+                                                   tr("PNG (*.png);;TIFF (*.tif);;JPEG (*.jpg)"));
+    if (f.isEmpty())
+        return;
+    const QImage img = m_view->renderWithOverlays(AppSettings::instance().overlays.scaleBar, true);
+    SaveOptions opt;
+    opt.format = formatFromExtension(f);
+    opt.sixteenBit = false;
+    QString err;
+    if (!saveImage(f, img, m_meta, opt, &err))
+        QMessageBox::warning(this, tr("Export"), tr("Could not export:\n%1").arg(err));
+    else
+        emit message(tr("Exported %1").arg(f), 5000);
+}
+
+void ProcessPage::copyToClipboard()
+{
+    if (m_data.empty())
+        return;
+    QApplication::clipboard()->setImage(m_view->renderWithOverlays(AppSettings::instance().overlays.scaleBar, true));
+    emit message(tr("Image copied to the clipboard"), 3000);
+}
+
+void ProcessPage::print()
+{
+    if (m_data.empty())
+        return;
+    QPrinter printer(QPrinter::HighResolution);
+    QPrintDialog dlg(&printer, this);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+    QPainter p(&printer);
+    const QImage img = m_view->renderWithOverlays(AppSettings::instance().overlays.scaleBar, true);
+    const QRect page = p.viewport();
+    QStringList caption;
+    caption << (m_path.isEmpty() ? tr("Untitled") : QFileInfo(m_path).fileName());
+    if (!m_meta.objective.isEmpty())
+        caption << m_meta.objective;
+    if (m_meta.acquired.isValid())
+        caption << QLocale().toString(m_meta.acquired, QLocale::ShortFormat);
+    const int capH = page.height() / 20;
+    QSize s = img.size().scaled(page.width(), page.height() - capH * 2, Qt::KeepAspectRatio);
+    p.drawImage(QRect(QPoint(page.left() + (page.width() - s.width()) / 2, page.top()), s), img);
+    QFont f = p.font();
+    f.setPointSize(9);
+    p.setFont(f);
+    p.drawText(QRect(page.left(), page.top() + s.height() + capH / 2, page.width(), capH), Qt::AlignLeft | Qt::AlignTop,
+               caption.join(QStringLiteral("  ·  ")));
+}
+
+void ProcessPage::multifocusFromFiles()
+{
+    const QStringList files = QFileDialog::getOpenFileNames(this, tr("Select images of a focus series"),
+                                                            AppSettings::instance().browseFolder, tr(kFileFilter));
+    if (files.size() < 2)
+        return;
+    QProgressDialog prog(tr("Merging focus series…"), tr("Cancel"), 0, int(files.size()), this);
+    prog.setWindowModality(Qt::WindowModal);
+    FocusStacker st;
+    st.setMode(FocusStacker::Mode::MaxContrast);
+    ImageMetadata meta;
+    for (int i = 0; i < files.size(); ++i) {
+        prog.setValue(i);
+        QApplication::processEvents();
+        if (prog.wasCanceled())
+            return;
+        LoadedImage li;
+        if (!loadImage(files[i], li)) {
+            QMessageBox::warning(this, tr("Multifocus"), tr("Cannot read %1").arg(files[i]));
+            return;
+        }
+        if (i == 0)
+            meta = li.meta;
+        st.add(li.data);
+    }
+    prog.setValue(int(files.size()));
+    meta.captureMode = tr("multifocus (%1 images)").arg(files.size());
+    meta.acquired = QDateTime::currentDateTime();
+    openImage(st.result(), meta, QString());
+}
+
+void ProcessPage::stitchFromFiles()
+{
+    const QStringList files = QFileDialog::getOpenFileNames(this, tr("Select overlapping images in acquisition order"),
+                                                            AppSettings::instance().browseFolder, tr(kFileFilter));
+    if (files.size() < 2)
+        return;
+    QProgressDialog prog(tr("Stitching…"), tr("Cancel"), 0, int(files.size()), this);
+    prog.setWindowModality(Qt::WindowModal);
+    MosaicBuilder mb;
+    auto o = mb.options();
+    o.autoAdd = false;
+    mb.setOptions(o);
+    ImageMetadata meta;
+    int failed = 0;
+    for (int i = 0; i < files.size(); ++i) {
+        prog.setValue(i);
+        QApplication::processEvents();
+        if (prog.wasCanceled())
+            return;
+        LoadedImage li;
+        if (!loadImage(files[i], li))
+            continue;
+        if (i == 0)
+            meta = li.meta;
+        const auto st = mb.feed(li.data, true);
+        if (i > 0 && !st.added)
+            ++failed;
+    }
+    prog.setValue(int(files.size()));
+    if (failed)
+        QMessageBox::information(this, tr("Stitching"), tr("%1 image(s) could not be placed (insufficient overlap).").arg(failed));
+    meta.captureMode = tr("stitched (%1 images)").arg(files.size());
+    meta.acquired = QDateTime::currentDateTime();
+    openImage(mb.result(), meta, QString());
+}
+
+} // namespace lm

@@ -25,6 +25,13 @@ Histogram computeHistogram(const Image8 &img, int step = 2);
 // Histogram of linear data (binned to 256 by the upper 8 bits).
 Histogram computeHistogram(const Image16 &img, int step = 2);
 
+// Histogram of 0xffRRGGBB pixels (live preview buffers).
+Histogram computeHistogram32(const uint32_t *px, int width, int height, int stride, int step = 3);
+
+// Focus measure computed directly on raw data (green Bayer sites or
+// luminance); region in sensor coordinates, empty = central 50%.
+double focusMeasureRaw(const RawFrame &raw, Rect region = {});
+
 // Normalized variance of the Laplacian over the green channel; higher = sharper.
 // Region empty = central 50% of the image.
 double focusMeasure(const Image16 &img, Rect region = {});

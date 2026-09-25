@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -50,6 +51,23 @@ struct RawFrame {
     bool empty() const { return data.empty() || width <= 0 || height <= 0; }
 };
 using RawFramePtr = std::shared_ptr<const RawFrame>;
+
+// Recycles frame buffers so streaming does not allocate (and zero) several
+// megabytes per frame. Frames return to the pool when the last reference is
+// released; the pool itself is reference counted and may outlive its owner.
+class FramePool : public std::enable_shared_from_this<FramePool> {
+public:
+    static std::shared_ptr<FramePool> create(size_t maxFree = 8) { return std::shared_ptr<FramePool>(new FramePool(maxFree)); }
+    // Returns a frame whose data vector holds at least `bytes` (contents undefined).
+    std::shared_ptr<RawFrame> acquire(size_t bytes);
+
+private:
+    explicit FramePool(size_t maxFree) : m_maxFree(maxFree) {}
+    void release(RawFrame *f);
+    std::mutex m_mutex;
+    std::vector<std::unique_ptr<RawFrame>> m_free;
+    size_t m_maxFree;
+};
 
 // Linear, 3-channel 16-bit working image (R,G,B interleaved). All processing
 // before display/output happens in this space to keep maximal precision.
