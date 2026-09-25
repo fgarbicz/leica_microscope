@@ -14,6 +14,7 @@
 #include <QMutex>
 #include <QObject>
 #include <QThread>
+#include <QThreadPool>
 #include <QWaitCondition>
 
 #include <atomic>
@@ -68,7 +69,9 @@ public:
     std::vector<CameraInfo> enumerateCameras();
     bool openCamera(const CameraInfo &info, QString &error);
     void closeCamera();
-    Camera *camera() const { return m_camera.get(); }
+    Camera *camera() const { return m_camera.get(); } // UI thread only
+    // Waits for background capture/reconstruction jobs (used before shutdown).
+    void waitForJobs();
     bool isLive() const;
     bool startLive(QString &error);
     void stopLive();
@@ -138,11 +141,15 @@ signals:
 private:
     void onRawFrame(RawFramePtr f);
     void processingLoop();
-    void runAutoExposure(const RawFrame &raw);
+    void runAutoExposure(const RawFrame &raw, Camera *cam);
     QImage toQImage(const Image8 &img, bool clipping, const Image16 *linear);
 
     std::vector<std::unique_ptr<CameraBackend>> m_backends;
-    std::unique_ptr<Camera> m_camera;
+    // shared: worker threads keep a reference while they use the camera
+    std::shared_ptr<Camera> m_camera;
+    std::shared_ptr<Camera> cameraRef() const;
+    void cancelPendingCapture(const QString &reason);
+    QThreadPool m_jobs; // capture / reconstruction jobs (joined on shutdown)
 
     mutable QMutex m_mutex;
     QWaitCondition m_frameCond;

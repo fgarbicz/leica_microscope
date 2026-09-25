@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.24)
+﻿cmake_minimum_required(VERSION 3.24)
 project(DMImaging VERSION 1.0.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -47,6 +47,8 @@ add_executable(DMImaging WIN32
     src/app/AcquisitionEngine.cpp
     src/app/AppSettings.cpp
     src/app/Calibration.cpp
+    src/app/VideoRecorder.cpp
+    src/io/AviWriter.cpp
     src/io/ImageIO.cpp
     src/io/Metadata.cpp
     src/ui/MainWindow.cpp
@@ -78,6 +80,11 @@ add_executable(enginetest tests/enginetest.cpp src/app/AcquisitionEngine.cpp)
 target_include_directories(enginetest PRIVATE src)
 target_link_libraries(enginetest PRIVATE lmcore Qt6::Core Qt6::Gui Qt6::Concurrent)
 add_test(NAME enginetest COMMAND enginetest)
+
+add_executable(iotest tests/iotest.cpp src/io/ImageIO.cpp src/io/Metadata.cpp)
+target_include_directories(iotest PRIVATE src)
+target_link_libraries(iotest PRIVATE lmcore Qt6::Core Qt6::Gui)
+add_test(NAME iotest COMMAND iotest)
 endif()
 
 # ---------------------------------------------------------------- tools & tests

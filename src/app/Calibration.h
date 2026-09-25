@@ -9,6 +9,7 @@
 namespace lm {
 
 struct Objective {
+    QString id;          // stable identifier (file names of per-objective data)
     QString name;
     double magnification = 10.0;
     double na = 0.25;

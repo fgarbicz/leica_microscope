@@ -15,6 +15,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QTableWidget>
+#include <QUuid>
 #include <QVBoxLayout>
 
 namespace lm {
@@ -148,15 +149,17 @@ void MicroscopePanel::editObjectives()
     auto *table = new QTableWidget(int(m_cfg->objectives.size()), 5, &dlg);
     table->setHorizontalHeaderLabels({tr("Name"), tr("Magnification"), tr("NA"), tr("Immersion"), tr("Calibrated µm/px (0 = nominal)")});
     table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-    auto fill = [&](int r, const Objective &o) {
-        table->setItem(r, 0, new QTableWidgetItem(o.name));
+    auto fill = [&](int r, const Objective &o, int original) {
+        auto *nameItem = new QTableWidgetItem(o.name);
+        nameItem->setData(Qt::UserRole, original); // index into the original list (-1 = new)
+        table->setItem(r, 0, nameItem);
         table->setItem(r, 1, new QTableWidgetItem(QString::number(o.magnification)));
         table->setItem(r, 2, new QTableWidgetItem(QString::number(o.na)));
         table->setItem(r, 3, new QTableWidgetItem(o.immersion));
         table->setItem(r, 4, new QTableWidgetItem(QString::number(o.calibratedUmPerPixel, 'g', 6)));
     };
     for (int r = 0; r < m_cfg->objectives.size(); ++r)
-        fill(r, m_cfg->objectives[r]);
+        fill(r, m_cfg->objectives[r], r);
     lay->addWidget(table);
     auto *btns = new QHBoxLayout;
     auto *add = new QPushButton(tr("Add"), &dlg);
@@ -174,7 +177,7 @@ void MicroscopePanel::editObjectives()
         table->insertRow(r);
         Objective o;
         o.name = tr("New objective");
-        fill(r, o);
+        fill(r, o, -1);
     });
     connect(del, &QPushButton::clicked, &dlg, [&] {
         if (table->currentRow() >= 0)
@@ -184,7 +187,7 @@ void MicroscopePanel::editObjectives()
         const auto d = MicroscopeConfig::defaultObjectives();
         table->setRowCount(int(d.size()));
         for (int r = 0; r < d.size(); ++r)
-            fill(r, d[r]);
+            fill(r, d[r], -1);
     });
     connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
     connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
@@ -192,15 +195,17 @@ void MicroscopePanel::editObjectives()
         return;
     QList<Objective> list;
     for (int r = 0; r < table->rowCount(); ++r) {
-        Objective o;
         auto txt = [&](int c) { return table->item(r, c) ? table->item(r, c)->text() : QString(); };
+        const int original = table->item(r, 0) ? table->item(r, 0)->data(Qt::UserRole).toInt() : -1;
+        // start from the original objective so shading, id and stored camera settings survive
+        Objective o = original >= 0 && original < m_cfg->objectives.size() ? m_cfg->objectives[original] : Objective();
         o.name = txt(0);
         o.magnification = std::max(0.1, txt(1).toDouble());
         o.na = txt(2).toDouble();
         o.immersion = txt(3);
         o.calibratedUmPerPixel = std::max(0.0, txt(4).toDouble());
-        if (r < m_cfg->objectives.size())
-            o.shadingFile = m_cfg->objectives[r].shadingFile;
+        if (o.id.isEmpty())
+            o.id = QUuid::createUuid().toString(QUuid::Id128).left(12);
         list.append(o);
     }
     if (list.isEmpty())

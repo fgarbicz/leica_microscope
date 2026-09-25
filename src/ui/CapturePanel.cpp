@@ -156,6 +156,27 @@ CapturePanel::CapturePanel(QWidget *parent) : QWidget(parent)
     mo->contentLayout()->addWidget(m_moStatus);
     root->addWidget(mo);
 
+    // --- video
+    auto *vid = new CollapsibleSection(tr("Video recording"), this, false);
+    auto *vf = new QFormLayout;
+    vf->setContentsMargins(0, 0, 0, 0);
+    m_videoFps = new QSpinBox(this);
+    m_videoFps->setRange(1, 60);
+    m_videoFps->setSuffix(tr(" fps"));
+    vf->addRow(tr("Frame rate"), m_videoFps);
+    vid->contentLayout()->addLayout(vf);
+    m_videoScale = new QCheckBox(tr("Include scale bar"), this);
+    vid->contentLayout()->addWidget(m_videoScale);
+    m_record = new QPushButton(tr("● Record video"), this);
+    m_record->setCheckable(true);
+    m_record->setObjectName(QStringLiteral("LiveButton"));
+    vid->contentLayout()->addWidget(m_record);
+    m_recStatus = new QLabel(this);
+    m_recStatus->setObjectName(QStringLiteral("Hint"));
+    m_recStatus->setWordWrap(true);
+    vid->contentLayout()->addWidget(m_recStatus);
+    root->addWidget(vid);
+
     // --- time lapse
     auto *tl = new CollapsibleSection(tr("Time lapse"), this, false);
     auto *tf = new QFormLayout;
@@ -207,6 +228,9 @@ CapturePanel::CapturePanel(QWidget *parent) : QWidget(parent)
     connect(m_tlInterval, &QDoubleSpinBox::valueChanged, this, &CapturePanel::store);
     connect(m_tlCount, &QSpinBox::valueChanged, this, &CapturePanel::store);
     connect(m_tlStart, &QPushButton::toggled, this, &CapturePanel::timelapseToggled);
+    connect(m_videoFps, &QSpinBox::valueChanged, this, &CapturePanel::store);
+    connect(m_videoScale, &QCheckBox::toggled, this, &CapturePanel::store);
+    connect(m_record, &QPushButton::toggled, this, &CapturePanel::recordToggled);
     connect(m_mfStart, &QPushButton::clicked, this, &CapturePanel::multifocusStart);
     connect(m_mfFinish, &QPushButton::clicked, this, &CapturePanel::multifocusFinish);
     connect(m_mfCancel, &QPushButton::clicked, this, &CapturePanel::multifocusCancel);
@@ -252,6 +276,8 @@ void CapturePanel::refreshFromSettings()
     m_prompt->setChecked(c.promptAfterCapture);
     m_tlInterval->setValue(c.timelapseIntervalS);
     m_tlCount->setValue(c.timelapseCount);
+    m_videoFps->setValue(c.videoFps);
+    m_videoScale->setChecked(c.videoScaleBar);
     m_updating = false;
 }
 
@@ -275,6 +301,8 @@ void CapturePanel::store()
     c.promptAfterCapture = m_prompt->isChecked();
     c.timelapseIntervalS = m_tlInterval->value();
     c.timelapseCount = m_tlCount->value();
+    c.videoFps = m_videoFps->value();
+    c.videoScaleBar = m_videoScale->isChecked();
     m_jpegQuality->setEnabled(f.fmt == FileFormat::Jpeg);
     m_average->setEnabled(c.shotMode < 0);
     AppSettings::instance().save();
@@ -310,6 +338,15 @@ void CapturePanel::setTimelapseRunning(bool on, int done, int total)
     m_tlStart->setChecked(on);
     m_tlStart->setText(on ? tr("Stop time lapse") : tr("Start time lapse"));
     m_tlStatus->setText(on || done > 0 ? tr("%1 of %2 images").arg(done).arg(total) : QString());
+}
+
+void CapturePanel::setRecording(bool on, const QString &status)
+{
+    QSignalBlocker b(m_record);
+    m_record->setChecked(on);
+    m_record->setText(on ? tr("■ Stop recording") : tr("● Record video"));
+    m_recStatus->setText(status);
+    m_videoFps->setEnabled(!on);
 }
 
 void CapturePanel::setMultifocusRunning(bool on, int frames)

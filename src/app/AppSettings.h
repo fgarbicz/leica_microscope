@@ -28,6 +28,9 @@ struct CaptureSettings {
     // time lapse
     double timelapseIntervalS = 60.0;
     int timelapseCount = 10;
+    // video
+    int videoFps = 25;
+    bool videoScaleBar = true;
 };
 
 struct OverlaySettings {

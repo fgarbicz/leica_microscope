@@ -2,10 +2,12 @@
 
 #include "app/AcquisitionEngine.h"
 #include "app/Calibration.h"
+#include "app/VideoRecorder.h"
 #include "io/Metadata.h"
 
 #include <QMainWindow>
 #include <QPointer>
+#include <QSet>
 #include <QTimer>
 
 class QTabBar;
@@ -78,11 +80,14 @@ private:
     QLabel *m_statusCamera, *m_statusFps, *m_statusExposure, *m_statusCursor, *m_statusZoom;
     QTimer m_timelapse;
     QTimer m_reconnect;   // polls for a lost camera
+    VideoRecorder m_recorder;
+    QTimer m_recTimer;
     QString m_lostCameraId;
     int m_timelapseDone = 0;
     bool m_multifocus = false, m_mosaic = false;
     bool m_capturing = false;
     QList<QPoint> m_calibPoints;
+    QSet<QString> m_pendingSaves; // images being written in the background
     LiveStats m_lastStats;
     int m_prevObjective = -1;
     bool m_objectiveFromCapture = false;

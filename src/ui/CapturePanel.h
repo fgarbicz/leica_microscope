@@ -30,6 +30,7 @@ public:
     void setTimelapseRunning(bool on, int done, int total);
     void setMultifocusRunning(bool on, int frames);
     void setMosaicRunning(bool on, int tiles, bool tracking);
+    void setRecording(bool on, const QString &status);
 
 signals:
     void captureRequested();
@@ -42,6 +43,7 @@ signals:
     void mosaicCancel();
     void mosaicAddTile();
     void mosaicAutoAddChanged(bool on);
+    void recordToggled(bool start);
     void settingsChanged();
 
 private:
@@ -73,6 +75,11 @@ private:
     QPushButton *m_moStart, *m_moFinish, *m_moCancel, *m_moAdd;
     QCheckBox *m_moAuto;
     QLabel *m_moStatus;
+    // video
+    QSpinBox *m_videoFps;
+    QCheckBox *m_videoScale;
+    QPushButton *m_record;
+    QLabel *m_recStatus;
     bool m_updating = false;
 };
 

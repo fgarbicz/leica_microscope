@@ -112,6 +112,8 @@ void AppSettings::load()
     capture.operatorName = s.value(QStringLiteral("operator")).toString();
     capture.timelapseIntervalS = s.value(QStringLiteral("tlInterval"), 60.0).toDouble();
     capture.timelapseCount = s.value(QStringLiteral("tlCount"), 10).toInt();
+    capture.videoFps = s.value(QStringLiteral("videoFps"), 25).toInt();
+    capture.videoScaleBar = s.value(QStringLiteral("videoScaleBar"), true).toBool();
     s.endGroup();
 
     s.beginGroup(QStringLiteral("overlays"));
@@ -172,6 +174,8 @@ void AppSettings::save() const
     s.setValue(QStringLiteral("operator"), capture.operatorName);
     s.setValue(QStringLiteral("tlInterval"), capture.timelapseIntervalS);
     s.setValue(QStringLiteral("tlCount"), capture.timelapseCount);
+    s.setValue(QStringLiteral("videoFps"), capture.videoFps);
+    s.setValue(QStringLiteral("videoScaleBar"), capture.videoScaleBar);
     s.endGroup();
 
     s.beginGroup(QStringLiteral("overlays"));

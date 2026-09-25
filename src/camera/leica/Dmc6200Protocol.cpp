@@ -1,6 +1,7 @@
 #include "Dmc6200Protocol.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 
 namespace lm::dmc {
@@ -69,6 +70,7 @@ bool Protocol::open(const std::string &path, std::string &error)
 
 void Protocol::close()
 {
+    std::lock_guard<std::mutex> lock(m_cmdMutex); // never free the device during a command
     m_dev.reset();
 }
 
@@ -77,7 +79,7 @@ bool Protocol::command(uint16_t cmd, const std::vector<uint8_t> &payload, uint32
 {
     std::lock_guard<std::mutex> lock(m_cmdMutex);
     if (!m_dev) {
-        m_error = "device not open";
+        setError("device not open");
         return false;
     }
     std::vector<uint8_t> req;
@@ -88,13 +90,13 @@ bool Protocol::command(uint16_t cmd, const std::vector<uint8_t> &payload, uint32
     put32(req, 0);
     req.insert(req.end(), payload.begin(), payload.end());
     if (m_dev->write(kEpCmdOut, req.data(), req.size(), timeoutMs) != int(req.size())) {
-        m_error = "command write failed: " + m_dev->lastErrorText();
+        setError("command write failed: " + m_dev->lastErrorText());
         return false;
     }
     std::vector<uint8_t> resp(size_t(maxResponse) + 8 + 512);
     int n = m_dev->read(kEpCmdIn, resp.data(), resp.size(), timeoutMs);
     if (n < 8) {
-        m_error = "command response failed: " + (n < 0 ? m_dev->lastErrorText() : std::string("short response"));
+        setError("command response failed: " + (n < 0 ? m_dev->lastErrorText() : std::string("short response")));
         return false;
     }
     const uint16_t rcmd = get16(resp.data()), plen = get16(resp.data() + 2), st = get16(resp.data() + 4),
@@ -102,7 +104,7 @@ bool Protocol::command(uint16_t cmd, const std::vector<uint8_t> &payload, uint32
     if (status)
         *status = st;
     if (rcmd != cmd || magic != kMagic) {
-        m_error = "unexpected response header";
+        setError("unexpected response header");
         return false;
     }
     if (response) {
@@ -110,7 +112,11 @@ bool Protocol::command(uint16_t cmd, const std::vector<uint8_t> &payload, uint32
         response->assign(resp.begin() + 8, resp.begin() + 8 + avail);
     }
     if (st != 0) {
-        m_error = "camera returned status 0x" + std::to_string(st);
+        {
+            char hex[16];
+            std::snprintf(hex, sizeof(hex), "0x%04X", unsigned(st));
+            setError(std::string("camera returned status ") + hex);
+        }
         return false;
     }
     return true;
@@ -126,7 +132,7 @@ bool Protocol::readRegisters(const std::vector<uint32_t> &regs, std::vector<uint
     if (!command(Cmd::ReadRegs, p, uint32_t(4 + 8 * regs.size()), &resp))
         return false;
     if (resp.size() < 4 + 8 * regs.size()) {
-        m_error = "short register read";
+        setError("short register read");
         return false;
     }
     values.resize(regs.size());
@@ -179,13 +185,13 @@ bool Protocol::uploadSequence(const std::vector<SequenceEntry> &entries)
     put32(hdr, uint32_t(body.size()));
     if (m_dev->write(kEpCmdOut, hdr.data(), hdr.size(), 1000) != int(hdr.size())
         || m_dev->write(kEpCmdOut, body.data(), body.size(), 1000) != int(body.size())) {
-        m_error = "sequence upload failed: " + m_dev->lastErrorText();
+        setError("sequence upload failed: " + m_dev->lastErrorText());
         return false;
     }
     uint8_t resp[64];
     int n = m_dev->read(kEpCmdIn, resp, sizeof(resp), 1000);
     if (n < 8 || get16(resp) != Cmd::SequenceTable || get16(resp + 6) != kMagic || get16(resp + 4) != 0) {
-        m_error = "sequence upload not acknowledged";
+        setError("sequence upload not acknowledged");
         return false;
     }
     return true;
@@ -223,6 +229,8 @@ std::string Protocol::sensorName()
 
 bool Protocol::waitFrameEvent(FrameEvent &ev, unsigned timeoutMs)
 {
+    if (!m_dev)
+        return false;
     uint8_t buf[64];
     int n = m_dev->read(kEpEvent, buf, sizeof(buf), timeoutMs);
     if (n <= 0)
@@ -232,13 +240,15 @@ bool Protocol::waitFrameEvent(FrameEvent &ev, unsigned timeoutMs)
 
 long long Protocol::readFrame(uint8_t *buf, size_t bytes, unsigned timeoutMs)
 {
+    if (!m_dev)
+        return -1;
     // read the image in large chunks (WinUSB splits into bursts internally)
     size_t done = 0;
     while (done < bytes) {
         const size_t chunk = std::min<size_t>(bytes - done, 4u << 20);
         int n = m_dev->read(kEpImage, buf + done, chunk, timeoutMs);
         if (n <= 0) {
-            m_error = "image read failed: " + (n < 0 ? m_dev->lastErrorText() : std::string("zero length"));
+            setError("image read failed: " + (n < 0 ? m_dev->lastErrorText() : std::string("zero length")));
             return -1;
         }
         done += size_t(n);

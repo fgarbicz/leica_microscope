@@ -7,9 +7,28 @@
 #include <cstdio>
 #include <cstring>
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 namespace lm {
 
 namespace {
+// fopen with a UTF-8 path (non-ASCII user names on Windows)
+FILE *openUtf8(const std::string &path, const wchar_t *wmode, const char *mode)
+{
+#ifdef _WIN32
+    const int n = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
+    std::wstring w(size_t(n > 0 ? n : 1), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, w.data(), n);
+    (void)mode;
+    return _wfopen(w.c_str(), wmode);
+#else
+    (void)wmode;
+    return std::fopen(path.c_str(), mode);
+#endif
+}
+
 constexpr uint32_t kMagic = 0x4C4D5348; // "LMSH"
 constexpr uint32_t kVersion = 1;
 
@@ -99,6 +118,16 @@ std::shared_ptr<ShadingCorrection> ShadingCorrection::fromReference(const Image1
 
 std::shared_ptr<const ShadingCorrection::GainMap> ShadingCorrection::gainsFor(int width, int height) const
 {
+    // The reference must describe the same field of view: equal size or an
+    // integer scale (half-resolution preview, pixel-shift upsampling). A crop
+    // (e.g. a centre ROI) would stretch the vignetting profile, so it is refused.
+    if (width <= 0 || height <= 0 || m_srcW <= 0 || m_srcH <= 0)
+        return nullptr;
+    const bool same = width == m_srcW && height == m_srcH;
+    const bool down = m_srcW % width == 0 && m_srcH % height == 0 && m_srcW / width == m_srcH / height;
+    const bool up = width % m_srcW == 0 && height % m_srcH == 0 && width / m_srcW == height / m_srcH;
+    if (!same && !down && !up)
+        return nullptr;
     std::lock_guard<std::mutex> lock(m_cacheMutex);
     if (m_cache && m_cache->width == width && m_cache->height == height)
         return m_cache;
@@ -134,7 +163,7 @@ std::shared_ptr<const ShadingCorrection::GainMap> ShadingCorrection::gainsFor(in
 
 bool ShadingCorrection::save(const std::string &path) const
 {
-    FILE *f = std::fopen(path.c_str(), "wb");
+    FILE *f = openUtf8(path, L"wb", "wb");
     if (!f)
         return false;
     uint32_t hdr[6] = {kMagic, kVersion, uint32_t(m_gridW), uint32_t(m_gridH), uint32_t(m_srcW), uint32_t(m_srcH)};
@@ -147,7 +176,7 @@ bool ShadingCorrection::save(const std::string &path) const
 
 std::shared_ptr<ShadingCorrection> ShadingCorrection::load(const std::string &path)
 {
-    FILE *f = std::fopen(path.c_str(), "rb");
+    FILE *f = openUtf8(path, L"rb", "rb");
     if (!f)
         return nullptr;
     uint32_t hdr[6];

@@ -96,6 +96,7 @@ AcquisitionEngine::AcquisitionEngine(QObject *parent) : QObject(parent)
 
 AcquisitionEngine::~AcquisitionEngine()
 {
+    waitForJobs();
     closeCamera();
     m_running = false;
     m_frameCond.wakeAll();
@@ -129,24 +130,56 @@ bool AcquisitionEngine::openCamera(const CameraInfo &info, QString &error)
         }
         cam->setFrameCallback([this](RawFramePtr f) { onRawFrame(std::move(f)); });
         cam->setErrorCallback([this](const std::string &e) { emit cameraError(QString::fromStdString(e)); });
-        m_camera = std::move(cam);
+        QMutexLocker l(&m_mutex);
+        m_camera = std::shared_ptr<Camera>(std::move(cam));
         return true;
     }
     error = tr("No backend for camera %1").arg(QString::fromStdString(info.name));
     return false;
 }
 
+std::shared_ptr<Camera> AcquisitionEngine::cameraRef() const
+{
+    QMutexLocker l(&m_mutex);
+    return m_camera;
+}
+
+void AcquisitionEngine::waitForJobs()
+{
+    m_jobs.waitForDone();
+}
+
+void AcquisitionEngine::cancelPendingCapture(const QString &reason)
+{
+    bool cancelled = false;
+    {
+        QMutexLocker l(&m_mutex);
+        if (m_captureWanted > 0) {
+            m_captureWanted = 0;
+            m_captureQueue.clear();
+            cancelled = true;
+        }
+    }
+    if (cancelled)
+        emit captureFailed(reason);
+}
+
 void AcquisitionEngine::closeCamera()
 {
-    if (m_camera) {
-        m_camera->stopStreaming();
-        m_camera->setFrameCallback(nullptr);
-        m_camera->close();
+    std::shared_ptr<Camera> cam;
+    {
+        QMutexLocker l(&m_mutex);
+        cam = std::move(m_camera); // worker threads may still hold a reference
         m_camera.reset();
+        m_pending.reset();
+    }
+    cancelPendingCapture(tr("The camera was disconnected"));
+    if (cam) {
+        cam->stopStreaming();
+        cam->setFrameCallback(nullptr);
+        cam->close();
         emit liveStateChanged(false);
     }
-    QMutexLocker l(&m_mutex);
-    m_pending.reset();
 }
 
 bool AcquisitionEngine::isLive() const
@@ -174,6 +207,7 @@ void AcquisitionEngine::stopLive()
 {
     if (m_camera)
         m_camera->stopStreaming();
+    cancelPendingCapture(tr("The live image was stopped"));
     emit liveStateChanged(false);
 }
 
@@ -275,37 +309,8 @@ void AcquisitionEngine::capture(int averageFrames)
 {
     QMutexLocker l(&m_mutex);
     if (!m_camera || !m_camera->isStreaming()) {
-        // no live stream: capture from the last frame if we have one
-        if (m_last) {
-            m_captureQueue.clear();
-            m_captureQueue.push_back(m_last);
-            m_captureAverage = 1;
-            m_captureWanted = 0;
-            auto frames = m_captureQueue;
-            m_captureQueue.clear();
-            l.unlock();
-            QMetaObject::invokeMethod(this, [this, frames] {
-                // reuse the same path as live captures
-                auto pipeline = [this] { QMutexLocker k(&m_mutex); return m_pipeline; }();
-                auto res = std::make_shared<CaptureResult>();
-                auto raw = averageRawFrames(frames);
-                res->linear = toLinearRGB(*raw, DemosaicMethod::MalvarHeCutler);
-                pipeline->applyLinear(res->linear);
-                const auto &cs = pipeline->settings();
-                res->linear = applyGeometry(res->linear, cs.flipHorizontal, cs.flipVertical, cs.rotation);
-                res->rendered16 = pipeline->toDisplay16(res->linear);
-                unsharpMask(res->rendered16, cs.sharpenAmount, cs.sharpenRadius);
-                res->rendered8 = pipeline->toDisplay8(res->linear);
-                unsharpMask(res->rendered8, cs.sharpenAmount, cs.sharpenRadius);
-                res->exposureMs = raw->exposureMs;
-                res->gain = raw->gain;
-                res->kind = "single";
-                emit captureFinished(res);
-            }, Qt::QueuedConnection);
-            return;
-        }
         l.unlock();
-        emit captureFailed(tr("Camera is not streaming"));
+        emit captureFailed(tr("The camera is not streaming. Start the live image first."));
         return;
     }
     m_captureQueue.clear();
@@ -347,7 +352,7 @@ void AcquisitionEngine::onRawFrame(RawFramePtr f)
 
     if (!captureFrames.empty()) {
         // full quality processing off the camera thread
-        QtConcurrent::run([this, captureFrames = std::move(captureFrames), pipeline] {
+        QtConcurrent::run(&m_jobs, [this, captureFrames = std::move(captureFrames), pipeline] {
             try {
                 auto raw = averageRawFrames(captureFrames);
                 auto res = std::make_shared<CaptureResult>();
@@ -371,7 +376,7 @@ void AcquisitionEngine::onRawFrame(RawFramePtr f)
     }
 }
 
-void AcquisitionEngine::runAutoExposure(const RawFrame &raw)
+void AcquisitionEngine::runAutoExposure(const RawFrame &raw, Camera *cam)
 {
     AutoExposureSettings ae;
     {
@@ -379,12 +384,12 @@ void AcquisitionEngine::runAutoExposure(const RawFrame &raw)
         ae = m_ae;
     }
     const bool once = m_aeOnce;
-    if ((!ae.enabled && !once) || !m_camera)
+    if ((!ae.enabled && !once) || !cam || !cam->isOpen())
         return;
     // wait until frames reflect the last change
     if (secondsSince(m_lastAeChange) < 0.15)
         return;
-    const double current = m_camera->exposure();
+    const double current = cam->exposure();
     if (raw.exposureMs > 0 && std::abs(raw.exposureMs - current) > std::max(0.01, current * 0.02))
         return;
     const ExposureStats st = exposureStats(raw);
@@ -397,26 +402,26 @@ void AcquisitionEngine::runAutoExposure(const RawFrame &raw)
         m_aeOnce = false;
         return;
     }
-    const Range r = m_camera->exposureRange();
+    const Range r = cam->exposureRange();
     double target = std::clamp(current * factor, r.min, std::min(r.max, ae.maxExposureMs));
-    double gain = m_camera->gain();
+    double gain = cam->gain();
     if (ae.allowGain) {
         // push gain up only once exposure is at its limit; bring it down first
         if (factor > 1.0 && target >= std::min(r.max, ae.maxExposureMs) - 1e-6) {
-            const Range gr = m_camera->gainRange();
+            const Range gr = cam->gainRange();
             gain = std::clamp(gain * factor * current / std::max(target, 1e-6), gr.min, gr.max);
-            m_camera->setGain(gain);
+            cam->setGain(gain);
         } else if (factor < 1.0 && gain > 1.0) {
-            const Range gr = m_camera->gainRange();
+            const Range gr = cam->gainRange();
             gain = std::clamp(gain * factor, gr.min, gr.max);
-            m_camera->setGain(gain);
+            cam->setGain(gain);
             target = current;
         }
     }
     if (std::abs(target - current) > 1e-6)
-        m_camera->setExposure(target);
+        cam->setExposure(target);
     m_lastAeChange = Clock::now();
-    emit exposureChanged(m_camera->exposure(), m_camera->gain());
+    emit exposureChanged(cam->exposure(), cam->gain());
 }
 
 QImage AcquisitionEngine::toQImage(const Image8 &img, bool clipping, const Image16 *linear)
@@ -456,7 +461,7 @@ void AcquisitionEngine::processingLoop()
         if (!raw)
             continue;
         try {
-            runAutoExposure(*raw);
+            runAutoExposure(*raw, cameraRef().get());
 
             std::shared_ptr<const ColorPipeline> pipeline;
             Rect focusRegion, wbRegion;
@@ -680,11 +685,12 @@ std::shared_ptr<const ColorPipeline> AcquisitionEngine::pipeline() const
 
 void AcquisitionEngine::captureShots(int modeIndex)
 {
-    if (!m_camera) {
+    std::shared_ptr<Camera> cam = cameraRef();
+    if (!cam) {
         emit captureFailed(tr("No camera open"));
         return;
     }
-    const auto modes = m_camera->shotModes();
+    const auto modes = cam->shotModes();
     if (modeIndex < 0 || modeIndex >= int(modes.size())) {
         emit captureFailed(tr("This camera does not support the selected capture mode"));
         return;
@@ -694,45 +700,55 @@ void AcquisitionEngine::captureShots(int modeIndex)
         return;
     }
     const Camera::ShotMode mode = modes[size_t(modeIndex)];
-    Camera *cam = m_camera.get();
     auto pipe = pipeline();
-    QtConcurrent::run([this, cam, mode, modeIndex, pipe] {
-        std::vector<RawFramePtr> shots;
-        std::string err;
-        const bool ok = cam->captureShots(modeIndex, shots, err, [this, &mode](int done, int total) {
-            QMetaObject::invokeMethod(this, [this, done, total, name = mode.name] {
-                emit captureProgress(done, total, QString::fromStdString(name));
+    QtConcurrent::run(&m_jobs, [this, cam, mode, modeIndex, pipe] {
+        struct BusyGuard {
+            std::atomic<bool> &b;
+            ~BusyGuard() { b = false; }
+        } guard{m_busy};
+        auto fail = [this](const QString &msg) {
+            QMetaObject::invokeMethod(this, [this, msg] { emit captureFailed(msg); }, Qt::QueuedConnection);
+        };
+        try {
+            std::vector<RawFramePtr> shots;
+            std::string err;
+            const bool ok = cam->captureShots(modeIndex, shots, err, [this, &mode](int done, int total) {
+                QMetaObject::invokeMethod(this, [this, done, total, name = mode.name] {
+                    emit captureProgress(done, total, QString::fromStdString(name));
+                }, Qt::QueuedConnection);
+            });
+            if (!ok) {
+                fail(QString::fromStdString(err));
+                return;
+            }
+            QMetaObject::invokeMethod(this, [this, total = int(shots.size())] {
+                emit captureProgress(total, total, tr("Reconstructing…"));
             }, Qt::QueuedConnection);
-        });
-        if (!ok) {
-            m_busy = false;
-            QMetaObject::invokeMethod(this, [this, err] { emit captureFailed(QString::fromStdString(err)); },
-                                      Qt::QueuedConnection);
-            return;
+            auto res = std::make_shared<CaptureResult>();
+            PixelShiftOptions opt;
+            opt.upscale = mode.upscale;
+            opt.signX = -1; // sensor motion moves the image in the opposite direction
+            opt.signY = -1;
+            res->linear = reconstructPixelShift(shots, mode.offsets, opt);
+            res->exposureMs = shots.empty() ? 0 : shots[0]->exposureMs;
+            res->gain = shots.empty() ? 1 : shots[0]->gain;
+            res->averagedFrames = int(shots.size());
+            shots.clear(); // release the raw shots before allocating the outputs
+            pipe->applyLinear(res->linear);
+            const auto &cs = pipe->settings();
+            res->linear = applyGeometry(res->linear, cs.flipHorizontal, cs.flipVertical, cs.rotation);
+            res->rendered16 = pipe->toDisplay16(res->linear);
+            unsharpMask(res->rendered16, cs.sharpenAmount, cs.sharpenRadius * mode.upscale);
+            res->rendered8 = pipe->toDisplay8(res->linear);
+            unsharpMask(res->rendered8, cs.sharpenAmount, cs.sharpenRadius * mode.upscale);
+            res->upscale = mode.upscale;
+            res->kind = "pixelshift-" + std::to_string(mode.shots);
+            emit captureFinished(res);
+        } catch (const std::bad_alloc &) {
+            fail(tr("Not enough memory for this capture mode. Close other programs or use a mode with fewer shots."));
+        } catch (const std::exception &e) {
+            fail(QString::fromUtf8(e.what()));
         }
-        QMetaObject::invokeMethod(this, [this, total = int(shots.size())] {
-            emit captureProgress(total, total, tr("Reconstructing…"));
-        }, Qt::QueuedConnection);
-        auto res = std::make_shared<CaptureResult>();
-        PixelShiftOptions opt;
-        opt.upscale = mode.upscale;
-        opt.signX = -1; // sensor motion moves the image in the opposite direction
-        opt.signY = -1;
-        res->linear = reconstructPixelShift(shots, mode.offsets, opt);
-        pipe->applyLinear(res->linear);
-        const auto &cs = pipe->settings();
-        res->linear = applyGeometry(res->linear, cs.flipHorizontal, cs.flipVertical, cs.rotation);
-        res->rendered16 = pipe->toDisplay16(res->linear);
-        unsharpMask(res->rendered16, cs.sharpenAmount, cs.sharpenRadius * mode.upscale);
-        res->rendered8 = pipe->toDisplay8(res->linear);
-        unsharpMask(res->rendered8, cs.sharpenAmount, cs.sharpenRadius * mode.upscale);
-        res->exposureMs = shots.empty() ? 0 : shots[0]->exposureMs;
-        res->gain = shots.empty() ? 1 : shots[0]->gain;
-        res->averagedFrames = int(shots.size());
-        res->upscale = mode.upscale;
-        res->kind = "pixelshift-" + std::to_string(mode.shots);
-        m_busy = false;
-        emit captureFinished(res);
     });
 }
 
@@ -753,6 +769,7 @@ void AcquisitionEngine::finishMultifocus()
     res->rendered8 = pipeline->toDisplay8(res->linear);
     res->averagedFrames = m_stacker.frameCount();
     res->kind = "multifocus";
+    m_stacker.reset();
     if (m_camera) {
         res->exposureMs = m_camera->exposure();
         res->gain = m_camera->gain();
@@ -778,6 +795,7 @@ void AcquisitionEngine::finishMosaic()
     res->rendered8 = pipeline->toDisplay8(res->linear);
     res->averagedFrames = m_mosaic.status().tiles;
     res->kind = "mosaic";
+    m_mosaic.reset();
     if (m_camera) {
         res->exposureMs = m_camera->exposure();
         res->gain = m_camera->gain();

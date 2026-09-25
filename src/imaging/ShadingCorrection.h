@@ -31,7 +31,8 @@ public:
 
     bool valid() const { return m_gridW > 0; }
 
-    // Returns gains for an image of the given size (cached, thread safe).
+    // Returns gains for an image of the given size (cached, thread safe), or
+    // nullptr when the reference does not match that field of view.
     std::shared_ptr<const GainMap> gainsFor(int width, int height) const;
 
     // Maximum gain applied (reported to the user: large values mean the

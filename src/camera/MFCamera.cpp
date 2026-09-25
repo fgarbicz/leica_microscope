@@ -189,7 +189,11 @@ bool MFCamera::open(std::string &error)
         m_typeIndex.push_back(c.idx);
     }
     if (m_resolutions.empty()) {
-        close();
+        safeRelease(m_reader);
+        if (m_source) {
+            m_source->Shutdown();
+            safeRelease(m_source);
+        }
         error = "Device reports no video formats";
         return false;
     }
@@ -277,6 +281,8 @@ bool MFCamera::startStreaming(std::string &error)
     }
     if (m_streaming)
         return true;
+    if (m_thread.joinable())
+        m_thread.join();
     m_streaming = true;
     m_thread = std::thread([this] { run(); });
     return true;
@@ -285,6 +291,12 @@ bool MFCamera::startStreaming(std::string &error)
 void MFCamera::stopStreaming()
 {
     m_streaming = false;
+    {
+        // unblock a pending ReadSample
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_reader)
+            m_reader->Flush(kVideoStream);
+    }
     if (m_thread.joinable())
         m_thread.join();
 }
@@ -403,15 +415,22 @@ void MFCamera::run()
         DWORD streamIndex = 0, flags = 0;
         LONGLONG ts = 0;
         IMFSample *sample = nullptr;
-        HRESULT hr;
+        IMFSourceReader *reader = nullptr;
         int w, h;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             if (!m_reader)
                 break;
-            hr = m_reader->ReadSample(kVideoStream, 0, &streamIndex, &flags, &ts, &sample);
+            reader = m_reader;
+            reader->AddRef();
             w = m_outW;
             h = m_outH;
+        }
+        const HRESULT hr = reader->ReadSample(kVideoStream, 0, &streamIndex, &flags, &ts, &sample);
+        reader->Release();
+        if (!m_streaming) {
+            safeRelease(sample);
+            break;
         }
         if (FAILED(hr) || (flags & MF_SOURCE_READERF_ERROR)) {
             if (++errors > 20) {

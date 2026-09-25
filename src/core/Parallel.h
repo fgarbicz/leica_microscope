@@ -7,8 +7,10 @@
 #include <atomic>
 #include <condition_variable>
 #include <cstdlib>
+#include <exception>
 #include <functional>
 #include <mutex>
+#include <utility>
 #include <thread>
 #include <vector>
 
@@ -52,11 +54,17 @@ public:
         m_cv.notify_all();
         const bool was = t_inWorker;
         t_inWorker = true; // nested parallelRows from the caller run inline
-        work();            // the caller helps
+        work();            // the caller helps (never throws: exceptions are captured)
         t_inWorker = was;
-        std::unique_lock<std::mutex> l(m_mutex);
-        m_doneCv.wait(l, [&] { return m_done == m_tasks; });
-        m_fn = nullptr;
+        std::exception_ptr exc;
+        {
+            std::unique_lock<std::mutex> l(m_mutex);
+            m_doneCv.wait(l, [&] { return m_done == m_tasks; });
+            m_fn = nullptr;
+            exc = std::exchange(m_exception, nullptr);
+        }
+        if (exc)
+            std::rethrow_exception(exc); // after all workers finished with the caller's data
     }
 
     static bool inWorker() { return t_inWorker; }
@@ -91,7 +99,13 @@ private:
                 i = m_next++;
                 fn = m_fn;
             }
-            (*fn)(i);
+            try {
+                (*fn)(i);
+            } catch (...) {
+                std::lock_guard<std::mutex> l(m_mutex);
+                if (!m_exception)
+                    m_exception = std::current_exception();
+            }
             std::lock_guard<std::mutex> l(m_mutex);
             if (++m_done == m_tasks)
                 m_doneCv.notify_all();
@@ -121,6 +135,7 @@ private:
     int m_tasks = 0, m_next = 0, m_done = 0;
     uint64_t m_generation = 0;
     bool m_stop = false;
+    std::exception_ptr m_exception;
     static inline thread_local bool t_inWorker = false;
 };
 

@@ -1,6 +1,7 @@
 #include "Calibration.h"
 
 #include <QSettings>
+#include <QUuid>
 
 #include <algorithm>
 
@@ -85,6 +86,7 @@ void MicroscopeConfig::load()
             o.na = s.value(QStringLiteral("na"), 0.25).toDouble();
             o.immersion = s.value(QStringLiteral("immersion"), QStringLiteral("Dry")).toString();
             o.calibratedUmPerPixel = s.value(QStringLiteral("umpp"), 0.0).toDouble();
+            o.id = s.value(QStringLiteral("id")).toString();
             o.shadingFile = s.value(QStringLiteral("shading")).toString();
             o.exposureMs = s.value(QStringLiteral("exposure"), 0.0).toDouble();
             o.gain = s.value(QStringLiteral("gain"), 1.0).toDouble();
@@ -98,6 +100,9 @@ void MicroscopeConfig::load()
     s.endGroup();
     if (objectives.isEmpty())
         objectives = defaultObjectives();
+    for (auto &o : objectives)
+        if (o.id.isEmpty())
+            o.id = QUuid::createUuid().toString(QUuid::Id128).left(12);
     current = std::clamp(current, 0, int(objectives.size()) - 1);
 }
 
@@ -119,6 +124,7 @@ void MicroscopeConfig::save() const
         s.setValue(QStringLiteral("na"), o.na);
         s.setValue(QStringLiteral("immersion"), o.immersion);
         s.setValue(QStringLiteral("umpp"), o.calibratedUmPerPixel);
+        s.setValue(QStringLiteral("id"), o.id);
         s.setValue(QStringLiteral("shading"), o.shadingFile);
         s.setValue(QStringLiteral("exposure"), o.exposureMs);
         s.setValue(QStringLiteral("gain"), o.gain);

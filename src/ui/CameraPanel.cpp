@@ -185,7 +185,15 @@ CameraPanel::CameraPanel(AcquisitionEngine *engine, QWidget *parent) : QWidget(p
 void CameraPanel::refreshCameras()
 {
     const QString current = m_cameraCombo->currentData().toString();
-    m_cameras = m_engine->enumerateCameras();
+    auto found = m_engine->enumerateCameras();
+    // unchanged device list: keep the combo untouched (an open popup or the
+    // user's selection must not be reset by periodic refreshes)
+    if (found.size() == m_cameras.size()
+        && std::equal(found.begin(), found.end(), m_cameras.begin(),
+                      [](const CameraInfo &a, const CameraInfo &b) { return a.id == b.id; })
+        && m_cameraCombo->count() == int(found.size()))
+        return;
+    m_cameras = std::move(found);
     m_cameraCombo->clear();
     for (const auto &c : m_cameras)
         m_cameraCombo->addItem(QString::fromStdString(c.name), QString::fromStdString(c.id));
@@ -349,9 +357,22 @@ void CameraPanel::onLiveToggled(bool on)
     updateEnabled();
 }
 
+void CameraPanel::setBusy(bool busy)
+{
+    m_busy = busy;
+    updateEnabled();
+}
+
 void CameraPanel::updateEnabled()
 {
     const bool open = m_engine->camera() != nullptr;
+    if (m_busy) {
+        m_connect->setEnabled(false);
+        m_live->setEnabled(false);
+        m_resolution->setEnabled(false);
+        m_cameraCombo->setEnabled(false);
+        return;
+    }
     m_connect->setText(open ? tr("Disconnect") : tr("Connect"));
     m_cameraCombo->setEnabled(!open);
     m_connect->setEnabled(open || m_cameraCombo->count() > 0);

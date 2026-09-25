@@ -247,36 +247,43 @@ bool readTiff(const QString &path, Image16 &img, int &bits, QString &description
         const int ts = typeSize(uint16_t(type));
         const qsizetype base = qsizetype(cnt) * ts <= 4 ? entry + 8 : qsizetype(g32(entry + 8));
         std::vector<uint32_t> v;
-        for (uint32_t i = 0; i < cnt && i < 1000000; ++i)
-            v.push_back(type == tShort ? g16(base + 2 * i) : type == tLong ? g32(base + 4 * i) : d[base + i]);
+        for (uint32_t i = 0; i < cnt && i < 1000000; ++i) {
+            const qsizetype o = base + qsizetype(i) * ts;
+            if (o < 0 || o + ts > n)
+                break; // out of file: malformed tag
+            v.push_back(type == tShort ? g16(o) : type == tLong ? g32(o) : d[o]);
+        }
         return v;
     };
+    auto first = [](const std::vector<uint32_t> &v) { return v.empty() ? 0u : v[0]; };
+    if (qsizetype(ifd) + 2 + 12 * qsizetype(count) > n)
+        return fail(QObject::tr("Corrupt TIFF directory"));
     for (uint32_t i = 0; i < count; ++i) {
         const qsizetype en = ifd + 2 + 12 * qsizetype(i);
         const uint32_t tag = g16(en);
         switch (tag) {
-        case kWidth: w = values(en).at(0); break;
-        case kLength: h = values(en).at(0); break;
+        case kWidth: w = first(values(en)); break;
+        case kLength: h = first(values(en)); break;
         case kBits: bitsV = values(en); break;
-        case kCompression: comp = values(en).at(0); break;
-        case kPhotometric: photometric = values(en).at(0); break;
+        case kCompression: comp = first(values(en)); break;
+        case kPhotometric: photometric = first(values(en)); break;
         case kStripOffsets: offs = values(en); break;
-        case kSamples: spp = values(en).at(0); break;
-        case kRowsPerStrip: rps = values(en).at(0); break;
+        case kSamples: spp = first(values(en)); break;
+        case kRowsPerStrip: rps = first(values(en)); break;
         case kStripBytes: cnts = values(en); break;
-        case kPredictor: predictor = values(en).at(0); break;
-        case kPlanar: planar = values(en).at(0); break;
-        case kResUnit: resUnit = values(en).at(0); break;
+        case kPredictor: predictor = first(values(en)); break;
+        case kPlanar: planar = first(values(en)); break;
+        case kResUnit: resUnit = first(values(en)); break;
         case kXRes: {
-            const uint32_t o = g32(en + 8);
-            const uint32_t num = g32(o), den = g32(o + 4);
+            const qsizetype o = g32(en + 8);
+            const uint32_t num = g32(o), den = g32(o + 4); // g32 returns 0 when out of range
             xres = den ? double(num) / den : 0;
             break;
         }
         case kDescription: {
             const uint32_t cnt = g32(en + 4);
             const qsizetype o = cnt <= 4 ? en + 8 : qsizetype(g32(en + 8));
-            if (o + cnt <= n)
+            if (o >= 0 && cnt < (64u << 20) && o + qsizetype(cnt) <= n)
                 description = QString::fromUtf8(reinterpret_cast<const char *>(d + o), int(cnt)).trimmed().remove(QChar(0));
             break;
         }
@@ -287,6 +294,9 @@ bool readTiff(const QString &path, Image16 &img, int &bits, QString &description
     if (w == 0 || h == 0 || (b != 8 && b != 16) || planar != 1 || (comp != 1 && comp != 8 && comp != 32946)
         || offs.empty() || offs.size() != cnts.size() || (spp != 1 && spp != 3 && spp != 4) || photometric > 2)
         return fail(QObject::tr("Unsupported TIFF layout"));
+    // plausibility limits before allocating (a tiny corrupt file must not request gigabytes)
+    if (w > 65535 || h > 65535 || uint64_t(w) * h * 6 > (uint64_t(3) << 30))
+        return fail(QObject::tr("Image too large (%1 x %2)").arg(w).arg(h));
     if (rps == 0 || rps > h)
         rps = h;
     bits = int(b);
@@ -466,8 +476,12 @@ bool saveImage(const QString &path, const QImage &imgIn, const ImageMetadata &me
         img.setDotsPerMeterY(dpm);
     }
     img.setColorSpace(QColorSpace::SRgb);
-    QImageWriter w(path);
-    w.setFormat(extensionFor(opt.format).toLatin1());
+    QSaveFile out(path); // atomic: the target is replaced only after a complete write
+    if (!out.open(QIODevice::WriteOnly)) {
+        if (error) *error = out.errorString();
+        return false;
+    }
+    QImageWriter w(&out, extensionFor(opt.format).toLatin1());
     if (opt.format == FileFormat::Jpeg) {
         w.setQuality(opt.jpegQuality);
         w.setOptimizedWrite(true);
@@ -479,14 +493,36 @@ bool saveImage(const QString &path, const QImage &imgIn, const ImageMetadata &me
     w.setText(QStringLiteral("Software"), meta.software);
     if (!w.write(img)) {
         if (error) *error = w.errorString();
+        out.cancelWriting();
         return false;
     }
-    if (opt.writeSidecar)
-        writeSidecar(path, meta);
+    if (!out.commit()) {
+        if (error) *error = out.errorString();
+        return false;
+    }
+    if (opt.writeSidecar && !writeSidecar(path, meta)) {
+        if (error) *error = QObject::tr("The image was saved, but its metadata file could not be written.");
+        return false;
+    }
     return true;
 }
 
+static bool loadImageImpl(const QString &path, LoadedImage &out, QString *error);
+
 bool loadImage(const QString &path, LoadedImage &out, QString *error)
+{
+    try {
+        return loadImageImpl(path, out, error);
+    } catch (const std::bad_alloc &) {
+        if (error) *error = QObject::tr("Not enough memory to open the image");
+    } catch (const std::exception &e) {
+        if (error) *error = QString::fromUtf8(e.what());
+    }
+    out = LoadedImage{};
+    return false;
+}
+
+static bool loadImageImpl(const QString &path, LoadedImage &out, QString *error)
 {
     out = LoadedImage{};
     out.path = path;

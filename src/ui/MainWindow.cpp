@@ -22,6 +22,8 @@
 #include <QCloseEvent>
 #include <QDesktopServices>
 #include <QDir>
+#include <QThreadPool>
+#include <QRegularExpression>
 #include <QElapsedTimer>
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -127,6 +129,11 @@ MainWindow::MainWindow()
     connect(m_engine, &AcquisitionEngine::captureFailed, this, [this](const QString &m) {
         m_capturing = false;
         m_capturePanel->setBusy(false);
+        m_cameraPanel->setBusy(false);
+        if (m_timelapse.isActive()) { // do not interrupt a time lapse with dialogs
+            showMessage(tr("Capture failed: %1").arg(m), 8000);
+            return;
+        }
         QMessageBox::warning(this, tr("Capture"), m);
     });
     connect(m_engine, &AcquisitionEngine::captureProgress, this, [this](int done, int total, const QString &what) {
@@ -154,8 +161,11 @@ MainWindow::MainWindow()
         const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + QStringLiteral("/shading");
         QDir().mkpath(dir);
         Objective &o = m_scope.currentObjective();
-        const QString file = dir + QStringLiteral("/objective_%1_%2x.lmsh").arg(m_scope.current).arg(o.magnification);
-        sc->save(file.toStdString());
+        const QString file = dir + QStringLiteral("/objective_%1_%2x.lmsh").arg(o.id).arg(o.magnification);
+        if (!sc->save(file.toStdString())) {
+            QMessageBox::warning(this, tr("Shading correction"), tr("The reference could not be saved to %1.").arg(file));
+            return;
+        }
         o.shadingFile = file;
         m_scope.save();
         m_engine->setShading(sc);
@@ -168,9 +178,12 @@ MainWindow::MainWindow()
                                         "empty and the illumination (Köhler) is centred.").arg(sc->maxGain(), 0, 'f', 1));
     });
     connect(m_engine, &AcquisitionEngine::multifocusProgress, this, [this](int n, double) {
-        m_capturePanel->setMultifocusRunning(true, n);
+        if (m_multifocus) // ignore updates that arrive after Finish/Cancel
+            m_capturePanel->setMultifocusRunning(true, n);
     });
     connect(m_engine, &AcquisitionEngine::mosaicStatus, this, [this](const MosaicBuilder::Status &st) {
+        if (!m_mosaic)
+            return;
         m_capturePanel->setMosaicRunning(true, st.tiles, st.tracking);
         const double s = m_lastStats.displayScale;
         Camera *cam = m_engine->camera();
@@ -185,6 +198,14 @@ MainWindow::MainWindow()
         m_view->setTileRects(tiles);
     });
     connect(&m_timelapse, &QTimer::timeout, this, &MainWindow::onTimelapseTick);
+    connect(m_engine, &AcquisitionEngine::liveStateChanged, this, [this](bool live) {
+        if (!live && m_timelapse.isActive()) {
+            m_timelapse.stop();
+            const auto &c = AppSettings::instance().capture;
+            m_capturePanel->setTimelapseRunning(false, m_timelapseDone, c.timelapseCount);
+            showMessage(tr("Time lapse stopped: the live image was stopped"), 8000);
+        }
+    });
     connect(m_process, &ProcessPage::message, this, &MainWindow::showMessage);
     connect(m_browse, &BrowsePage::openInProcess, this, [this](const QString &p) {
         if (m_process->openFile(p))
@@ -412,6 +433,48 @@ QWidget *MainWindow::buildAcquirePage()
         m_engine->setLiveMode(LiveMode::Normal);
     });
     connect(m_capturePanel, &CapturePanel::mosaicAddTile, this, [this] { m_engine->mosaicAddTile(); });
+    connect(m_capturePanel, &CapturePanel::recordToggled, this, [this](bool start) {
+        const auto &c = AppSettings::instance().capture;
+        if (start) {
+            if (!m_engine->isLive()) {
+                QMessageBox::information(this, tr("Video"), tr("Start the live image first."));
+                m_capturePanel->setRecording(false, QString());
+                return;
+            }
+            QDir().mkpath(c.folder);
+            QString sample = c.sample;
+            sample.replace(QRegularExpression(QStringLiteral("[\\\\/:*?\"<>|]")), QStringLiteral("_"));
+            const QString path = QDir(c.folder).filePath(
+                QStringLiteral("%1_video_%2.avi").arg(sample, QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss"))));
+            QString err;
+            if (!m_recorder.start(path, c.videoFps, c.videoScaleBar, &err)) {
+                QMessageBox::warning(this, tr("Video"), tr("Cannot record to %1:\n%2").arg(path, err));
+                m_capturePanel->setRecording(false, QString());
+                return;
+            }
+            m_capturePanel->setRecording(true, tr("Recording…"));
+            m_view->setStatusText(tr("\u25cf REC"));
+            m_recTimer.start(500);
+        } else {
+            m_recorder.stop();
+            m_recTimer.stop();
+            m_view->setStatusText(QString());
+            const QString msg = tr("Saved %1 (%2 frames, %3 s, %4 MB)")
+                                    .arg(QFileInfo(m_recorder.path()).fileName())
+                                    .arg(m_recorder.frames())
+                                    .arg(m_recorder.frames() / double(std::max(1, c.videoFps)), 0, 'f', 1)
+                                    .arg(m_recorder.bytes() / 1048576.0, 0, 'f', 1);
+            m_capturePanel->setRecording(false, msg);
+            showMessage(msg, 8000);
+        }
+    });
+    connect(&m_recTimer, &QTimer::timeout, this, [this] {
+        m_capturePanel->setRecording(true, tr("\u25cf %1 s, %2 frames, %3 MB%4")
+                                               .arg(m_recorder.seconds(), 0, 'f', 0)
+                                               .arg(m_recorder.frames())
+                                               .arg(m_recorder.bytes() / 1048576.0, 0, 'f', 1)
+                                               .arg(m_recorder.dropped() ? tr(", %1 dropped").arg(m_recorder.dropped()) : QString()));
+    });
     connect(m_capturePanel, &CapturePanel::mosaicAutoAddChanged, this, [this](bool on) {
         auto o = m_engine->mosaic().options();
         o.autoAdd = on;
@@ -590,6 +653,8 @@ void MainWindow::onFrame(const QImage &img, const LiveStats &stats)
     m_lastStats = stats;
     m_view->setSensorScale(stats.displayScale);
     m_view->setImage(img);
+    if (m_recorder.isRecording())
+        m_recorder.push(img, m_view->umPerPixel());
     // choose the live preview resolution from the effective zoom (sensor pixels)
     if (stats.width > 0 && stats.height > 0) {
         // effective zoom in physical screen pixels per sensor pixel (high-DPI aware)
@@ -807,6 +872,7 @@ void MainWindow::capture()
     }
     const auto &c = AppSettings::instance().capture;
     m_capturing = true;
+    m_cameraPanel->setBusy(true);
     if (c.shotMode >= 0 && !m_engine->camera()->shotModes().empty()) {
         m_capturePanel->setBusy(true, tr("Pixel shift capture…"));
         m_engine->captureShots(c.shotMode);
@@ -858,6 +924,7 @@ void MainWindow::onCaptureFinished(std::shared_ptr<CaptureResult> r)
 {
     m_capturing = false;
     m_capturePanel->setBusy(false);
+    m_cameraPanel->setBusy(false);
     if (!r || r->rendered16.empty()) {
         showMessage(tr("Capture produced no image"), 6000);
         return;
@@ -874,6 +941,11 @@ void MainWindow::onCaptureFinished(std::shared_ptr<CaptureResult> r)
         return p;
     };
     QString path = suggested(m_scope.current);
+    // names of images still being written must not be reused
+    while (m_pendingSaves.contains(path)) {
+        S.capture.counter++;
+        path = suggested(m_scope.current);
+    }
     QString notes;
 
     // ask for the objective and the image name (manual microscope: the turret is not coded)
@@ -900,7 +972,7 @@ void MainWindow::onCaptureFinished(std::shared_ptr<CaptureResult> r)
         notes = dlg.notes();
         const QString ext = QLatin1Char('.') + extensionFor(S.capture.save.format);
         path = QDir(S.capture.folder).filePath(dlg.imageName() + ext);
-        for (int n = 2; QFileInfo::exists(path); ++n)
+        for (int n = 2; QFileInfo::exists(path) || m_pendingSaves.contains(path); ++n)
             path = QDir(S.capture.folder).filePath(QStringLiteral("%1_%2").arg(dlg.imageName()).arg(n) + ext);
     }
     S.capture.counter++;
@@ -916,6 +988,7 @@ void MainWindow::onCaptureFinished(std::shared_ptr<CaptureResult> r)
     const OverlaySettings ov = S.overlays;
     const QImage thumbSrc = toQImage8(r->rendered8);
     showMessage(tr("Saving %1…").arg(QFileInfo(path).fileName()), 0);
+    m_pendingSaves.insert(path);
     QtConcurrent::run([r, path, meta, opt, burn, ov] {
         QString err;
         bool ok;
@@ -937,6 +1010,7 @@ void MainWindow::onCaptureFinished(std::shared_ptr<CaptureResult> r)
         }
         return ok ? QString() : (err.isEmpty() ? QObject::tr("unknown error") : err);
     }).then(this, [this, path, thumbSrc, r, meta](const QString &err) {
+        m_pendingSaves.remove(path);
         if (!err.isEmpty()) {
             QMessageBox::warning(this, tr("Save image"), tr("Could not save %1:\n%2").arg(path, err));
             return;
@@ -1055,6 +1129,11 @@ void MainWindow::closeEvent(QCloseEvent *e)
         }
     }
     m_timelapse.stop();
+    m_recorder.stop();
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    m_engine->waitForJobs();                  // finish captures in progress
+    QThreadPool::globalInstance()->waitForDone(); // finish image saves
+    QApplication::restoreOverrideCursor();
     QSettings qs;
     qs.setValue(QStringLiteral("ui/geometry"), saveGeometry());
     AppSettings::instance().save();

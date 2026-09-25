@@ -117,13 +117,23 @@ public:
     void abortStreaming();
     void resetStreamPipes();
 
-    const std::string &lastError() const { return m_error; }
+    std::string lastError() const
+    {
+        std::lock_guard<std::mutex> l(m_errMutex);
+        return m_error;
+    }
     usb::WinUsbDevice *device() { return m_dev.get(); }
 
 private:
     std::unique_ptr<usb::WinUsbDevice> m_dev;
     std::mutex m_cmdMutex;
+    mutable std::mutex m_errMutex;
     std::string m_error;
+    void setError(const std::string &e)
+    {
+        std::lock_guard<std::mutex> l(m_errMutex);
+        m_error = e;
+    }
     std::vector<uint8_t> m_trailer;
 };
 

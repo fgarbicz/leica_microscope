@@ -218,7 +218,7 @@ void ColorPipeline::applyLinear(Image16 &img) const
     std::shared_ptr<const ShadingCorrection::GainMap> gainHolder;
     if (shading && shading->valid()) {
         gainHolder = shading->gainsFor(img.width, img.height);
-        gains = gainHolder.get();
+        gains = gainHolder.get(); // null: reference does not fit this image
     }
     if (identity && !gains)
         return;

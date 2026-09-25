@@ -69,6 +69,7 @@ private:
     std::thread m_thread;
     std::atomic<bool> m_streaming{false};
     std::atomic<bool> m_stopRequested{false};
+    std::atomic<bool> m_threadDone{true};
     std::atomic<double> m_exposureMs{20.0};
     std::atomic<double> m_gain{1.0};
     int m_resIndex = 0;

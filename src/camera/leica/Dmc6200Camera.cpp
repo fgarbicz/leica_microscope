@@ -166,9 +166,20 @@ bool Dmc6200Camera::startLiveLocked(std::string &error)
         error = "Cannot start acquisition: " + m_proto.lastError();
         return false;
     }
+    if (m_thread.joinable())
+        m_thread.join(); // a previous stream thread that gave up on its own
     m_stopRequested = false;
+    m_threadDone = false;
     m_streaming = true;
-    m_thread = std::thread([this] { streamLoop(); });
+    m_thread = std::thread([this] {
+        try {
+            streamLoop();
+        } catch (const std::exception &e) {
+            m_streaming = false;
+            emitError(std::string("Streaming stopped: ") + e.what());
+        }
+        m_threadDone = true;
+    });
     return true;
 }
 
@@ -177,7 +188,12 @@ void Dmc6200Camera::stopLiveLocked()
     if (!m_streaming && !m_thread.joinable())
         return;
     m_stopRequested = true;
-    m_proto.abortStreaming(); // unblock pending reads
+    m_proto.acquisition(dmc::Acq::Stop);
+    // abort repeatedly: a single abort can land before the thread's next read
+    for (int i = 0; i < 400 && !m_threadDone; ++i) {
+        m_proto.abortStreaming();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
     if (m_thread.joinable())
         m_thread.join();
     m_streaming = false;
@@ -211,7 +227,9 @@ RawFramePtr Dmc6200Camera::readOneFrame(unsigned timeoutMs, dmc::FrameEvent *evO
     dmc::FrameEvent ev;
     if (!m_proto.waitFrameEvent(ev, timeoutMs))
         return nullptr;
-    if (ev.bytes != uint32_t(ev.width) * ev.height * 2)
+    // validate the announcement (a corrupted event must not trigger huge allocations)
+    if (ev.width == 0 || ev.height == 0 || ev.width > m_sensorW || ev.height > m_sensorH
+        || uint64_t(ev.bytes) != uint64_t(ev.width) * ev.height * 2)
         return nullptr;
     auto f = m_pool->acquire(ev.bytes);
     f->width = ev.width;

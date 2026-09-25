@@ -27,6 +27,8 @@ public:
     void autoConnect();
     void syncFromCamera();
     void setExposureDisplay(double ms, double gain);
+    // lock camera changes while a (multi-shot) capture runs
+    void setBusy(bool busy);
     std::vector<CameraInfo> cameras() const { return m_cameras; }
 
 signals:
@@ -59,6 +61,7 @@ private:
     QCheckBox *m_hqPreview;
     CollapsibleSection *m_advanced;
     QFormLayout *m_advancedForm = nullptr;
+    bool m_busy = false;
 };
 
 } // namespace lm
