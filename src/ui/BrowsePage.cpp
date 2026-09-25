@@ -40,6 +40,7 @@ const QStringList kImageFilters = {QStringLiteral("*.tif"), QStringLiteral("*.ti
 
 BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
 {
+    m_thumbPool.setMaxThreadCount(2);
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(0);
@@ -248,6 +249,7 @@ void BrowsePage::setFolder(const QString &path)
 void BrowsePage::refresh()
 {
     const int gen = ++(*m_generation);
+    m_thumbPool.clear(); // thumbnails of the previous folder that have not started yet
     m_grid->clear();
     const QFileInfoList files = QDir(m_folder).entryInfoList(kImageFilters, QDir::Files, QDir::Time);
     m_header->setText(tr("%1 — %n image(s)", nullptr, int(files.size())).arg(QDir::toNativeSeparators(m_folder)));
@@ -265,7 +267,7 @@ void BrowsePage::refresh()
         m_grid->addItem(it);
         const QString path = fi.absoluteFilePath();
         // thumbnails are generated in the background; stale results are dropped
-        QtConcurrent::run([path, gen, generation] {
+        QtConcurrent::run(&m_thumbPool, [path, gen, generation] {
             if (generation->load() != gen)
                 return QImage();
             QImageReader r(path);

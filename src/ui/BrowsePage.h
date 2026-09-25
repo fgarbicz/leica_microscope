@@ -1,6 +1,7 @@
 #pragma once
 // Browse workspace: folder tree, thumbnails, preview and metadata.
 
+#include <QThreadPool>
 #include <QWidget>
 
 #include <atomic>
@@ -39,6 +40,9 @@ private:
     QLabel *m_header;
     QString m_folder;
     std::shared_ptr<std::atomic<int>> m_generation = std::make_shared<std::atomic<int>>(0);
+    // thumbnails get their own small pool so that capture saves on the global
+    // pool never wait behind a folder full of thumbnails
+    QThreadPool m_thumbPool;
 };
 
 } // namespace lm

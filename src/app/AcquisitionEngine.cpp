@@ -709,6 +709,12 @@ void AcquisitionEngine::processingLoop()
             }
             st.focus = focusMeasure(lin, focusRegion);
 
+            // back-pressure as in the fast path: build a display image only when the UI has
+            // taken the previous one (and about once a second while the live view is hidden);
+            // frames still go into the focus stack / mosaic
+            const bool uiReady = !(m_uiBusy && secondsSince(m_uiBusySince) < 0.5)
+                                 && (m_previewVisible || m_lastDisplayTime.time_since_epoch().count() == 0
+                                     || secondsSince(m_lastDisplayTime) >= 1.0);
             QImage display;
             const LiveMode mode = m_mode;
             if (mode == LiveMode::Multifocus) {
@@ -716,6 +722,8 @@ void AcquisitionEngine::processingLoop()
                 const int n = m_stacker.frameCount();
                 QMetaObject::invokeMethod(this, [this, n, improved] { emit multifocusProgress(n, improved); },
                                           Qt::QueuedConnection);
+                if (!uiReady)
+                    continue;
                 Image16 comp = m_stacker.result();
                 Image8 out = pipeline->toDisplay8(comp);
                 display = toQImage(out, false, nullptr);
@@ -724,6 +732,8 @@ void AcquisitionEngine::processingLoop()
                 const bool force = m_mosaicForceAdd.exchange(false);
                 auto status = m_mosaic.feed(lin, force);
                 QMetaObject::invokeMethod(this, [this, status] { emit mosaicStatus(status); }, Qt::QueuedConnection);
+                if (!uiReady)
+                    continue;
                 double scale = 1.0;
                 Image16 prev = m_mosaic.preview(2400, scale);
                 st.displayScale = scale;
@@ -731,7 +741,7 @@ void AcquisitionEngine::processingLoop()
                 display = toQImage(out, false, nullptr);
                 st.histogram = computeHistogram(out, 4);
             } else {
-                if (m_frozen)
+                if (m_frozen || !uiReady)
                     continue;
                 Image8 out = pipeline->toDisplay8(lin);
                 unsharpMask(out, cs.sharpenAmount, cs.sharpenRadius);
@@ -747,6 +757,8 @@ void AcquisitionEngine::processingLoop()
             }
             m_lastDisplayTime = now;
             st.displayFps = m_displayFps;
+            m_uiBusy = true;
+            m_uiBusySince = Clock::now();
             emit frameReady(display, st);
         } catch (const std::exception &e) {
             emit processingError(QString::fromUtf8(e.what()));
