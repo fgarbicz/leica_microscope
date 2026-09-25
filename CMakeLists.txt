@@ -73,6 +73,7 @@ add_executable(DMImaging WIN32
     src/ui/CaptureDialog.cpp
     src/ui/CompareWindow.cpp
     src/ui/BatchExportDialog.cpp
+    src/ui/BatchIhcDialog.cpp
     resources/resources.qrc
     resources/app.rc
 )

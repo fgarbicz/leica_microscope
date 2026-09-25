@@ -3,6 +3,7 @@
 #include "app/AppSettings.h"
 #include "io/ImageIO.h"
 #include "ui/BatchExportDialog.h"
+#include "ui/BatchIhcDialog.h"
 #include "ui/CompareWindow.h"
 #include "ui/GalleryWidget.h"
 #include "ui/ImageView.h"
@@ -53,6 +54,8 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
     tb->addSeparator();
     auto *exportAct = tb->addAction(tr("Export…"));
     exportAct->setToolTip(tr("Export the selected images (JPEG/PNG, scale bar, annotations, resize)"));
+    auto *ihc = tb->addAction(tr("IHC quantification…"));
+    ihc->setToolTip(tr("DAB quantification of the selected images (or all images in the folder), exported as CSV"));
     auto *compare = tb->addAction(tr("Compare"));
     compare->setToolTip(tr("Compare two selected images side by side"));
     auto *rename = tb->addAction(tr("Rename…"));
@@ -141,6 +144,16 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
         if (sel.isEmpty())
             return;
         BatchExportDialog dlg(sel, this);
+        dlg.exec();
+    });
+    connect(ihc, &QAction::triggered, this, [this] {
+        QStringList sel = selectedPaths();
+        if (sel.isEmpty())
+            for (int i = 0; i < m_grid->count(); ++i)
+                sel << m_grid->item(i)->data(Qt::UserRole).toString();
+        if (sel.isEmpty())
+            return;
+        BatchIhcDialog dlg(sel, this);
         dlg.exec();
     });
     connect(compare, &QAction::triggered, this, [this] {
@@ -275,6 +288,8 @@ void BrowsePage::refresh()
             for (int i = 0; i < grid->count(); ++i)
                 if (grid->item(i)->data(Qt::UserRole).toString() == path) {
                     grid->item(i)->setIcon(thumbnailIcon(thumb));
+                    // the item's layout can shift slightly; repaint everything so no stale label remains
+                    grid->viewport()->update();
                     break;
                 }
         });

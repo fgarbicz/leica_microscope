@@ -11,6 +11,8 @@
 #include <QVector>
 
 class QPainter;
+class QImage;
+class QSize;
 class QKeyEvent;
 
 namespace lm {
@@ -25,6 +27,11 @@ struct Annotation {
     double lineWidth = 2.0;
     bool showMeasurement = true;
 };
+
+// True for annotations that enclose an area (rectangle, ellipse, polygon).
+bool isRegion(const Annotation &a);
+// Grayscale8 mask (255 inside) of the union of the given region annotations.
+QImage regionMask(const QVector<const Annotation *> &regions, QSize size);
 
 struct Measurement {
     double lengthUm = 0;     // line/polyline length or perimeter

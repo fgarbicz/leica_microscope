@@ -409,24 +409,13 @@ void ProcessPage::analyzeIhc(bool regionOnly)
         for (const auto &a : m_layer->annotations())
             if (a.id == m_layer->selectedId())
                 sel = &a;
-        if (!sel || (sel->type != Annotation::Rectangle && sel->type != Annotation::Ellipse && sel->type != Annotation::Polygon)) {
+        if (!sel || !isRegion(*sel)) {
             QMessageBox::information(this, tr("IHC quantification"),
                                      tr("Select a rectangle, ellipse or area annotation first (Select tool), "
                                         "or use \"Analyse image\"."));
             return;
         }
-        region = QImage(m_data.width, m_data.height, QImage::Format_Grayscale8);
-        region.fill(0);
-        QPainter p(&region);
-        p.setPen(Qt::NoPen);
-        p.setBrush(Qt::white);
-        if (sel->type == Annotation::Rectangle)
-            p.drawRect(QRectF(sel->pts[0], sel->pts[1]).normalized());
-        else if (sel->type == Annotation::Ellipse)
-            p.drawEllipse(QRectF(sel->pts[0], sel->pts[1]).normalized());
-        else
-            p.drawPolygon(QPolygonF(sel->pts));
-        p.end();
+        region = regionMask({sel}, QSize(m_data.width, m_data.height));
         regionName = tr("selected region");
     }
     StainOptions opt;
