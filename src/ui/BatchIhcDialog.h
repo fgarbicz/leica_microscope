@@ -26,6 +26,7 @@ public:
     struct Row {
         QString file, objective, region, error;
         double umPerPixel = 0;
+        QString colorCorrection; // from the image metadata (empty: not recorded)
         double tissueArea = 0, positiveArea = 0; // µm² when calibrated, else pixels
         double positivePct = 0, weakPct = 0, moderatePct = 0, strongPct = 0;
         double hScore = 0, meanDabPositive = 0;
@@ -44,6 +45,7 @@ private:
     void exportCsv();
     void exportPdf();
     QString stainDescription() const;
+    QString colourMixWarning() const; // empty unless corrected and uncorrected images are mixed
 
     QStringList m_files;
     QDoubleSpinBox *m_threshold;

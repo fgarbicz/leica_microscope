@@ -236,6 +236,7 @@ void BatchIhcDialog::run()
                                 ? QStringLiteral("%1x").arg(li.meta.magnification)
                                 : li.meta.objective;
             row.umPerPixel = li.meta.umPerPixel;
+            row.colorCorrection = li.meta.colorCorrection;
             StainOptions o = opt;
             o.umPerPixel = li.meta.umPerPixel;
             QImage region;
@@ -377,6 +378,8 @@ void BatchIhcDialog::run()
                  .arg(stddev(hs), 0, 'f', 0);
     if (saveOverlays)
         s += QStringLiteral(" — <a href=\"%1\">%2</a>").arg(QUrl::fromLocalFile(outDir).toString(), tr("open overlay folder"));
+    if (const QString w = colourMixWarning(); !w.isEmpty())
+        s += QStringLiteral("<br><span style='color:#e8a33d'>") + w.toHtmlEscaped() + QStringLiteral("</span>");
     m_status->setTextFormat(Qt::RichText);
     m_status->setText(s);
 }
@@ -462,6 +465,21 @@ QString BatchIhcDialog::csv(QChar sep) const
     return out;
 }
 
+QString BatchIhcDialog::colourMixWarning() const
+{
+    // images with and without the camera colour correction have different stain
+    // colours, so their DAB results are not directly comparable
+    int corrected = 0, other = 0;
+    for (const auto &r : m_rows)
+        (r.colorCorrection.startsWith(QStringLiteral("camera matrix")) ? corrected : other)++;
+    if (!corrected || !other)
+        return {};
+    return tr("%1 image(s) were taken with camera colour correction and %2 without (or by an older version); "
+              "their DAB results are not directly comparable.")
+        .arg(corrected)
+        .arg(other);
+}
+
 QString BatchIhcDialog::stainDescription() const
 {
     const auto &ih = AppSettings::instance().ihc;
@@ -526,6 +544,8 @@ void BatchIhcDialog::exportPdf()
     kv(tr("DAB positivity threshold"), tr("%1 OD; intensity classes: weak &lt; 0.35 &le; moderate &lt; 0.6 &le; strong")
                                            .arg(m_runThreshold, 0, 'f', 2));
     kv(tr("H-score"), tr("1 &times; %weak + 2 &times; %moderate + 3 &times; %strong, of the tissue area (0–300)"));
+    if (const QString w = colourMixWarning(); !w.isEmpty())
+        kv(tr("Warning"), QStringLiteral("<span style='color:#b35c00'>") + w.toHtmlEscaped() + QStringLiteral("</span>"));
     kv(tr("Region"), m_runUseRegions ? tr("rectangle / ellipse / area annotations where present, else whole image")
                                                : tr("whole image"));
     const bool anyCells = std::any_of(m_rows.begin(), m_rows.end(), [](const Row &r) { return r.cells >= 0; });
