@@ -10,11 +10,6 @@ namespace lm {
 
 namespace {
 
-inline uint16_t clamp16(float v)
-{
-    return v <= 0.f ? 0 : v >= 65535.f ? 65535 : uint16_t(v + 0.5f);
-}
-
 inline uint16_t clamp16i(int v)
 {
     return v <= 0 ? 0 : v >= 65535 ? 65535 : uint16_t(v);
@@ -51,7 +46,7 @@ Padded padMosaic(const RawFrame &raw, float scale)
     p.pw = raw.width + 4;
     p.v.resize(size_t(p.pw) * (raw.height + 4));
     const bool wide = is16Bit(raw.format);
-    const int maxv = (1 << raw.bitDepth) - 1;
+    const int maxv = (1 << std::clamp(raw.bitDepth, 1, 16)) - 1;
     parallelRows(raw.height, [&](int y0, int y1) {
         for (int y = y0; y < y1; ++y) {
             int32_t *dst = p.v.data() + size_t(y + 2) * p.pw + 2;
@@ -155,9 +150,9 @@ void demosaicMHC(const Padded &p, int rx, int ry, Image16 &out)
                     if (redRow) { r = horiz; b = vert; }   // G in R row: R left/right, B up/down
                     else        { r = vert; b = horiz; }   // G in B row
                 }
-                o[0] = clamp16(r);
-                o[1] = clamp16(g);
-                o[2] = clamp16(b);
+                o[0] = saturate16(r);
+                o[1] = saturate16(g);
+                o[2] = saturate16(b);
             }
         }
     });
@@ -208,7 +203,7 @@ Image16 toLinearRGB(const RawFrame &raw, DemosaicMethod method)
             case PixelFormat::Mono16: {
                 auto *s16 = reinterpret_cast<const uint16_t *>(s);
                 for (int x = 0; x < raw.width; ++x, o += 3)
-                    o[0] = o[1] = o[2] = clamp16(s16[x] * scale);
+                    o[0] = o[1] = o[2] = saturate16(s16[x] * scale);
                 break;
             }
             case PixelFormat::RGB8:
@@ -229,7 +224,7 @@ Image16 toLinearRGB(const RawFrame &raw, DemosaicMethod method)
             case PixelFormat::RGB16: {
                 auto *s16 = reinterpret_cast<const uint16_t *>(s);
                 for (int x = 0; x < raw.width * 3; ++x)
-                    o[x] = clamp16(s16[x] * scale);
+                    o[x] = saturate16(s16[x] * scale);
                 break;
             }
             case PixelFormat::YUYV:

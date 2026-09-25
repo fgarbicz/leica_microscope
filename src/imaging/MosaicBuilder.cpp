@@ -19,6 +19,8 @@ void MosaicBuilder::reset()
     m_lost = false;
     m_tiles.clear();
     m_frameW = m_frameH = 0;
+    ++m_version;
+    m_previewCache = {};
 }
 
 void MosaicBuilder::setOptions(const Options &o)
@@ -98,6 +100,7 @@ void MosaicBuilder::paste(const Image16 &frame, int px, int py)
         }
     });
     m_tiles.push_back({px, py, frame.width, frame.height});
+    ++m_version;
 }
 
 double MosaicBuilder::uncoveredFraction(int x, int y, int w, int h) const
@@ -276,24 +279,53 @@ Image16 MosaicBuilder::result(uint16_t bg) const
 
 Image16 MosaicBuilder::preview(int maxSize, double &scale, uint16_t bg) const
 {
-    Image16 full = result(bg);
-    if (full.empty()) {
+    // Called for every live frame: sample the canvas directly (no full-size
+    // copy of the mosaic) and reuse the last preview until a tile is added.
+    // Same output as point-sampling result() every f-th pixel.
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_canvas.empty() || m_tiles.empty()) {
         scale = 1.0;
-        return full;
+        return {};
     }
-    const int f = std::max(1, (std::max(full.width, full.height) + maxSize - 1) / maxSize);
-    scale = 1.0 / f;
-    if (f == 1)
-        return full;
-    Image16 out(full.width / f, full.height / f);
-    for (int y = 0; y < out.height; ++y)
-        for (int x = 0; x < out.width; ++x) {
-            const uint16_t *s = full.row(y * f) + size_t(x) * f * 3;
-            uint16_t *d = out.row(y) + size_t(x) * 3;
-            d[0] = s[0];
-            d[1] = s[1];
-            d[2] = s[2];
+    maxSize = std::max(1, maxSize);
+    if (!m_previewCache.empty() && m_previewVersion == m_version && m_previewMaxSize == maxSize && m_previewBg == bg) {
+        scale = m_previewScale;
+        return m_previewCache;
+    }
+    int minX = m_canvas.width, minY = m_canvas.height, maxX = -1, maxY = -1;
+    for (const auto &t : m_tiles) {
+        minX = std::min(minX, t.x - m_originX);
+        minY = std::min(minY, t.y - m_originY);
+        maxX = std::max(maxX, t.x - m_originX + t.w);
+        maxY = std::max(maxY, t.y - m_originY + t.h);
+    }
+    const int fullW = maxX - minX, fullH = maxY - minY;
+    const int f = std::max(1, (std::max(fullW, fullH) + maxSize - 1) / maxSize);
+    Image16 out(fullW / f, fullH / f);
+    parallelRows(out.height, [&](int y0, int y1) {
+        for (int y = y0; y < y1; ++y) {
+            const int cy = minY + y * f;
+            const uint16_t *s = m_canvas.row(cy) + size_t(minX) * 3;
+            const uint8_t *w = m_weight.data() + size_t(cy) * m_canvas.width + minX;
+            uint16_t *d = out.row(y);
+            for (int x = 0; x < out.width; ++x) {
+                const size_t sx = size_t(x) * f;
+                if (w[sx]) {
+                    d[x * 3] = s[sx * 3];
+                    d[x * 3 + 1] = s[sx * 3 + 1];
+                    d[x * 3 + 2] = s[sx * 3 + 2];
+                } else {
+                    d[x * 3] = d[x * 3 + 1] = d[x * 3 + 2] = bg;
+                }
+            }
         }
+    });
+    scale = 1.0 / f;
+    m_previewCache = out;
+    m_previewScale = scale;
+    m_previewVersion = m_version;
+    m_previewMaxSize = maxSize;
+    m_previewBg = bg;
     return out;
 }
 

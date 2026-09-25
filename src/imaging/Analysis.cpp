@@ -124,6 +124,11 @@ double focusMeasureRaw(const RawFrame &raw, Rect r)
         const uint8_t *row = raw.data.data() + size_t(y) * raw.stride;
         if (isBayer(raw.format) || isMono(raw.format))
             return wide ? reinterpret_cast<const uint16_t *>(row)[x] : row[x];
+        // YUV: use luma (YUYV interleaves Y with chroma; NV12's first plane is luma)
+        if (raw.format == PixelFormat::YUYV)
+            return row[x * 2];
+        if (raw.format == PixelFormat::NV12)
+            return row[x];
         // packed colour: use the green component
         if (raw.format == PixelFormat::RGB16)
             return reinterpret_cast<const uint16_t *>(row)[x * 3 + 1];
@@ -229,7 +234,7 @@ ExposureStats exposureStats(const RawFrame &raw, int step)
         return s;
     const bool wide = is16Bit(raw.format);
     const int bpp = bytesPerPixel(raw.format);
-    const double full = wide ? double((1 << raw.bitDepth) - 1) : 255.0;
+    const double full = wide ? double((1 << std::clamp(raw.bitDepth, 1, 16)) - 1) : 255.0;
     std::vector<uint32_t> hist(1024, 0);
     uint64_t n = 0, sat = 0;
     double sum = 0;

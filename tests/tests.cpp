@@ -456,6 +456,141 @@ static void testMosaic()
     CHECK_NEAR(res.height, h + 160, 3);
     // compare a pixel in the far corner with the analytic scene
     CHECK_NEAR(res.row(res.height - 10)[(res.width - 10) * 3], scene(res.width - 10, res.height - 10) * 60000, 1500);
+
+    // preview() samples the canvas directly: it must equal result() point-sampled
+    // every f-th pixel, and stay correct when served from its cache
+    for (int maxSize : {100, 237, 4000}) {
+        for (int pass = 0; pass < 2; ++pass) {
+            double scale = 0;
+            Image16 pv = mb.preview(maxSize, scale);
+            const int f = std::max(1, (std::max(res.width, res.height) + maxSize - 1) / maxSize);
+            CHECK_NEAR(scale, 1.0 / f, 1e-12);
+            CHECK(pv.width == res.width / f && pv.height == res.height / f);
+            int maxDiff = 0;
+            if (pv.width == res.width / f && pv.height == res.height / f)
+                for (int y = 0; y < pv.height; ++y)
+                    for (int x = 0; x < pv.width; ++x)
+                        for (int c = 0; c < 3; ++c)
+                            maxDiff = std::max(maxDiff, std::abs(int(pv.row(y)[x * 3 + c]) - int(res.row(y * f)[size_t(x) * f * 3 + c])));
+            CHECK(maxDiff == 0);
+        }
+    }
+    // a new tile invalidates the cached preview
+    {
+        double s0 = 0, s1 = 0;
+        Image16 before = mb.preview(4000, s0);
+        mb.feed(frameAt(240, 200), true);
+        Image16 after = mb.preview(4000, s1);
+        Image16 res2 = mb.result();
+        CHECK(after.width == res2.width && after.height == res2.height && after.px == res2.px);
+        CHECK(mb.status().tiles == st.tiles + 1);
+        CHECK(after.px != before.px);
+    }
+    mb.reset();
+    double sEmpty = 0;
+    CHECK(mb.preview(100, sEmpty).empty());
+}
+
+// Scalar reference of the 3x3 unsharp mask in unsharpMask32 (edge pixels replicated).
+static std::vector<uint32_t> unsharp3x3Reference(const std::vector<uint32_t> &src, int w, int h, int stride, double amount)
+{
+    std::vector<uint32_t> out = src;
+    const int a = int(amount * 256);
+    auto at = [&](int x, int y, int sh) {
+        x = std::clamp(x, 0, w - 1);
+        y = std::clamp(y, 0, h - 1);
+        return int((src[size_t(y) * stride + x] >> sh) & 0xFF);
+    };
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            uint32_t res = src[size_t(y) * stride + x] & 0xFF000000u;
+            for (int sh = 0; sh <= 16; sh += 8) {
+                int sum = 0;
+                for (int dy = -1; dy <= 1; ++dy)
+                    for (int dx = -1; dx <= 1; ++dx)
+                        sum += at(x + dx, y + dy, sh);
+                const int o = at(x, y, sh) * 9;
+                res |= uint32_t(std::clamp((o + ((o - sum) * a >> 8)) / 9, 0, 255)) << sh;
+            }
+            out[size_t(y) * stride + x] = res;
+        }
+    return out;
+}
+
+static void testUnsharp32()
+{
+    std::printf("unsharpMask32 (3x3) == scalar reference\n");
+    std::mt19937 rng(1234);
+    const int sizes[][2] = {{4, 4}, {37, 5}, {64, 17}, {257, 203}, {1920, 1200}};
+    for (const auto &sz : sizes) {
+        const int w = sz[0], h = sz[1], stride = w + 3;
+        std::vector<uint32_t> img(size_t(stride) * h);
+        for (auto &v : img)
+            v = rng();
+        for (double amount : {0.5, 1.7}) {
+            const std::vector<uint32_t> ref = unsharp3x3Reference(img, w, h, stride, amount);
+            for (int rep = 0; rep < 3; ++rep) {
+                std::vector<uint32_t> out = img;
+                unsharpMask32(out.data(), w, h, stride, amount, 1.0);
+                CHECK(out == ref);
+            }
+        }
+    }
+}
+
+// Degenerate 1xN / Nx1 frames must render without reading outside the frame.
+static void testThinFrames()
+{
+    std::printf("1-pixel wide/high frames\n");
+    const double g[3] = {0.8, 0.6, 0.4};
+    const int dims[][2] = {{1, 1}, {1, 9}, {9, 1}, {1, 2}, {2, 1}, {2, 2}, {3, 1}};
+    for (const auto &d : dims) {
+        auto raw = makeBayer(d[0], d[1], PixelFormat::BayerGB16, g);
+        for (int rot : {0, 90}) {
+            ColorSettings s;
+            s.rotation = rot;
+            ColorPipeline p;
+            p.update(s);
+            for (bool half : {false, true}) {
+                // full-size buffer: renderPreviewHalf32 falls back to full size for tiny frames
+                int w, h;
+                ColorPipeline::previewSize(*raw, rot, w, h, false);
+                std::vector<uint32_t> buf(size_t(w) * h, 0);
+                if (half)
+                    p.renderPreviewHalf32(*raw, buf.data(), w, false);
+                else
+                    p.renderPreview32(*raw, buf.data(), w, false);
+                CHECK(buf[0] >> 24 == 0xFF);
+            }
+        }
+    }
+}
+
+// Focus on YUYV must use luma only: flat luma with textured chroma gives ~0.
+static void testFocusYuyv()
+{
+    std::printf("focus measure (YUYV uses luma)\n");
+    auto make = [](bool lumaTexture) {
+        RawFrame f;
+        f.width = 320;
+        f.height = 240;
+        f.format = PixelFormat::YUYV;
+        f.bitDepth = 8;
+        f.stride = f.width * 2;
+        f.data.resize(size_t(f.stride) * f.height);
+        for (int y = 0; y < f.height; ++y)
+            for (int x = 0; x < f.width; ++x) {
+                const uint8_t tex = uint8_t(40 + 180 * scene(x * 1.7, y * 1.7));
+                f.data[size_t(y) * f.stride + x * 2] = lumaTexture ? tex : 128;
+                f.data[size_t(y) * f.stride + x * 2 + 1] = lumaTexture ? 128 : tex;
+            }
+        return f;
+    };
+    const double flatLuma = focusMeasureRaw(make(false));
+    const double sharpLuma = focusMeasureRaw(make(true));
+    std::printf("  flat luma %.4f, textured luma %.4f\n", flatLuma, sharpLuma);
+    CHECK(flatLuma < 1e-6);
+    CHECK(sharpLuma > 1.0);
 }
 
 static void testPixelShift()
@@ -844,6 +979,9 @@ int main(int argc, char **argv)
         testShading();
         testFocusStack();
         testMosaic();
+        testUnsharp32();
+        testThinFrames();
+        testFocusYuyv();
         testPixelShift();
         testSimCamera();
         testFocusMeasure();

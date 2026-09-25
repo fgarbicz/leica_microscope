@@ -66,6 +66,14 @@ private:
     bool m_lost = false;
     std::vector<TileRect> m_tiles;
     int m_frameW = 0, m_frameH = 0;
+    uint64_t m_version = 0; // bumped whenever the canvas content changes
+
+    // preview() cache (valid while version, size and background match)
+    mutable Image16 m_previewCache;
+    mutable double m_previewScale = 1.0;
+    mutable uint64_t m_previewVersion = ~uint64_t(0);
+    mutable int m_previewMaxSize = 0;
+    mutable uint16_t m_previewBg = 0;
 };
 
 } // namespace lm
