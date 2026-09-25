@@ -91,6 +91,9 @@ public:
     void setPreviewQuality(bool high) { m_previewHighQuality = high; }
     // half resolution live preview (view zoomed out)
     void setPreviewHalf(bool half) { m_previewHalf = half; }
+    // false while nobody looks at the live image (other workspace, minimised):
+    // the live preview is then rendered about once a second to save CPU
+    void setPreviewVisible(bool visible) { m_previewVisible = visible; }
     void setFocusRegion(Rect r) { QMutexLocker l(&m_mutex); m_focusRegion = r; }
 
     // one-shot operations executed on the next live frame
@@ -168,6 +171,7 @@ private:
     std::atomic<bool> m_showClipping{false};
     std::atomic<bool> m_previewHighQuality{false};
     std::atomic<bool> m_previewHalf{false};
+    std::atomic<bool> m_previewVisible{true};
     std::atomic<bool> m_frozen{false};
     Rect m_focusRegion;
 

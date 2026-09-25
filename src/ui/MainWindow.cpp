@@ -454,10 +454,12 @@ QWidget *MainWindow::buildAcquirePage()
                 return;
             }
             m_capturePanel->setRecording(true, tr("Recording…"));
+            updatePreviewVisibility();
             m_view->setStatusText(tr("\u25cf REC"));
             m_recTimer.start(500);
         } else {
             m_recorder.stop();
+            updatePreviewVisibility();
             m_recTimer.stop();
             m_view->setStatusText(QString());
             const QString msg = tr("Saved %1 (%2 frames, %3 s, %4 MB)")
@@ -638,9 +640,23 @@ void MainWindow::startup()
     onCameraChanged();
 }
 
+void MainWindow::updatePreviewVisibility()
+{
+    // the live image is only rendered at full rate when someone can see it (or a video records it)
+    m_engine->setPreviewVisible((m_stack->currentIndex() == 0 && !isMinimized()) || m_recorder.isRecording());
+}
+
+void MainWindow::changeEvent(QEvent *e)
+{
+    QMainWindow::changeEvent(e);
+    if (e->type() == QEvent::WindowStateChange)
+        updatePreviewVisibility();
+}
+
 void MainWindow::setWorkspace(int index)
 {
     m_stack->setCurrentIndex(index);
+    updatePreviewVisibility();
     if (index == 1)
         m_browse->refresh();
 }

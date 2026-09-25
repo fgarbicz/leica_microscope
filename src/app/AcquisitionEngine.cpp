@@ -483,6 +483,10 @@ void AcquisitionEngine::processingLoop()
                 // UI still busy with the previous image: skip (unless it seems stuck)
                 if (m_uiBusy && secondsSince(m_uiBusySince) < 0.5)
                     continue;
+                // live image not visible: refresh about once a second (keeps statistics current)
+                if (!m_previewVisible && m_lastDisplayTime.time_since_epoch().count() != 0
+                    && secondsSince(m_lastDisplayTime) < 1.0)
+                    continue;
                 static const bool profile = qEnvironmentVariableIsSet("DMI_PROFILE");
                 const auto tp0 = Clock::now();
                 const bool half = m_previewHalf && isBayer(raw->format);

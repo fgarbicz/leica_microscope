@@ -149,7 +149,8 @@ double focusMeasureRaw(const RawFrame &raw, Rect r)
         return 0.25 * (a + b + c + d);
     };
     const int samplesPerCell = bayer ? 2 : 4;
-    const int stepY = std::max(1, (cy1 - cy0) / 200), stepX = std::max(1, (cx1 - cx0) / 300);
+    // ~26k samples: plenty for a stable value, cheap enough for every live frame
+    const int stepY = std::max(1, (cy1 - cy0) / 130), stepX = std::max(1, (cx1 - cx0) / 200);
     double sum = 0, sum2 = 0, mean = 0;
     std::vector<float> diffs;
     diffs.reserve(size_t((cy1 - cy0) / stepY + 1) * size_t((cx1 - cx0) / stepX + 1));

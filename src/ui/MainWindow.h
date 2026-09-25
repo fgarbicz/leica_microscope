@@ -37,6 +37,8 @@ public:
 
 protected:
     void closeEvent(QCloseEvent *e) override;
+    void changeEvent(QEvent *e) override;
+    void updatePreviewVisibility();
     bool eventFilter(QObject *o, QEvent *e) override;
 
 private slots:
