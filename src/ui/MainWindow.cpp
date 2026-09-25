@@ -445,7 +445,34 @@ QWidget *MainWindow::buildAcquirePage()
         m_engine->setLiveMode(LiveMode::Normal);
     });
     connect(m_capturePanel, &CapturePanel::mosaicAddTile, this, [this] { m_engine->mosaicAddTile(); });
-    connect(m_capturePanel, &CapturePanel::recordToggled, this, [this](bool start) {
+    // finishes the file and reports the result; also used when the recorder
+    // stopped by itself (write error or file size limit)
+    auto finishRecording = [this] {
+        const auto &c = AppSettings::instance().capture;
+        m_recorder.stop();
+        updatePreviewVisibility();
+        m_recTimer.stop();
+        m_view->setStatusText(QString());
+        const QString err = m_recorder.lastError();
+        if (!err.isEmpty()) {
+            m_capturePanel->setRecording(false, tr("Recording failed"));
+            QMessageBox::warning(this, tr("Video"), tr("Recording to %1 failed:\n%2")
+                                                        .arg(QDir::toNativeSeparators(m_recorder.path()), err));
+            return;
+        }
+        QString msg = tr("Saved %1 (%2 frames, %3 s, %4 MB)")
+                          .arg(QFileInfo(m_recorder.path()).fileName())
+                          .arg(m_recorder.frames())
+                          .arg(m_recorder.frames() / double(std::max(1, c.videoFps)), 0, 'f', 1)
+                          .arg(m_recorder.bytes() / 1048576.0, 0, 'f', 1);
+        if (m_recorder.sizeLimitReached())
+            msg = tr("Recording stopped: the video reached the maximum file size (%1 GB). ")
+                      .arg(VideoRecorder::kMaxFileBytes / 1e9, 0, 'f', 1)
+                  + msg;
+        m_capturePanel->setRecording(false, msg);
+        showMessage(msg, m_recorder.sizeLimitReached() ? 30000 : 8000);
+    };
+    connect(m_capturePanel, &CapturePanel::recordToggled, this, [this, finishRecording](bool start) {
         const auto &c = AppSettings::instance().capture;
         if (start) {
             if (!m_engine->isLive()) {
@@ -469,20 +496,14 @@ QWidget *MainWindow::buildAcquirePage()
             m_view->setStatusText(tr("\u25cf REC"));
             m_recTimer.start(500);
         } else {
-            m_recorder.stop();
-            updatePreviewVisibility();
-            m_recTimer.stop();
-            m_view->setStatusText(QString());
-            const QString msg = tr("Saved %1 (%2 frames, %3 s, %4 MB)")
-                                    .arg(QFileInfo(m_recorder.path()).fileName())
-                                    .arg(m_recorder.frames())
-                                    .arg(m_recorder.frames() / double(std::max(1, c.videoFps)), 0, 'f', 1)
-                                    .arg(m_recorder.bytes() / 1048576.0, 0, 'f', 1);
-            m_capturePanel->setRecording(false, msg);
-            showMessage(msg, 8000);
+            finishRecording();
         }
     });
-    connect(&m_recTimer, &QTimer::timeout, this, [this] {
+    connect(&m_recTimer, &QTimer::timeout, this, [this, finishRecording] {
+        if (!m_recorder.isRecording()) { // stopped by itself: error or size limit
+            finishRecording();
+            return;
+        }
         m_capturePanel->setRecording(true, tr("\u25cf %1 s, %2 frames, %3 MB%4")
                                                .arg(m_recorder.seconds(), 0, 'f', 0)
                                                .arg(m_recorder.frames())

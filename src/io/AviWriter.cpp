@@ -141,6 +141,9 @@ bool AviWriter::addJpeg(const QByteArray &jpeg)
 {
     if (!m_file.isOpen() || jpeg.isEmpty())
         return false;
+    // AVI 1.0 offsets and sizes are 32-bit (signed in many readers): refuse to grow past 2 GB
+    if (m_file.pos() + jpeg.size() + 8 + qint64(m_index.size() + 1) * 16 + 16 > 0x7FFFFFFFLL)
+        return false;
     const quint32 offset = quint32(m_file.pos() - m_moviPos);
     fcc(m_file, "00dc");
     u32(m_file, quint32(jpeg.size()));

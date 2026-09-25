@@ -22,6 +22,8 @@ bool VideoRecorder::start(const QString &path, double fps, bool scaleBar, QStrin
     m_frames = 0;
     m_dropped = 0;
     m_bytes = 0;
+    m_error.clear();
+    m_sizeLimit = false;
     m_startMs = QDateTime::currentMSecsSinceEpoch();
     m_lastPushMs = 0;
     // the file is opened lazily on the first frame (size known then); check the path now
@@ -88,20 +90,38 @@ void VideoRecorder::run()
         }
         if (!avi.isOpen()) {
             // even dimensions for maximum player compatibility
-            if (!avi.open(m_path, img.width() & ~1, img.height() & ~1, m_fps, &m_error))
+            if (!avi.open(m_path, img.width() & ~1, img.height() & ~1, m_fps, &m_error)) {
+                if (m_error.isEmpty())
+                    m_error = QStringLiteral("Cannot open the video file");
                 break;
+            }
         }
         if (m_scaleBar && um > 0)
             img = burnScaleBar(img, um, m_overlay);
-        avi.addFrame(img, 88);
+        if (!avi.addFrame(img, 88)) {
+            m_error = QStringLiteral("Writing the video file failed (disk full?). The recording was stopped.");
+            break;
+        }
         ++m_frames;
         m_bytes = avi.bytesWritten();
+        // leave room for the index (16 bytes per frame) and at least one more large frame
+        if (m_bytes + qint64(m_frames) * 16 >= kMaxFileBytes) {
+            m_sizeLimit = true;
+            break;
+        }
+    }
+    // stopped by itself (error or size limit): refuse further frames
+    m_running = false;
+    {
+        std::lock_guard<std::mutex> l(m_mutex);
+        m_queue.clear();
     }
     if (avi.isOpen()) {
         // real-time playback: use the frame rate actually achieved
         const double secs = (QDateTime::currentMSecsSinceEpoch() - m_startMs) / 1000.0;
         const double actual = secs > 0.5 ? m_frames / secs : 0.0;
-        avi.close(actual > 0 && actual < m_fps * 0.97 ? actual : 0.0);
+        if (!avi.close(actual > 0 && actual < m_fps * 0.97 ? actual : 0.0) && m_error.isEmpty())
+            m_error = QStringLiteral("Finishing the video file failed (disk full?). The file may be incomplete.");
     }
     else
         QFile::remove(m_path); // nothing recorded: do not leave an empty file
