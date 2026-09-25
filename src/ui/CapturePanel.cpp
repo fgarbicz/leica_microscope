@@ -53,9 +53,10 @@ CapturePanel::CapturePanel(QWidget *parent) : QWidget(parent)
     m_capture = new QPushButton(tr("Capture image"), this);
     m_capture->setObjectName(QStringLiteral("PrimaryButton"));
     m_capture->setIcon(icon(Icon::Capture, QColor(Qt::white), 18));
-    m_capture->setIconSize(QSize(18, 18));
+    m_capture->setProperty("lmIconBase", 18);
+    m_capture->setIconSize(iconSize(18));
     m_capture->setToolTip(tr("Acquire and save an image (F9 or Space)"));
-    m_capture->setMinimumHeight(42);
+    m_capture->setMinimumHeight(px(42));
     cap->contentLayout()->addWidget(m_capture);
     m_progress = new QProgressBar(this);
     m_progress->setVisible(false);

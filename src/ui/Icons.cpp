@@ -3,6 +3,8 @@
 #include "Theme.h"
 
 #include <QHash>
+
+#include <cmath>
 #include <QPainter>
 #include <QSvgRenderer>
 
@@ -206,11 +208,11 @@ void clearIconCache()
     g_cache.clear();
 }
 
-QPixmap iconPixmap(Icon which, const QColor &color, int px)
+QPixmap iconPixmap(Icon which, const QColor &color, int size)
 {
-    if (which == Icon::None || px <= 0)
+    if (which == Icon::None || size <= 0)
         return {};
-    const CacheKey key{which, color.rgba(), px};
+    const CacheKey key{which, color.rgba(), size};
     if (const auto it = g_cache.constFind(key); it != g_cache.constEnd())
         return it.value();
 
@@ -218,7 +220,7 @@ QPixmap iconPixmap(Icon which, const QColor &color, int px)
     body.replace(QLatin1String("@C"), color.name());
     // Stroke width shrinks a little at large sizes so big icons do not look
     // heavy and small ones stay legible.
-    const double stroke = px <= 16 ? 1.7 : px <= 24 ? 1.6 : 1.45;
+    const double stroke = size <= 16 ? 1.7 : size <= 24 ? 1.6 : 1.45;
     const QString doc = QStringLiteral("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' "
                                        "stroke='%1' stroke-width='%2' stroke-linecap='round' "
                                        "stroke-linejoin='round'>%3</svg>")
@@ -232,27 +234,32 @@ QPixmap iconPixmap(Icon which, const QColor &color, int px)
     // Device pixel ratio 2 keeps the drawing crisp on HiDPI screens (all three
     // platforms scale, and Qt picks the right representation).
     constexpr qreal kDpr = 2.0;
-    QPixmap pm(QSize(px, px) * kDpr);
+    QPixmap pm(QSize(size, size) * kDpr);
     pm.setDevicePixelRatio(kDpr);
     pm.fill(Qt::transparent);
     QPainter p(&pm);
     p.setRenderHint(QPainter::Antialiasing, true);
-    renderer.render(&p, QRectF(0, 0, px, px));
+    renderer.render(&p, QRectF(0, 0, size, size));
     p.end();
     g_cache.insert(key, pm);
     return pm;
 }
 
-QIcon icon(Icon which, const QColor &color, int px)
+QIcon icon(Icon which, const QColor &color, int size)
 {
     if (which == Icon::None)
         return {};
     QIcon ic;
-    ic.addPixmap(iconPixmap(which, color, px), QIcon::Normal);
-    // a dimmed copy, so a disabled button does not look merely greyed out by Qt
     QColor off = color;
-    off.setAlphaF(0.4f);
-    ic.addPixmap(iconPixmap(which, off, px), QIcon::Disabled);
+    off.setAlphaF(0.4f); // dimmed, so a disabled button is not merely greyed out by Qt
+    // Several resolutions: the interface size can change while the program
+    // runs, and a widget then asks the icon for a bigger pixmap. Without these
+    // Qt would upscale one bitmap and the icons would go soft.
+    for (const double factor : {1.0, 1.3, 1.6, 2.0}) {
+        const int n = int(std::lround(size * factor));
+        ic.addPixmap(iconPixmap(which, color, n), QIcon::Normal);
+        ic.addPixmap(iconPixmap(which, off, n), QIcon::Disabled);
+    }
     return ic;
 }
 

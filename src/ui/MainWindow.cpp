@@ -35,6 +35,7 @@
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
+#include <QPainter>
 #include <QMessageBox>
 #include <QScrollArea>
 #include <QSettings>
@@ -53,8 +54,13 @@ namespace lm {
 
 namespace {
 // Wide enough for the longest control label in every platform font (the
-// interface font is larger on macOS and Linux than on Windows).
-constexpr int kPanelWidth = 340;
+// interface font is larger on macOS and Linux than on Windows). Scaled with
+// the interface size, or a larger font would just clip.
+constexpr int kPanelWidthAt100 = 340;
+int panelWidth()
+{
+    return px(kPanelWidthAt100);
+}
 
 QScrollArea *panelScroll(QWidget *content, int minWidth)
 {
@@ -82,7 +88,7 @@ MainWindow::MainWindow()
     m_engine->setColorSettings(S.color);
 
     setWindowTitle(QStringLiteral("DM Imaging"));
-    setMinimumSize(1100, 700);
+    setMinimumSize(px(1100), px(700));
 
     // ---- top bar with workflow tabs
     auto *central = new QWidget(this);
@@ -94,8 +100,8 @@ MainWindow::MainWindow()
     auto *tl = new QHBoxLayout(top);
     tl->setContentsMargins(0, 0, 8, 0);
     auto *logo = new QLabel(top);
-    logo->setPixmap(QIcon(QStringLiteral(":/icons/app.png")).pixmap(20, 20));
-    logo->setContentsMargins(12, 0, 0, 0);
+    logo->setPixmap(QIcon(QStringLiteral(":/icons/app.png")).pixmap(lm::iconSize(20)));
+    logo->setContentsMargins(px(12), 0, 0, 0);
     tl->addWidget(logo);
     auto *title = new QLabel(QStringLiteral("DM Imaging"), top);
     title->setObjectName(QStringLiteral("AppTitle"));
@@ -109,7 +115,7 @@ MainWindow::MainWindow()
     m_tabs->setTabToolTip(0, tr("Live image, camera settings and capturing (Alt+1)"));
     m_tabs->setTabToolTip(1, tr("The images you have captured (Alt+2)"));
     m_tabs->setTabToolTip(2, tr("Measure, quantify and export one image (Alt+3)"));
-    m_tabs->setIconSize(QSize(16, 16));
+    m_tabs->setIconSize(lm::iconSize(16));
     m_tabs->setDrawBase(false);
     m_tabs->setExpanding(false);
     // without this the bar shrinks to its minimum and hides tabs behind arrows
@@ -130,14 +136,22 @@ MainWindow::MainWindow()
 
     // ---- status bar
     m_statusCamera = new QLabel(tr("No camera"));
+    m_statusCamera->setToolTip(tr("The connected camera"));
     m_statusFps = new QLabel;
+    m_statusFps->setToolTip(tr("Frames per second delivered by the camera"));
     m_statusExposure = new QLabel;
     m_statusCursor = new QLabel;
+    m_statusCursor->setToolTip(tr("Position and colour under the pointer"));
     m_statusZoom = new QLabel;
+    // a dot that says at a glance whether the camera is there
+    m_statusLed = new QLabel;
+    m_statusLed->setToolTip(m_statusCamera->toolTip());
+    setCameraLed(CameraState::None);
     statusBar()->addPermanentWidget(m_statusCursor);
     statusBar()->addPermanentWidget(m_statusZoom);
     statusBar()->addPermanentWidget(m_statusExposure);
     statusBar()->addPermanentWidget(m_statusFps);
+    statusBar()->addPermanentWidget(m_statusLed);
     statusBar()->addPermanentWidget(m_statusCamera);
 
     buildMenus();
@@ -222,6 +236,8 @@ MainWindow::MainWindow()
     });
     connect(&m_timelapse, &QTimer::timeout, this, &MainWindow::onTimelapseTick);
     connect(m_engine, &AcquisitionEngine::liveStateChanged, this, [this](bool live) {
+        if (m_engine->camera())
+            setCameraLed(live ? CameraState::Live : CameraState::Ready);
         if (!live && m_timelapse.isActive()) {
             m_timelapse.stop();
             const auto &c = AppSettings::instance().capture;
@@ -256,6 +272,7 @@ QWidget *MainWindow::buildAcquirePage()
     lay->setContentsMargins(0, 0, 0, 0);
     auto *split = new QSplitter(Qt::Horizontal, page);
     split->setObjectName(QStringLiteral("AcquireSplitter"));
+    m_acquireSplitter = split;
 
     // left: camera, microscope, capture
     auto *left = new QWidget;
@@ -271,7 +288,8 @@ QWidget *MainWindow::buildAcquirePage()
     ll->addWidget(m_scopePanel);
     ll->addWidget(m_capturePanel);
     ll->addStretch();
-    split->addWidget(panelScroll(left, kPanelWidth));
+    m_leftPanel = panelScroll(left, panelWidth());
+    split->addWidget(m_leftPanel);
 
     // centre: image + gallery
     auto *centre = new QSplitter(Qt::Vertical, split);
@@ -283,7 +301,7 @@ QWidget *MainWindow::buildAcquirePage()
     centre->addWidget(m_gallery);
     centre->setStretchFactor(0, 5);
     centre->setStretchFactor(1, 1);
-    centre->setSizes({800, 150});
+    centre->setSizes({px(800), px(150)});
     split->addWidget(centre);
 
     // right: what the image is (histogram, focus, information), then how it is
@@ -299,12 +317,13 @@ QWidget *MainWindow::buildAcquirePage()
     rl->addWidget(m_colorPanel);
     rl->addWidget(m_toolsPanel->overlaysPanel());
     rl->addStretch();
-    split->addWidget(panelScroll(right, kPanelWidth));
+    m_rightPanel = panelScroll(right, panelWidth());
+    split->addWidget(m_rightPanel);
 
     split->setStretchFactor(0, 0);
     split->setStretchFactor(1, 1);
     split->setStretchFactor(2, 0);
-    split->setSizes({kPanelWidth + 20, 1100, kPanelWidth + 20});
+    split->setSizes({panelWidth() + px(20), px(1100), panelWidth() + px(20)});
     lay->addWidget(split);
 
     // --- wiring of the panels
@@ -561,7 +580,8 @@ void MainWindow::buildMenus()
     file->addSeparator();
     auto *settingsAction = file->addAction(icon(Icon::Settings), tr("&Settings…"), QKeySequence(tr("Ctrl+,")), this, [this] {
         SettingsDialog dlg(this);
-        connect(&dlg, &SettingsDialog::themeChanged, this, [](const QString &t) { applyTheme(*qApp, t); });
+        connect(&dlg, &SettingsDialog::appearanceChanged, this,
+                [this](const QString &t, int scale) { applyAppearance(t, scale); });
         if (dlg.exec() == QDialog::Accepted) {
             m_capturePanel->refreshFromSettings();
             updateNextName();
@@ -632,6 +652,20 @@ void MainWindow::buildMenus()
     view->addAction(icon(Icon::ZoomIn), tr("Zoom &in"), QKeySequence::ZoomIn, m_view, &ImageView::zoomIn);
     view->addAction(icon(Icon::ZoomOut), tr("Zoom &out"), QKeySequence::ZoomOut, m_view, &ImageView::zoomOut);
     view->addSeparator();
+    QMenu *size = view->addMenu(tr("&Interface size"));
+    size->setIcon(icon(Icon::Settings));
+    size->addAction(icon(Icon::Plus), tr("&Larger text"), QKeySequence(QStringLiteral("Ctrl+Shift+=")), this, [this] {
+        const auto &S = AppSettings::instance();
+        applyAppearance(S.theme, nextUiScale(S.uiScale, +1), true);
+    });
+    size->addAction(icon(Icon::Minus), tr("&Smaller text"), QKeySequence(QStringLiteral("Ctrl+Shift+-")), this, [this] {
+        const auto &S = AppSettings::instance();
+        applyAppearance(S.theme, nextUiScale(S.uiScale, -1), true);
+    });
+    size->addAction(icon(Icon::Reset), tr("&Default size"), QKeySequence(QStringLiteral("Ctrl+Shift+0")), this, [this] {
+        applyAppearance(AppSettings::instance().theme, 100, true);
+    });
+    view->addSeparator();
     view->addAction(icon(Icon::Fullscreen), tr("F&ull screen"), QKeySequence(Qt::Key_F11), this, [this] {
         isFullScreen() ? showNormal() : showFullScreen();
     });
@@ -694,7 +728,10 @@ void MainWindow::buildMenus()
                            "Del — delete selected · %1+Z / %1+Y — undo / redo<br><br>"
                            "<b>Side panels</b><br>"
                            "The mouse wheel scrolls the panel. It never changes a setting: "
-                           "drag a slider, type in the box, or use the arrow keys.")
+                           "drag a slider, type in the box, or use the arrow keys.<br><br>"
+                           "<b>Interface size</b><br>"
+                           "%1+Shift++ / %1+Shift+- — larger / smaller text<br>"
+                           "%1+Shift+0 — back to the default size")
                             .arg(ctrl),
                         QMessageBox::Ok, this);
         box.setTextFormat(Qt::RichText);
@@ -760,6 +797,59 @@ void MainWindow::setWorkspace(int index)
         applyLiveDab(); // stain settings may have changed in Process
     if (index == 1)
         m_browse->refresh();
+}
+
+void MainWindow::setCameraLed(CameraState state)
+{
+    m_cameraState = state;
+    const QColor c = state == CameraState::Live      ? theme().success
+                     : state == CameraState::Ready   ? theme().accent
+                     : state == CameraState::Lost    ? theme().danger
+                                                     : theme().faintText;
+    const int d = px(9);
+    QPixmap pm(QSize(d, d) * 2);
+    pm.setDevicePixelRatio(2.0);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing);
+    p.setPen(Qt::NoPen);
+    p.setBrush(c);
+    p.drawEllipse(QRectF(0, 0, d, d));
+    p.end();
+    m_statusLed->setPixmap(pm);
+}
+
+void MainWindow::applyAppearance(const QString &theme, int scalePercent, bool save)
+{
+    auto &S = AppSettings::instance();
+    const bool scaleChanged = scalePercent != uiScale();
+    S.theme = theme;
+    S.uiScale = scalePercent;
+    applyTheme(*qApp, theme, scalePercent);
+    // the style sheet and font reach every widget on their own; icon sizes do not
+    applyUiScaleTo(this);
+    setCameraLed(m_cameraState); // redrawn at the new size and in the new colours
+    if (scaleChanged) {
+        // the panels have a minimum width in device pixels, and the splitter
+        // keeps whatever widths it had: both have to be told about the change
+        const int w = panelWidth();
+        m_leftPanel->setMinimumWidth(w);
+        m_rightPanel->setMinimumWidth(w);
+        if (m_acquireSplitter) {
+            QList<int> sizes = m_acquireSplitter->sizes();
+            if (sizes.size() == 3) {
+                const int centre = std::max(px(200), sizes[0] + sizes[1] + sizes[2] - 2 * w);
+                m_acquireSplitter->setSizes({w, centre, w});
+            }
+        }
+    }
+    for (QWidget *w : QApplication::topLevelWidgets())
+        if (w != this)
+            applyUiScaleTo(w);
+    if (scaleChanged)
+        showMessage(tr("Interface size %1%").arg(scalePercent), 2500);
+    if (save)
+        S.save();
 }
 
 void MainWindow::applyColorSettings(const ColorSettings &c)
@@ -840,12 +930,14 @@ void MainWindow::onCameraChanged()
     Camera *cam = m_engine->camera();
     if (!cam) {
         m_statusCamera->setText(tr("No camera"));
+        setCameraLed(m_lostCameraId.isEmpty() ? CameraState::None : CameraState::Lost);
         m_capturePanel->setShotModes({});
         m_view->clear();
         updateTitle();
         return;
     }
     m_statusCamera->setText(QString::fromStdString(cam->info().name));
+    setCameraLed(m_engine->isLive() ? CameraState::Live : CameraState::Ready);
     QStringList modes;
     for (const auto &m : cam->shotModes())
         modes << QString::fromStdString(m.name);

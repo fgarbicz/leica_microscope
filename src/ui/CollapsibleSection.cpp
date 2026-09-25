@@ -23,8 +23,8 @@ CollapsibleSection::CollapsibleSection(const QString &title, QWidget *parent, bo
     m_header = new QWidget(this);
     m_header->setObjectName(QStringLiteral("SectionHeader"));
     auto *hl = new QHBoxLayout(m_header);
-    hl->setContentsMargins(8, 1, 8, 1);
-    hl->setSpacing(4);
+    hl->setContentsMargins(px(8), px(1), px(8), px(1));
+    hl->setSpacing(px(4));
 
     // The disclosure chevron sits at the far left, ahead of the icon and the
     // title, and toggles the section like the title does.
@@ -33,7 +33,8 @@ CollapsibleSection::CollapsibleSection(const QString &title, QWidget *parent, bo
     m_chevron->setAutoRaise(true);
     m_chevron->setCursor(Qt::PointingHandCursor);
     m_chevron->setFocusPolicy(Qt::NoFocus);
-    m_chevron->setIconSize(QSize(13, 13));
+    m_chevron->setProperty("lmIconBase", 13); // read by applyUiScaleTo()
+    m_chevron->setIconSize(iconSize(13));
     hl->addWidget(m_chevron);
 
     m_button = new QToolButton(m_header);
@@ -47,7 +48,8 @@ CollapsibleSection::CollapsibleSection(const QString &title, QWidget *parent, bo
     // the section's own icon, drawn in the enclosing group's colour
     if (iconId != Icon::None) {
         m_button->setIcon(icon(iconId, m_accent, 15));
-        m_button->setIconSize(QSize(15, 15));
+        m_button->setProperty("lmIconBase", 15);
+        m_button->setIconSize(iconSize(15));
         m_button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     } else {
         m_button->setToolButtonStyle(Qt::ToolButtonTextOnly);
@@ -64,14 +66,14 @@ CollapsibleSection::CollapsibleSection(const QString &title, QWidget *parent, bo
     m_content = new QWidget(this);
     m_content->setObjectName(QStringLiteral("SectionContent"));
     m_layout = new QVBoxLayout(m_content);
-    m_layout->setContentsMargins(12, 4, 12, 10);
-    m_layout->setSpacing(7);
+    m_layout->setContentsMargins(px(12), px(4), px(12), px(10));
+    m_layout->setSpacing(px(7));
     outer->addWidget(m_content);
 
     auto *rule = new QFrame(this);
     rule->setObjectName(QStringLiteral("SectionRule"));
     rule->setFrameShape(QFrame::NoFrame);
-    rule->setFixedHeight(1);
+    rule->setFixedHeight(px(1));
     outer->addWidget(rule);
 
     const QString key = QStringLiteral("ui/section/") + title;

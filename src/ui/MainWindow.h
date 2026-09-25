@@ -14,6 +14,7 @@ class QTabBar;
 class QStackedWidget;
 class QLabel;
 class QSplitter;
+class QScrollArea;
 
 namespace lm {
 
@@ -55,6 +56,9 @@ private:
     QWidget *buildAcquirePage();
     void buildMenus();
     void setWorkspace(int index);
+    // Applies a theme and interface size to the running application, and
+    // optionally remembers them (the Settings dialog saves on OK itself).
+    void applyAppearance(const QString &theme, int scalePercent, bool save = false);
     void applyColorSettings(const ColorSettings &c);
     void loadShadingForObjective();
     void startCalibration();
@@ -81,6 +85,15 @@ private:
     ProcessPage *m_process;
 
     QLabel *m_statusCamera, *m_statusFps, *m_statusExposure, *m_statusCursor, *m_statusZoom;
+    // A coloured dot in the status bar: grey none, blue connected, green live,
+    // red lost. Visible from across the room, unlike a word.
+    enum class CameraState { None, Ready, Live, Lost };
+    QLabel *m_statusLed = nullptr;
+    CameraState m_cameraState = CameraState::None;
+    void setCameraLed(CameraState state);
+    QScrollArea *m_leftPanel = nullptr;   // the two side panels, so their minimum
+    QScrollArea *m_rightPanel = nullptr;  // width can follow the interface size
+    QSplitter *m_acquireSplitter = nullptr;
     QTimer m_timelapse;
     QTimer m_reconnect;   // polls for a lost camera
     VideoRecorder m_recorder;

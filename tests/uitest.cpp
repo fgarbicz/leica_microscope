@@ -16,6 +16,7 @@
 #include <QSpinBox>
 #include <QTabBar>
 #include <QVBoxLayout>
+#include <QStyle>
 #include <QWheelEvent>
 
 #include <cstdio>
@@ -109,6 +110,41 @@ int main(int argc, char **argv)
     CHECK(spin->value() == 33.0);
     slider->setValue(70);
     CHECK(slider->value() == 70);
+
+    std::printf("the interface size scales everything\n");
+    applyTheme(app, QStringLiteral("dark"), 100);
+    const double font100 = QApplication::font().pointSizeF();
+    const int px100 = px(40);
+    const QSize icon100 = iconSize(16);
+    CHECK(uiScale() == 100);
+    CHECK(px(40) == 40);
+
+    applyTheme(app, QStringLiteral("dark"), 150);
+    CHECK(uiScale() == 150);
+    CHECK(QApplication::font().pointSizeF() > font100);
+    CHECK(px(40) > px100);
+    CHECK(iconSize(16).width() > icon100.width());
+    // the style sheet's own lengths were scaled, not just the font
+    CHECK(app.styleSheet().contains(QStringLiteral("px")));
+    CHECK(app.style()->pixelMetric(QStyle::PM_SmallIconSize) > 16);
+
+    applyTheme(app, QStringLiteral("dark"), 75);
+    CHECK(px(40) < px100);
+    CHECK(QApplication::font().pointSizeF() < font100);
+
+    // out-of-range values are clamped, not honoured
+    applyTheme(app, QStringLiteral("dark"), 10000);
+    CHECK(uiScale() <= maxUiScale());
+    applyTheme(app, QStringLiteral("dark"), 1);
+    CHECK(uiScale() >= minUiScale());
+
+    std::printf("the size steps walk in both directions and stop\n");
+    CHECK(nextUiScale(100, 1) > 100);
+    CHECK(nextUiScale(100, -1) < 100);
+    CHECK(nextUiScale(maxUiScale(), 1) == maxUiScale());
+    CHECK(nextUiScale(minUiScale(), -1) == minUiScale());
+
+    applyTheme(app, QStringLiteral("dark"), 100);
 
     std::printf("every icon renders\n");
     // A missing or malformed SVG body would give a null pixmap and an invisible

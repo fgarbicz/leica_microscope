@@ -26,6 +26,12 @@ changing the exposure, the objective or an analysis threshold. The wheel now alw
 scrolls the panel (and still zooms the image); values are changed by dragging, typing or
 the arrow keys.
 
+**The interface size is adjustable**, from 75% to 200% (*File → Settings → Interface
+size*, or *View → Interface size* with Ctrl+Shift+Plus / Minus / 0). It scales the
+text, the controls, the icons, the spacing and the panel widths together rather than
+only enlarging the font, applies immediately without restarting, and is remembered.
+The list in Settings previews each size as it is selected.
+
 **Reorganised interface.**
 - The side panels now have three levels instead of one flat list: a coloured, named group
   (Camera, Microscope, Capture, Advanced acquisition, Image, Adjust, Overlays), the
@@ -41,6 +47,11 @@ the arrow keys.
   e.g. the selected objective and its µm/pixel.
 - Consistent styling of every control, and a per-platform base font size so the Windows,
   macOS and Linux builds look alike.
+- A coloured dot in the status bar for the camera: grey when there is none, blue when
+  connected, green when live, red when the connection was lost.
+- Collapsed sections show what they are set to, e.g. the camera in use and
+  "20 ms · 2.0×" for the exposure.
+- The Browse and Process tool bars show a label beside each icon.
 
 **Fixes**
 - The file browser no longer reads the image folder at startup; on macOS that asked for

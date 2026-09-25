@@ -77,6 +77,10 @@ public:
     QString lastCameraId;
     QString browseFolder;
     QString theme = QStringLiteral("dark");
+    // Size of the whole interface in percent (text, controls, icons and
+    // spacing). 100 is the platform default; the microscope room is often read
+    // from a metre away, and some people simply want it bigger.
+    int uiScale = 100;
     bool shadingEnabled = false;
     QMap<QString, ColorSettings> colorPresets; // user presets
 

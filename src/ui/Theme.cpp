@@ -2,14 +2,23 @@
 
 #include "Icons.h"
 
+#include <QAbstractButton>
 #include <QApplication>
 #include <QFont>
 #include <QFontDatabase>
 #include <QFontInfo>
 #include <QPalette>
+#include <QRegularExpression>
 #include <QStyle>
+#include <QProxyStyle>
 #include <QStyleFactory>
+#include <QTabBar>
+#include <QToolBar>
 #include <QStringList>
+#include <QWidget>
+
+#include <algorithm>
+#include <iterator>
 
 namespace lm {
 
@@ -76,6 +85,45 @@ ThemeColors makeLight()
 }
 
 ThemeColors g_colors = makeDark();
+int g_uiScale = 100;
+
+// The sizes Settings offers. Anything in between (set by hand or inherited from
+// an older version) still works; these are the steps the menu walks through.
+const int kScaleSteps[] = {75, 85, 100, 115, 130, 150, 175, 200};
+
+// Fusion computes icon sizes, check box indicators and scroll bar widths from
+// its own pixel metrics. Scaling those here means a larger interface grows in
+// every dimension, not just in text.
+class ScaledStyle : public QProxyStyle {
+public:
+    using QProxyStyle::QProxyStyle;
+
+    int pixelMetric(PixelMetric metric, const QStyleOption *option, const QWidget *widget) const override
+    {
+        const int base = QProxyStyle::pixelMetric(metric, option, widget);
+        switch (metric) {
+        case PM_SmallIconSize:
+        case PM_ButtonIconSize:
+        case PM_ToolBarIconSize:
+        case PM_LargeIconSize:
+        case PM_ListViewIconSize:
+        case PM_TabBarIconSize:
+        case PM_MessageBoxIconSize:
+        case PM_IndicatorWidth:
+        case PM_IndicatorHeight:
+        case PM_ExclusiveIndicatorWidth:
+        case PM_ExclusiveIndicatorHeight:
+        case PM_ScrollBarExtent:
+        case PM_SliderThickness:
+        case PM_SliderLength:
+        case PM_TitleBarHeight:
+        case PM_MenuButtonIndicator:
+            return px(base);
+        default:
+            return base;
+        }
+    }
+};
 
 // The interface font. A named family is chosen only when it exists, so no
 // platform falls back to something unintended.
@@ -99,7 +147,8 @@ QFont interfaceFont()
             break;
         }
     }
-    f.setPointSize(baseFontPointSize());
+    // fractional sizes keep the steps smooth (13 pt at 115% is 14.95, not 15)
+    f.setPointSizeF(baseFontPointSize() * g_uiScale / 100.0);
     return f;
 }
 
@@ -115,6 +164,71 @@ const ThemeColors &theme()
     return g_colors;
 }
 
+int uiScale()
+{
+    return g_uiScale;
+}
+
+int minUiScale()
+{
+    return kScaleSteps[0];
+}
+
+int maxUiScale()
+{
+    return kScaleSteps[std::size(kScaleSteps) - 1];
+}
+
+int nextUiScale(int percent, int direction)
+{
+    const int n = int(std::size(kScaleSteps));
+    if (direction > 0) {
+        for (int i = 0; i < n; ++i)
+            if (kScaleSteps[i] > percent)
+                return kScaleSteps[i];
+        return kScaleSteps[n - 1];
+    }
+    for (int i = n - 1; i >= 0; --i)
+        if (kScaleSteps[i] < percent)
+            return kScaleSteps[i];
+    return kScaleSteps[0];
+}
+
+int px(int deviceIndependentPixels)
+{
+    return (deviceIndependentPixels * g_uiScale + 50) / 100;
+}
+
+QSize iconSize(int base)
+{
+    const int n = px(base);
+    return QSize(n, n);
+}
+
+void applyUiScaleTo(QWidget *root)
+{
+    if (!root)
+        return;
+    // Qt picks up the new font, palette and style sheet by itself. Icon sizes
+    // are a per-widget property, so they are refreshed here; the icons hold
+    // several resolutions (see Icons.cpp) and the right one is chosen.
+    const auto scaleIcons = [](QWidget *w) {
+        if (auto *tb = qobject_cast<QToolBar *>(w))
+            tb->setIconSize(iconSize(16));
+        else if (auto *tabs = qobject_cast<QTabBar *>(w))
+            tabs->setIconSize(iconSize(16));
+        else if (auto *b = qobject_cast<QAbstractButton *>(w)) {
+            // keep the relative size a widget asked for (a section chevron is
+            // smaller than a tool bar button)
+            const int base = w->property("lmIconBase").isValid() ? w->property("lmIconBase").toInt() : 15;
+            b->setIconSize(iconSize(base));
+        }
+    };
+    scaleIcons(root);
+    for (QWidget *w : root->findChildren<QWidget *>())
+        scaleIcons(w);
+}
+
 int baseFontPointSize()
 {
     // Windows renders 9 pt at the size macOS renders 13 px; matching them by
@@ -128,12 +242,15 @@ int baseFontPointSize()
 #endif
 }
 
-void applyTheme(QApplication &app, const QString &name)
+void applyTheme(QApplication &app, const QString &name, int scalePercent)
 {
+    g_uiScale = std::clamp(scalePercent, 75, 200);
     // Fusion on every platform: the native styles disagree about padding,
     // check box size and group boxes, which is exactly what must not differ
     // between the Windows, macOS and Linux builds.
-    app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+    // Fusion on every platform, wrapped so its pixel metrics follow the
+    // interface size. setStyle() takes ownership of the proxy.
+    app.setStyle(new ScaledStyle(QStyleFactory::create(QStringLiteral("Fusion"))));
     const bool dark = name != QLatin1String("light");
     g_colors = dark ? makeDark() : makeLight();
     const ThemeColors &c = g_colors;
@@ -341,12 +458,35 @@ QSplitter::handle:hover { background: %ACCENT%; }
         {"%DANGERWASH%", rgba(c.danger, dark ? 0.18 : 0.10)},
         {"%DISABLEDFILL%", rgba(c.accent, 0.22)},
         {"%SCROLLTHUMB%", rgba(c.text, 0.22)},
-        {"%SMALLPT%", QString::number(baseFontPointSize() - 1)},
-        {"%TITLEPT%", QString::number(baseFontPointSize() + 2)},
-        {"%BIGPT%", QString::number(baseFontPointSize() + 1)},
+        // font sizes follow the interface size, like the application font
+        {"%SMALLPT%", QString::number((baseFontPointSize() - 1) * g_uiScale / 100.0, 'f', 1)},
+        {"%TITLEPT%", QString::number((baseFontPointSize() + 2) * g_uiScale / 100.0, 'f', 1)},
+        {"%BIGPT%", QString::number((baseFontPointSize() + 1) * g_uiScale / 100.0, 'f', 1)},
     };
     for (const Token &t : tokens)
         css.replace(QLatin1String(t.name), t.value);
+
+    // Every length in the sheet above is written for 100%; scale them all in one
+    // pass, so a padding or a corner radius never has to be remembered
+    // separately. Lengths are the only px values in the sheet.
+    if (g_uiScale != 100) {
+        static const QRegularExpression lengths(QStringLiteral("(-?\\d+)px"));
+        QString scaled;
+        scaled.reserve(css.size() + 64);
+        qsizetype last = 0;
+        auto it = lengths.globalMatch(css);
+        while (it.hasNext()) {
+            const QRegularExpressionMatch m = it.next();
+            scaled += QStringView(css).mid(last, m.capturedStart() - last);
+            const int value = m.captured(1).toInt();
+            // a hairline stays a hairline until the interface is much larger
+            const int out = value < 0 ? -px(-value) : px(value);
+            scaled += QString::number(out) + QStringLiteral("px");
+            last = m.capturedEnd();
+        }
+        scaled += QStringView(css).mid(last);
+        css = scaled;
+    }
     app.setStyleSheet(css);
 }
 

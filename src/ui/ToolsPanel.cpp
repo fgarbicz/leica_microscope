@@ -35,7 +35,7 @@ ToolsPanel::ToolsPanel(QWidget *parent) : QWidget(parent)
 
     auto *hs = imageGroup->addSection(tr("Histogram"), Icon::Histogram);
     m_hist = new HistogramWidget(this);
-    m_hist->setMinimumHeight(130);
+    m_hist->setMinimumHeight(px(130));
     hs->contentLayout()->addWidget(m_hist);
     auto *hHint = new QLabel(tr("Drag the handles to set black and white points."), this);
     hHint->setObjectName(QStringLiteral("Hint"));

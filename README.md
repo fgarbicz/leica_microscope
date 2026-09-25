@@ -59,6 +59,13 @@ features and the same interface on all three (see [Platforms](#platforms)).
 - Export with burned-in scale bar and annotations; copy to clipboard; print.
 - Multifocus and stitching from existing image files.
 
+**Interface**
+- Dark and light themes.
+- Interface size adjustable from 75% to 200% (text, controls, icons and spacing
+  together), applied immediately and remembered.
+- Side panels grouped by function, with the mouse wheel reserved for scrolling so it
+  cannot change a setting by accident.
+
 **Files**
 - TIFF output: 16-bit or 8-bit, lossless Deflate, with the calibration in the
   resolution tags (ImageJ/Fiji/QuPath read the µm scale) and all acquisition

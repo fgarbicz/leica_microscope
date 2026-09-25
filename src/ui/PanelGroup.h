@@ -40,7 +40,12 @@ public:
 
     const QColor &color() const { return m_color; }
 
+protected:
+    void changeEvent(QEvent *e) override;
+
 private:
+    void updateIcon();
+
     QColor m_color;
     QVBoxLayout *m_sections;
     QLabel *m_icon;

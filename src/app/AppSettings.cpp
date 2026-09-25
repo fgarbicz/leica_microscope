@@ -178,6 +178,7 @@ void AppSettings::load()
 
     browseFolder = s.value(QStringLiteral("browseFolder"), capture.folder).toString();
     theme = s.value(QStringLiteral("theme"), theme).toString();
+    uiScale = std::clamp(s.value(QStringLiteral("uiScale"), uiScale).toInt(), 75, 200);
 }
 
 void AppSettings::save() const
@@ -249,6 +250,7 @@ void AppSettings::save() const
     s.endGroup();
     s.setValue(QStringLiteral("browseFolder"), browseFolder);
     s.setValue(QStringLiteral("theme"), theme);
+    s.setValue(QStringLiteral("uiScale"), uiScale);
 }
 
 QString AppSettings::nextFileName(const QString &objective, const QString &mode) const

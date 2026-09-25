@@ -61,6 +61,9 @@ private:
     QCheckBox *m_aeGain;
     QCheckBox *m_hqPreview;
     CollapsibleSection *m_advanced;
+    CollapsibleSection *m_deviceSection = nullptr;
+    CollapsibleSection *m_exposureSection = nullptr;
+    void updateSummaries();
     QFormLayout *m_advancedForm = nullptr;
     bool m_busy = false;
     bool m_canSetExposure = true, m_canSetGain = true;
