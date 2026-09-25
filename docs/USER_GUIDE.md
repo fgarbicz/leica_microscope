@@ -168,6 +168,7 @@ using the marker type, nucleus size and sensitivity set in Process.
 
 | Key | Action |
 |---|---|
+| F1 | user guide |
 | F5 | live on/off |
 | F6 | freeze |
 | F7 | auto white balance |

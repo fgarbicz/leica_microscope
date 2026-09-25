@@ -141,3 +141,10 @@ frames. Only removing power fixes this.
   it in some states. `dmctest --usbc-cycle` (native implementation in
   `src/camera/usb/UsbCPower.cpp`, admin rights needed) watches the connector and
   reports whether power was really removed. If it was not, unplug the camera.
+
+## Driver signing on PCs without the Windows SDK
+
+`install_driver.ps1` falls back to `New-FileCatalog` + `Set-AuthenticodeSignature` when
+`makecat`/`signtool` are not installed (typical lab PC). Verified on 2026-09-25: a package
+with a changed INF, catalogued and signed this way with the local "DM Imaging Driver
+Signing" certificate, was accepted by `pnputil /add-driver` as a new package (then removed).

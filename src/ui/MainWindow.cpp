@@ -639,10 +639,27 @@ void MainWindow::buildMenus()
 
     // ---- Help
     QMenu *help = menuBar()->addMenu(tr("&Help"));
+    help->addAction(tr("&User guide"), QKeySequence(Qt::Key_F1), this, [this] {
+        // installed: <app>/docs/USER_GUIDE.html; development tree: <repo>/docs/USER_GUIDE.md
+        QDir d(QCoreApplication::applicationDirPath());
+        for (int i = 0; i < 5; ++i) {
+            for (const char *name : {"docs/USER_GUIDE.html", "docs/USER_GUIDE.md"}) {
+                const QString p = d.filePath(QString::fromLatin1(name));
+                if (QFileInfo::exists(p)) {
+                    QDesktopServices::openUrl(QUrl::fromLocalFile(p));
+                    return;
+                }
+            }
+            if (!d.cdUp())
+                break;
+        }
+        QMessageBox::information(this, tr("User guide"), tr("The user guide was not found. Reinstall DM Imaging."));
+    });
+    help->addSeparator();
     help->addAction(tr("&Keyboard shortcuts"), this, [this] {
         QMessageBox::information(this, tr("Keyboard shortcuts"),
                                  tr("F5\tLive on/off\nF6\tFreeze\nF7\tAuto white balance\nF8\tAuto exposure once\n"
-                                    "F9 / Space\tCapture image\nF11\tFull screen\nCtrl+1, Ctrl+2, …\tSelect objective (one per objective)\n"
+                                    "F1\tUser guide\nF9 / Space\tCapture image\nF11\tFull screen\nCtrl+1, Ctrl+2, …\tSelect objective (one per objective)\n"
                                     "Alt+1/2/3\tAcquire / Browse / Process\nMouse wheel\tZoom\nDouble click\tFit / 100%\n"
                                     "Ctrl+drag, middle drag\tPan\n0 / 1 / 2\tFit / 100% / 200%\nDel\tDelete annotation\n"
                                     "Ctrl+Z / Ctrl+Y\tUndo / redo annotations"));
