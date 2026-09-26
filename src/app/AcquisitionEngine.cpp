@@ -5,7 +5,6 @@
 #include "imaging/PixelShift.h"
 
 #include <QDeadlineTimer>
-#include <QtConcurrent/QtConcurrentRun>
 
 #include <algorithm>
 #include <cmath>
@@ -384,7 +383,7 @@ void AcquisitionEngine::onRawFrame(RawFramePtr f)
 
     if (!captureFrames.empty()) {
         // full quality processing off the camera thread
-        QtConcurrent::run(&m_jobs, [this, captureFrames = std::move(captureFrames), pipeline] {
+        m_jobs.start([this, captureFrames = std::move(captureFrames), pipeline] {
             try {
                 auto raw = averageRawFrames(captureFrames);
                 auto res = std::make_shared<CaptureResult>();
@@ -804,7 +803,7 @@ void AcquisitionEngine::captureShots(int modeIndex)
     }
     const Camera::ShotMode mode = modes[size_t(modeIndex)];
     auto pipe = pipeline();
-    QtConcurrent::run(&m_jobs, [this, cam, mode, modeIndex, pipe] {
+    m_jobs.start([this, cam, mode, modeIndex, pipe] {
         struct BusyGuard {
             std::atomic<bool> &b;
             ~BusyGuard() { b = false; }
@@ -894,7 +893,7 @@ void AcquisitionEngine::captureHdr(int exposures, double stops, int averageFrame
     }
     auto pipe = pipeline();
     const int avg = std::clamp(averageFrames, 1, 64);
-    QtConcurrent::run(&m_jobs, [this, cam, exposures, stops, avg, pipe] {
+    m_jobs.start([this, cam, exposures, stops, avg, pipe] {
         const double base = cam->exposure();
         struct Restore {
             std::atomic<bool> &busy;
