@@ -117,6 +117,7 @@ public:
     // one upwards, `averageFrames` each, merged in raw (needs manual exposure)
     void captureHdr(int exposures, double stops = 2.0, int averageFrames = 1);
     bool isBusy() const { return m_busy; }
+    uint64_t framesReceived() const { return m_received; }
     std::shared_ptr<const ColorPipeline> pipeline() const;
 
     // multifocus / live image builder

@@ -125,7 +125,13 @@ int main(int argc, char **argv)
     e.setLiveMode(LiveMode::Multifocus);
     for (double f = -7; f <= 7; f += 1.0) {
         cam->setProperty("focus", f);
+        // at least 120 ms and two new frames per focus step (slow machines deliver fewer)
+        const uint64_t n0 = e.framesReceived();
+        QElapsedTimer t;
+        t.start();
         spin(120);
+        while (e.framesReceived() < n0 + 2 && t.elapsed() < 1500)
+            spin(20);
     }
     std::printf("  frames merged: %d\n", e.focusStacker().frameCount());
     CHECK(e.focusStacker().frameCount() >= 8);
@@ -149,14 +155,31 @@ int main(int argc, char **argv)
     std::printf("live image builder\n");
     e.setLiveMode(LiveMode::Mosaic);
     spin(500);
-    // slow continuous scanning (5 sensor px / frame), as a user would move the stage
+    // slow continuous scanning (5 sensor px / frame), as a user would move the stage.
+    // The drift is per frame, so each leg runs until the stage has covered its
+    // distance rather than for a fixed time: a slow or busy machine delivers fewer
+    // frames per second and would otherwise build a smaller mosaic.
+    auto stage = [&](const char *key) {
+        for (const auto &p : cam->properties())
+            if (p.key == key)
+                return p.value;
+        return 0.0;
+    };
+    auto spinUntil = [&](const std::function<bool()> &done, int maxMs) {
+        QElapsedTimer t;
+        t.start();
+        while (!done() && t.elapsed() < maxMs)
+            spin(50);
+    };
+    const double x0 = stage("stage_x"), y0 = stage("stage_y");
     cam->setProperty("drift_x", 5.0);
-    spin(4000);
+    spinUntil([&] { return stage("stage_x") >= x0 + 600; }, 20000);
     cam->setProperty("drift_x", 0.0);
     cam->setProperty("drift_y", 5.0);
-    spin(3000);
+    spinUntil([&] { return stage("stage_y") >= y0 + 450; }, 20000);
     cam->setProperty("drift_y", 0.0);
-    spin(800); // at rest -> last tile added
+    spinUntil([&] { return e.mosaic().status().tiles >= 3; }, 800); // at rest -> last tile added
+    spin(300);
     const auto st = e.mosaic().status();
     std::printf("  tiles %d tracking %d\n", st.tiles, int(st.tracking));
     CHECK(st.tiles >= 3);
