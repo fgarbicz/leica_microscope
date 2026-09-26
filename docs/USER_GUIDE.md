@@ -24,6 +24,11 @@ setting: to change a value, drag its slider, type in its box, or use the arrow k
 This is deliberate — scrolling past a control used to alter the exposure or the
 objective by accident.
 
+**The images you capture** appear as a reel of thumbnails under the live image. On a
+tall screen, *View → Captured images in a vertical list* puts them in a column beside
+the image instead, with the file name next to each one: more images visible at once,
+and the names readable. The choice is remembered.
+
 **If the text is too small** (or too large), change *Interface size* in
 *File → Settings*: it ranges from 75% to 200% and scales the text, the controls and
 the icons together. The list previews each size as you pick it. It is also on the

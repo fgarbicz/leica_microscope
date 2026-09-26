@@ -5,6 +5,7 @@
 // pointer, silently changing the exposure or the objective.
 #include "io/ImageIO.h"
 #include "ui/CompareWindow.h"
+#include "ui/GalleryWidget.h"
 #include "ui/Icons.h"
 #include "ui/ImageView.h"
 #include "ui/Theme.h"
@@ -155,6 +156,38 @@ int main(int argc, char **argv)
     CHECK(nextUiScale(minUiScale(), -1) == minUiScale());
 
     applyTheme(app, QStringLiteral("dark"), 100);
+
+    std::printf("captured images: reel and vertical list\n");
+    {
+        GalleryWidget gallery;
+        // the reel: thumbnails in a row, sized to keep the strip short
+        CHECK(!gallery.isVertical());
+        CHECK(gallery.viewMode() == QListView::IconMode);
+        CHECK(gallery.flow() == QListView::LeftToRight);
+        CHECK(gallery.minimumHeight() > 0);
+        const int reelWidth = gallery.minimumWidth();
+
+        gallery.setVertical(true);
+        CHECK(gallery.isVertical());
+        CHECK(gallery.viewMode() == QListView::ListMode);
+        CHECK(gallery.flow() == QListView::TopToBottom);
+        // a column needs a width, and must not force the old height
+        CHECK(gallery.minimumWidth() > reelWidth);
+        CHECK(gallery.minimumHeight() == 0);
+
+        gallery.setVertical(false);
+        CHECK(!gallery.isVertical());
+        CHECK(gallery.viewMode() == QListView::IconMode);
+        CHECK(gallery.minimumHeight() > 0);
+
+        // neither layout may lose the images
+        gallery.addImage(QStringLiteral("/tmp/a.tif"), QImage(64, 48, QImage::Format_RGB888));
+        gallery.addImage(QStringLiteral("/tmp/b.tif"), QImage(64, 48, QImage::Format_RGB888));
+        CHECK(gallery.count() == 2);
+        gallery.setVertical(true);
+        CHECK(gallery.count() == 2);
+        CHECK(gallery.paths().size() == 2);
+    }
 
     std::printf("every icon renders\n");
     // A missing or malformed SVG body would give a null pixmap and an invisible

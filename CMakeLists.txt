@@ -228,9 +228,13 @@ add_test(NAME enginetest COMMAND enginetest)
 # user interface behaviour (the wheel guard, the icon set, image view overlays)
 add_executable(uitest tests/uitest.cpp src/ui/WheelGuard.cpp src/ui/Theme.cpp src/ui/Icons.cpp
                src/ui/ImageView.cpp src/ui/Annotations.cpp src/ui/Overlays.cpp src/app/AppSettings.cpp
-               src/io/ImageIO.cpp src/io/Metadata.cpp src/ui/CompareWindow.cpp)
+               src/io/ImageIO.cpp src/io/Metadata.cpp src/ui/CompareWindow.cpp
+               src/ui/GalleryWidget.cpp src/ui/PlatformUi.cpp)
 target_include_directories(uitest PRIVATE src)
 target_link_libraries(uitest PRIVATE lmcore Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(uitest PRIVATE Qt6::DBus)  # PlatformUi's "show in file manager"
+endif()
 add_test(NAME uitest COMMAND uitest)
 
 add_executable(iotest tests/iotest.cpp src/io/ImageIO.cpp src/io/Metadata.cpp)

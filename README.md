@@ -65,6 +65,8 @@ features and the same interface on all three (see [Platforms](#platforms)).
   together), applied immediately and remembered.
 - Side panels grouped by function, with the mouse wheel reserved for scrolling so it
   cannot change a setting by accident.
+- Captured images shown as a reel under the live image or as a vertical list beside it,
+  whichever suits the screen.
 
 **Files**
 - TIFF output: 16-bit or 8-bit, lossless Deflate, with the calibration in the
