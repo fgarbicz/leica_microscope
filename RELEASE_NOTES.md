@@ -59,7 +59,8 @@ Preview or the desktop's viewer) while the live image keeps running, e.g. to fin
 same area on a serial section stained with another marker. *Open in Process* moved to
 the thumbnail's right-click menu. Or overlay it on the live image instead
 (right-click → *Overlay on live image*, Ctrl+R), semi-transparent, and move the stage
-until the two match.
+until the two match. Afterwards, *Process → Compare two images* aligns the two
+sections automatically, so synchronised zoom and pan show the same cells.
 
 **HDR capture** (*Acquire image → Mode*): two or three exposures (1×, 4×, 16×) of the
 same field merged in the raw sensor data into one 16-bit image. Dark DAB and

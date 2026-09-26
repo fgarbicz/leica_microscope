@@ -173,6 +173,12 @@ CSV file). Annotations are saved automatically next to the image. *Export with
 overlays* writes an image with the scale bar and annotations burned in, ready
 for presentations.
 
+**Compare two images** (*Process → Compare two images*, Ctrl+K) shows two images
+side by side with zoom and pan synchronised, e.g. the same area stained for two
+markers on serial sections. *Align images* finds how far the tissue is shifted
+between them, so both panes show the same cells as you zoom and pan (shifts only,
+not rotation).
+
 ### IHC quantification (DAB)
 
 In the *IHC quantification* panel, press **Analyse image**, or draw a rectangle, ellipse
