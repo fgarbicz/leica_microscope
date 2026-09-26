@@ -304,8 +304,10 @@ QWidget *MainWindow::buildAcquirePage()
     m_leftPanel = panelScroll(left, panelWidth());
     split->addWidget(m_leftPanel);
 
-    // centre: image + gallery
+    // centre: the live image, with the captured images either under it (reel)
+    // or beside it (list); see setGalleryVertical()
     auto *centre = new QSplitter(Qt::Vertical, split);
+    m_centreSplitter = centre;
     m_view = new ImageView(centre);
     m_view->setPlaceholder(tr("No camera connected\n\nConnect the camera in the Camera panel (or use the simulator)."));
     m_view->installEventFilter(this);
@@ -314,8 +316,8 @@ QWidget *MainWindow::buildAcquirePage()
     centre->addWidget(m_gallery);
     centre->setStretchFactor(0, 5);
     centre->setStretchFactor(1, 1);
-    centre->setSizes({px(800), px(150)});
     split->addWidget(centre);
+    applyGalleryLayout(AppSettings::instance().galleryVertical);
 
     // right: what the image is (histogram, focus, information), then how it is
     // adjusted, then what is drawn over it
@@ -700,6 +702,13 @@ void MainWindow::buildMenus()
     }
     m_view->setReferenceOpacity(savedOpacity / 100.0);
     view->addSeparator();
+    m_galleryVerticalAct = view->addAction(icon(Icon::Browse), tr("Captured images in a &vertical list"));
+    m_galleryVerticalAct->setCheckable(true);
+    m_galleryVerticalAct->setChecked(AppSettings::instance().galleryVertical);
+    m_galleryVerticalAct->setToolTip(tr("Show the images captured in this session beside the live image with their "
+                                        "names, instead of as a reel underneath it"));
+    connect(m_galleryVerticalAct, &QAction::toggled, this, &MainWindow::setGalleryVertical);
+    view->addSeparator();
     QMenu *size = view->addMenu(tr("&Interface size"));
     size->setIcon(icon(Icon::Settings));
     size->addAction(icon(Icon::Plus), tr("&Larger text"), QKeySequence(QStringLiteral("Ctrl+Shift+=")), this, [this] {
@@ -867,6 +876,30 @@ void MainWindow::setWorkspace(int index)
         m_browse->refresh();
 }
 
+void MainWindow::applyGalleryLayout(bool vertical)
+{
+    if (!m_centreSplitter || !m_gallery)
+        return;
+    m_gallery->setVertical(vertical);
+    m_centreSplitter->setOrientation(vertical ? Qt::Horizontal : Qt::Vertical);
+    // The splitter keeps the sizes it had, which are meaningless once the
+    // orientation flips, so give it a sensible split of the space it has.
+    const int total = vertical ? m_centreSplitter->width() : m_centreSplitter->height();
+    const int strip = vertical ? px(250) : px(150);
+    const int image = std::max(px(200), (total > 0 ? total : px(950)) - strip);
+    m_centreSplitter->setSizes({image, strip});
+}
+
+void MainWindow::setGalleryVertical(bool vertical)
+{
+    AppSettings::instance().galleryVertical = vertical;
+    AppSettings::instance().save();
+    applyGalleryLayout(vertical);
+    showMessage(vertical ? tr("Captured images: vertical list beside the image")
+                         : tr("Captured images: reel under the image"),
+                2500);
+}
+
 void MainWindow::setCameraLed(CameraState state)
 {
     m_cameraState = state;
@@ -897,6 +930,8 @@ void MainWindow::applyAppearance(const QString &theme, int scalePercent, bool sa
     // the style sheet and font reach every widget on their own; icon sizes do not
     applyUiScaleTo(this);
     setCameraLed(m_cameraState); // redrawn at the new size and in the new colours
+    if (scaleChanged)
+        applyGalleryLayout(AppSettings::instance().galleryVertical);
     if (scaleChanged) {
         // the panels have a minimum width in device pixels, and the splitter
         // keeps whatever widths it had: both have to be told about the change

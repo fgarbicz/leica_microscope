@@ -8,6 +8,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QContextMenuEvent>
+#include <QEvent>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -57,21 +58,73 @@ QString itemToolTip(const QString &path)
 GalleryWidget::GalleryWidget(QWidget *parent) : QListWidget(parent)
 {
     setObjectName(QStringLiteral("Gallery"));
-    setViewMode(QListView::IconMode);
-    setFlow(QListView::LeftToRight);
-    setWrapping(false);
-    setIconSize(QSize(px(150), px(100)));
-    setGridSize(QSize(px(170), px(132)));
     setMovement(QListView::Static);
     setResizeMode(QListView::Adjust);
-    setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
     setSelectionMode(QAbstractItemView::ExtendedSelection);
     setTextElideMode(Qt::ElideMiddle);
-    setMinimumHeight(px(140));
+    applyLayout();
     // double click opens the image in the system viewer, in its own window (e.g. a
     // reference on a second screen while the next marker is imaged); live keeps running
     connect(this, &QListWidget::itemDoubleClicked, this,
             [this](QListWidgetItem *it) { openInImageViewer(it->data(Qt::UserRole).toString(), this); });
+}
+
+void GalleryWidget::applyLayout()
+{
+    if (m_vertical) {
+        // one image per row: thumbnail on the left, file name beside it
+        setViewMode(QListView::ListMode);
+        setFlow(QListView::TopToBottom);
+        setWrapping(false);
+        setIconSize(QSize(px(112), px(76)));
+        setGridSize(QSize()); // let each row size itself around the icon and the name
+        setUniformItemSizes(true);
+        setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+        setWordWrap(true);
+        setMinimumHeight(0);
+        setMinimumWidth(px(210));
+        setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+    } else {
+        setViewMode(QListView::IconMode);
+        setFlow(QListView::LeftToRight);
+        setWrapping(false);
+        setIconSize(QSize(px(150), px(100)));
+        setGridSize(QSize(px(170), px(132)));
+        setUniformItemSizes(true);
+        setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
+        setWordWrap(false);
+        setMinimumWidth(0);
+        setMinimumHeight(px(140));
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    }
+}
+
+void GalleryWidget::setVertical(bool on)
+{
+    if (on == m_vertical)
+        return;
+    m_vertical = on;
+    applyLayout();
+}
+
+void GalleryWidget::changeEvent(QEvent *e)
+{
+    QListWidget::changeEvent(e);
+    if (e->type() == QEvent::StyleChange || e->type() == QEvent::FontChange)
+        applyLayout(); // the sizes above are in scaled pixels
+}
+
+void GalleryWidget::paintEvent(QPaintEvent *e)
+{
+    QListWidget::paintEvent(e);
+    if (count() > 0)
+        return;
+    // An empty column beside the image reads as a fault; say what it is for.
+    QPainter p(viewport());
+    p.setPen(theme().faintText);
+    const QRect r = viewport()->rect().adjusted(px(10), px(10), -px(10), -px(10));
+    p.drawText(r, Qt::AlignCenter | Qt::TextWordWrap,
+               tr("Images you capture\nin this session\nappear here"));
 }
 
 void GalleryWidget::keyPressEvent(QKeyEvent *e)

@@ -61,6 +61,9 @@ private:
     // optionally remembers them (the Settings dialog saves on OK itself).
     void applyAppearance(const QString &theme, int scalePercent, bool save = false);
     void applyColorSettings(const ColorSettings &c);
+    // Captured images beside the live image (vertical list) or under it (reel).
+    void applyGalleryLayout(bool vertical);
+    void setGalleryVertical(bool vertical);
     void loadShadingForObjective();
     void startCalibration();
     ImageMetadata currentMetadata(const CaptureResult &r) const;
@@ -99,6 +102,8 @@ private:
     QScrollArea *m_leftPanel = nullptr;   // the two side panels, so their minimum
     QScrollArea *m_rightPanel = nullptr;  // width can follow the interface size
     QSplitter *m_acquireSplitter = nullptr;
+    QSplitter *m_centreSplitter = nullptr; // live image + captured images
+    QAction *m_galleryVerticalAct = nullptr;
     QTimer m_timelapse;
     QTimer m_reconnect;   // polls for a lost camera
     VideoRecorder m_recorder;

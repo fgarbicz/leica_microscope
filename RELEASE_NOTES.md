@@ -1,5 +1,14 @@
 # DM Imaging release notes
 
+## Unreleased
+
+- **The captured images can be a vertical list.** They were always a horizontal reel
+  under the live image, which suits a wide screen but shows few images and no readable
+  names. *View → Captured images in a vertical list* puts them in a column beside the
+  image instead, thumbnail and file name per row; the live image keeps the rest of the
+  space. The choice is remembered, and both layouts follow the interface size. An empty
+  strip now says what it is for rather than looking like a fault.
+
 ## 1.1.1 (2026-09-26)
 
 Serial sections: finding, capturing and comparing the same area stained for

@@ -87,6 +87,9 @@ public:
     // spacing). 100 is the platform default; the microscope room is often read
     // from a metre away, and some people simply want it bigger.
     int uiScale = 100;
+    // Captured images beside the live image as a vertical list, instead of the
+    // horizontal reel underneath it.
+    bool galleryVertical = false;
     bool shadingEnabled = false;
     QMap<QString, ColorSettings> colorPresets; // user presets
 
