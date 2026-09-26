@@ -84,11 +84,19 @@ Capture modes (*Acquire image → Mode*):
 | Mode | Result | When |
 |---|---|---|
 | Standard | 1920 × 1200 | everyday imaging |
+| HDR, 2 exposures | 1920 × 1200, 16-bit, 4× more signal in dark areas | dark DAB / haematoxylin next to bright background |
+| HDR, 3 exposures | 1920 × 1200, 16-bit, 16× more signal in dark areas | very dark stains, publication |
 | 4-shot true colour | 1920 × 1200, full colour at every pixel | fine colour detail, lowest noise |
 | 16-shot | 3840 × 2400 | low-magnification overviews, publication |
 | 36-shot | 5760 × 3600 | maximum detail (takes a few seconds) |
 
-Keep the microscope still during pixel-shift captures. **Averaging** (e.g. 4
+**HDR** takes the same field at the current exposure and at 4× (and 16×) longer
+exposures and merges them: the background comes from the short exposure, the dark
+stain from the long ones, so dark areas are recorded with far less noise and the
+background is not clipped. Set the exposure for the background first (auto
+exposure does this), then capture. *Averaging* applies to every exposure.
+
+Keep the microscope still during pixel-shift and HDR captures. **Averaging** (e.g. 4
 frames) reduces noise in standard captures.
 
 Images are saved as **16-bit TIFF** by default. The calibration is stored in the

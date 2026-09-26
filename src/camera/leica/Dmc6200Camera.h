@@ -44,6 +44,7 @@ public:
 
     std::vector<int> bitDepths() const override { return {12}; }
     int bitDepth() const override { return 12; }
+    double blackLevel() const override { return 8.0 / 4095.0; } // ~8 DN, see docs/DMC6200_PROTOCOL.md
 
     std::vector<CameraProperty> properties() const override;
     bool setProperty(const std::string &key, double value) override;

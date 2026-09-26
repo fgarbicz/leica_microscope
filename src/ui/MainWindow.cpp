@@ -997,7 +997,7 @@ void MainWindow::onCameraChanged()
     QStringList modes;
     for (const auto &m : cam->shotModes())
         modes << QString::fromStdString(m.name);
-    m_capturePanel->setShotModes(modes);
+    m_capturePanel->setShotModes(modes, cam->canSetExposure());
     // restore saved acquisition settings
     auto &S = AppSettings::instance();
     AutoExposureSettings ae = m_engine->autoExposure();
@@ -1153,6 +1153,9 @@ void MainWindow::capture()
     if (c.shotMode >= 0 && !m_engine->camera()->shotModes().empty()) {
         m_capturePanel->setBusy(true, tr("Pixel shift capture…"));
         m_engine->captureShots(c.shotMode);
+    } else if (c.shotMode <= -2 && m_engine->camera()->canSetExposure()) {
+        m_capturePanel->setBusy(true, tr("HDR capture…"));
+        m_engine->captureHdr(-c.shotMode, 2.0, c.averageFrames);
     } else {
         m_capturePanel->setBusy(true);
         m_engine->capture(c.averageFrames);

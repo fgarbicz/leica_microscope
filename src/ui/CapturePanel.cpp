@@ -69,7 +69,8 @@ CapturePanel::CapturePanel(QWidget *parent) : QWidget(parent)
     auto *form = new QFormLayout;
     form->setContentsMargins(0, 4, 0, 0);
     m_mode = new QComboBox(this);
-    m_mode->setToolTip(tr("Pixel shift moves the sensor to record full colour at every pixel (4-shot) or "
+    m_mode->setToolTip(tr("HDR merges longer exposures so dark stains are recorded with less noise. "
+                          "Pixel shift moves the sensor to record full colour at every pixel (4-shot) or "
                           "to increase the resolution (16/36-shot). The specimen must not move."));
     form->addRow(tr("Mode"), m_mode);
     m_average = new QSpinBox(this);
@@ -262,11 +263,24 @@ CapturePanel::CapturePanel(QWidget *parent) : QWidget(parent)
     connect(m_moAuto, &QCheckBox::toggled, this, &CapturePanel::mosaicAutoAddChanged);
 }
 
-void CapturePanel::setShotModes(const QStringList &names)
+void CapturePanel::setShotModes(const QStringList &names, bool hdrAvailable)
 {
     m_updating = true;
     m_mode->clear();
     m_mode->addItem(tr("Standard (single shot)"), -1);
+    // HDR entries carry -(number of exposures), see MainWindow::capture
+    if (hdrAvailable) {
+        m_mode->addItem(tr("HDR, 2 exposures (dark stains, less noise)"), -2);
+        m_mode->setItemData(m_mode->count() - 1,
+                            tr("Two exposures, 4× apart, merged: dark areas get 4× the signal while the background "
+                               "stays unclipped. Set the exposure for the background first (auto exposure)."),
+                            Qt::ToolTipRole);
+        m_mode->addItem(tr("HDR, 3 exposures (very dark stains)"), -3);
+        m_mode->setItemData(m_mode->count() - 1,
+                            tr("Three exposures (1×, 4×, 16×) merged into one 16-bit image. Takes longer; the "
+                               "specimen must not move."),
+                            Qt::ToolTipRole);
+    }
     for (int i = 0; i < names.size(); ++i)
         m_mode->addItem(names[i], i);
     const int want = AppSettings::instance().capture.shotMode;

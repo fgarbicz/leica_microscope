@@ -77,6 +77,9 @@ public:
     // on macOS, where AVFoundation has no manual exposure API); the UI then
     // disables the control instead of letting it do nothing.
     virtual bool canSetExposure() const { return true; }
+    // Sensor black level of the raw data (fraction of full scale); used where
+    // raw values are scaled by exposure (HDR).
+    virtual double blackLevel() const { return 0.0; }
 
     // Analog gain as a multiplier (1.0 = unity)
     virtual Range gainRange() const = 0;

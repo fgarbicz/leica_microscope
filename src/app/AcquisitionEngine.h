@@ -113,6 +113,9 @@ public:
     void capture(int averageFrames = 1);
     // multi-shot sensor-shift capture (camera shot mode index)
     void captureShots(int modeIndex);
+    // high dynamic range: `exposures` exposures `stops` EV apart from the current
+    // one upwards, `averageFrames` each, merged in raw (needs manual exposure)
+    void captureHdr(int exposures, double stops = 2.0, int averageFrames = 1);
     bool isBusy() const { return m_busy; }
     std::shared_ptr<const ColorPipeline> pipeline() const;
 
@@ -172,6 +175,13 @@ private:
     std::deque<RawFramePtr> m_captureQueue;
     int m_captureWanted = 0;    // frames still needed for a capture
     int m_captureAverage = 1;
+    // frames of a given exposure for a capture job (HDR); guarded by m_mutex
+    std::vector<RawFramePtr> m_grabbed;
+    int m_grabWanted = 0, m_grabSkip = 0;
+    double m_grabExposureMs = 0;
+    QWaitCondition m_grabCond;
+    // waits (on a job thread) for `n` frames exposed at `exposureMs`
+    std::vector<RawFramePtr> grabFrames(int n, double exposureMs, int timeoutMs);
 
     ColorSettings m_color;
     std::shared_ptr<const ColorPipeline> m_pipeline; // immutable, swapped on change

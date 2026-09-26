@@ -1,8 +1,10 @@
 #include "AcquisitionEngine.h"
 
 #include "imaging/Debayer.h"
+#include "imaging/Hdr.h"
 #include "imaging/PixelShift.h"
 
+#include <QDeadlineTimer>
 #include <QtConcurrent/QtConcurrentRun>
 
 #include <algorithm>
@@ -360,6 +362,18 @@ void AcquisitionEngine::onRawFrame(RawFramePtr f)
             if (--m_captureWanted == 0) {
                 captureFrames.swap(m_captureQueue);
                 pipeline = m_pipeline;
+            }
+        }
+        if (m_grabWanted > 0) {
+            // frames still exposed with the previous setting are skipped; cameras
+            // that report the real exposure are matched on it
+            const bool match = f->exposureMs <= 0 || std::abs(f->exposureMs - m_grabExposureMs) <= 0.02 * m_grabExposureMs + 0.02;
+            if (m_grabSkip > 0)
+                --m_grabSkip;
+            else if (match) {
+                m_grabbed.push_back(f);
+                if (--m_grabWanted == 0)
+                    m_grabCond.wakeAll();
             }
         }
         if (m_pending)
@@ -835,6 +849,101 @@ void AcquisitionEngine::captureShots(int modeIndex)
             emit captureFinished(res);
         } catch (const std::bad_alloc &) {
             fail(tr("Not enough memory for this capture mode. Close other programs or use a mode with fewer shots."));
+        } catch (const std::exception &e) {
+            fail(QString::fromUtf8(e.what()));
+        }
+    });
+}
+
+std::vector<RawFramePtr> AcquisitionEngine::grabFrames(int n, double exposureMs, int timeoutMs)
+{
+    QMutexLocker l(&m_mutex);
+    m_grabbed.clear();
+    m_grabExposureMs = exposureMs;
+    m_grabSkip = 1; // the frame in flight when the setting changed
+    m_grabWanted = n;
+    QDeadlineTimer deadline(timeoutMs);
+    while (m_grabWanted > 0)
+        if (!m_grabCond.wait(&m_mutex, deadline))
+            break;
+    const bool complete = m_grabWanted == 0;
+    m_grabWanted = 0;
+    std::vector<RawFramePtr> out;
+    out.swap(m_grabbed);
+    if (!complete)
+        throw std::runtime_error(tr("No image from the camera at %1 ms exposure. Check that the live image is running.")
+                                     .arg(exposureMs, 0, 'f', 1)
+                                     .toStdString());
+    return out;
+}
+
+void AcquisitionEngine::captureHdr(int exposures, double stops, int averageFrames)
+{
+    std::shared_ptr<Camera> cam = cameraRef();
+    if (!cam || !cam->isStreaming()) {
+        emit captureFailed(tr("The camera is not streaming. Start the live image first."));
+        return;
+    }
+    if (!cam->canSetExposure()) {
+        emit captureFailed(tr("HDR needs a camera whose exposure time can be set."));
+        return;
+    }
+    if (m_busy.exchange(true)) {
+        emit captureFailed(tr("Another capture is in progress"));
+        return;
+    }
+    auto pipe = pipeline();
+    const int avg = std::clamp(averageFrames, 1, 64);
+    QtConcurrent::run(&m_jobs, [this, cam, exposures, stops, avg, pipe] {
+        const double base = cam->exposure();
+        struct Restore {
+            std::atomic<bool> &busy;
+            Camera &cam;
+            double exposure;
+            ~Restore() {
+                cam.setExposure(exposure);
+                busy = false;
+            }
+        } restore{m_busy, *cam, base};
+        auto fail = [this](const QString &msg) {
+            QMetaObject::invokeMethod(this, [this, msg] { emit captureFailed(msg); }, Qt::QueuedConnection);
+        };
+        try {
+            const double maxMs = std::min(cam->exposureRange().max, 4000.0);
+            std::vector<RawFramePtr> merged;
+            const auto factors = hdrExposureFactors(exposures, stops);
+            for (size_t i = 0; i < factors.size(); ++i) {
+                const double ms = std::min(base * factors[i], maxMs);
+                if (i > 0 && ms <= merged.back()->exposureMs * 1.05)
+                    break; // exposure limit reached
+                QMetaObject::invokeMethod(this, [this, i, n = int(factors.size()), ms] {
+                    emit captureProgress(int(i), n, tr("HDR exposure %1 ms").arg(ms, 0, 'f', 1));
+                }, Qt::QueuedConnection);
+                cam->setExposure(ms);
+                auto frames = grabFrames(avg, cam->exposure(), int(avg * (ms + 100) * 3) + 4000);
+                merged.push_back(averageRawFrames(std::deque<RawFramePtr>(frames.begin(), frames.end())));
+            }
+            cam->setExposure(base); // live image back to normal while merging
+            QMetaObject::invokeMethod(this, [this, n = int(factors.size())] { emit captureProgress(n, n, tr("Merging…")); },
+                                      Qt::QueuedConnection);
+            auto raw = mergeExposures(merged, merged.front()->exposureMs, cam->blackLevel());
+            auto res = std::make_shared<CaptureResult>();
+            res->averagedFrames = int(merged.size()) * avg;
+            res->exposureMs = raw->exposureMs;
+            res->gain = raw->gain;
+            res->kind = "hdr-" + std::to_string(merged.size());
+            merged.clear();
+            res->linear = toLinearRGB(*raw, DemosaicMethod::MalvarHeCutler);
+            pipe->applyLinear(res->linear);
+            const auto &cs = pipe->settings();
+            res->linear = applyGeometry(res->linear, cs.flipHorizontal, cs.flipVertical, cs.rotation);
+            res->rendered16 = pipe->toDisplay16(res->linear);
+            unsharpMask(res->rendered16, cs.sharpenAmount, cs.sharpenRadius);
+            res->rendered8 = pipe->toDisplay8(res->linear);
+            unsharpMask(res->rendered8, cs.sharpenAmount, cs.sharpenRadius);
+            emit captureFinished(res);
+        } catch (const std::bad_alloc &) {
+            fail(tr("Not enough memory for the HDR capture."));
         } catch (const std::exception &e) {
             fail(QString::fromUtf8(e.what()));
         }

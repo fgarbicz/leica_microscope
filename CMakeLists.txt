@@ -72,6 +72,7 @@ set(LMCORE_SOURCES
     src/imaging/FocusStacker.cpp
     src/imaging/MosaicBuilder.cpp
     src/imaging/PixelShift.cpp
+    src/imaging/Hdr.cpp
     src/imaging/StainAnalysis.cpp
     src/imaging/NucleusDetection.cpp
     src/camera/Backends.cpp

@@ -61,6 +61,12 @@ the thumbnail's right-click menu. Or overlay it on the live image instead
 (right-click → *Overlay on live image*, Ctrl+R), semi-transparent, and move the stage
 until the two match.
 
+**HDR capture** (*Acquire image → Mode*): two or three exposures (1×, 4×, 16×) of the
+same field merged in the raw sensor data into one 16-bit image. Dark DAB and
+haematoxylin get up to 16× the signal, so they are recorded with much less noise,
+while the background stays unclipped. The camera already reads 12 bits and pixel
+shift already gives 3840 × 2400 and 5760 × 3600; HDR adds the dynamic range.
+
 **Safer acquisition and analysis.**
 - *Help → User guide* (F1) opens the user guide on every platform.
 - Exposure and gain are locked while a capture collects its frames or pixel-shift shots, and

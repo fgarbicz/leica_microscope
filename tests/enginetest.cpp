@@ -105,6 +105,17 @@ int main(int argc, char **argv)
     auto res = waitCapture(e, 10000, [&] { e.capture(4); });
     CHECK(res && res->rendered16.width == 1024 && res->averagedFrames == 4);
 
+    // --- HDR: three exposures merged; the exposure is restored afterwards
+    std::printf("HDR capture (3 exposures)\n");
+    {
+        const double before = cam->exposure();
+        auto hdr = waitCapture(e, 20000, [&] { e.captureHdr(3, 2.0, 1); });
+        CHECK(hdr && hdr->kind == "hdr-3" && hdr->rendered16.width == 1024);
+        CHECK(std::abs(cam->exposure() - before) < 0.01);
+        spin(300);
+        CHECK(!e.isBusy());
+    }
+
     // --- multifocus: sweep focus through the section, compare sharpness
     std::printf("multifocus\n");
     cam->setProperty("tilt", 12.0);

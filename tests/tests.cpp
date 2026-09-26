@@ -6,6 +6,7 @@
 #include "imaging/ColorPipeline.h"
 #include "imaging/Debayer.h"
 #include "imaging/FocusStacker.h"
+#include "imaging/Hdr.h"
 #include "imaging/MosaicBuilder.h"
 #include "imaging/PixelShift.h"
 #include "imaging/Registration.h"
@@ -13,6 +14,7 @@
 #include "imaging/StainAnalysis.h"
 #include "imaging/NucleusDetection.h"
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -649,6 +651,64 @@ static void testPixelShift()
     CHECK(err / n < 0.002); // exact colour at every pixel, only quantisation error
 }
 
+static void testHdr()
+{
+    std::printf("HDR merge\n");
+    // 12-bit frames of a ramp from deep shadow to near white at 1x, 4x and 16x
+    // exposure, with read noise and the sensor's black level
+    const int w = 256, h = 64;
+    const double black = 8.0 / 4095.0, noise = 2.0 / 4095.0;
+    auto radiance = [&](int x, int y) { return y < h / 2 ? 0.01 : 0.002 + 0.85 * x / double(w - 1); };
+    std::mt19937 rng(7);
+    std::normal_distribution<double> nd(0.0, noise);
+    std::vector<RawFramePtr> frames;
+    for (double t : hdrExposureFactors(3, 2.0)) {
+        auto f = std::make_shared<RawFrame>();
+        f->width = w;
+        f->height = h;
+        f->format = PixelFormat::BayerGB16;
+        f->bitDepth = 12;
+        f->stride = w * 2;
+        f->exposureMs = 10.0 * t;
+        f->data.resize(size_t(f->stride) * h);
+        auto *d = reinterpret_cast<uint16_t *>(f->data.data());
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x)
+                d[y * w + x] = uint16_t(std::clamp(black + radiance(x, y) * t + nd(rng), 0.0, 1.0) * 4095 + 0.5);
+        frames.push_back(f);
+    }
+    CHECK(hdrExposureFactors(3, 2.0) == (std::vector<double>{1, 4, 16}));
+    auto m = mergeExposures(frames, 10.0, black);
+    CHECK(m && m->bitDepth == 16 && m->format == PixelFormat::BayerGB16 && m->exposureMs == 10.0);
+    if (!m)
+        return;
+    auto at = [&](const RawFrame &f, int x, int y) {
+        return reinterpret_cast<const uint16_t *>(f.data.data())[y * w + x] / double((1 << f.bitDepth) - 1);
+    };
+    // bright part of the ramp: saturated long exposures must not pull it up
+    double maxErr = 0;
+    for (int x = 0; x < w; x += 7)
+        maxErr = std::max(maxErr, std::abs(at(*m, x, h - 5) - black - radiance(x, h - 5)));
+    CHECK(maxErr < 0.01);
+    // flat dark patch: noise at least 4x lower than in the single exposure
+    auto stdev = [&](const RawFrame &f) {
+        double s = 0, s2 = 0;
+        int n = 0;
+        for (int y = 4; y < h / 2 - 4; ++y)
+            for (int x = 4; x < w - 4; ++x) {
+                const double v = at(f, x, y);
+                s += v;
+                s2 += v * v;
+                ++n;
+            }
+        return std::sqrt(std::max(0.0, s2 / n - (s / n) * (s / n)));
+    };
+    const double s1 = stdev(*frames[0]), sm = stdev(*m);
+    std::printf("  dark patch noise single %.5f -> HDR %.5f\n", s1, sm);
+    CHECK(sm < s1 / 4);
+    CHECK_NEAR(at(*m, w / 2, h / 4), black + 0.01, 0.001);
+}
+
 static void testSimCamera()
 {
     std::printf("simulated camera\n");
@@ -1018,6 +1078,7 @@ int main(int argc, char **argv)
         testThinFrames();
         testFocusYuyv();
         testPixelShift();
+        testHdr();
         testSimCamera();
         testFocusMeasure();
         testNuclei();
