@@ -80,6 +80,11 @@ public:
     // Sensor black level of the raw data (fraction of full scale); used where
     // raw values are scaled by exposure (HDR).
     virtual double blackLevel() const { return 0.0; }
+    // HDR needs linear raw frames stamped with the exposure they were really taken
+    // at. UVC backends (Media Foundation, V4L2, AVFoundation) deliver processed,
+    // gamma-encoded data stamped with the current setting, so frames still in the
+    // driver queue after a change would be merged at the wrong exposure.
+    virtual bool supportsHdr() const { return false; }
 
     // Analog gain as a multiplier (1.0 = unity)
     virtual Range gainRange() const = 0;

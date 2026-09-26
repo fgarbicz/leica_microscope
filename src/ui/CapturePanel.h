@@ -20,7 +20,7 @@ class CapturePanel : public QWidget {
 public:
     explicit CapturePanel(QWidget *parent = nullptr);
 
-    // pixel-shift modes of the camera; HDR entries when its exposure can be set
+    // pixel-shift modes of the camera; HDR entries when it supports HDR
     void setShotModes(const QStringList &names, bool hdrAvailable = false);
     void setBusy(bool busy, const QString &what = QString());
     void setProgress(int done, int total);

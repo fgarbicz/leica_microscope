@@ -38,6 +38,7 @@ public:
 
     std::vector<int> bitDepths() const override { return {8, 12}; }
     int bitDepth() const override { return m_bitDepth; }
+    bool supportsHdr() const override { return true; } // linear raw, exact exposure per frame
     bool setBitDepth(int b) override;
 
     std::vector<CameraProperty> properties() const override;

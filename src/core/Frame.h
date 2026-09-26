@@ -33,6 +33,9 @@ const char *pixelFormatName(PixelFormat f);
 int bytesPerPixel(PixelFormat f);          // for NV12 returns 1 (luma plane)
 bool isBayer(PixelFormat f);
 bool is16Bit(PixelFormat f);
+// The 16-bit counterpart of an 8-bit raw format (Mono8 -> Mono16, Bayer*8 ->
+// Bayer*16, RGB8 -> RGB16); other formats are returned unchanged.
+PixelFormat widenedTo16(PixelFormat f);
 bool isMono(PixelFormat f);
 
 // Rounds a float sample to uint16, saturating to 0..65535.

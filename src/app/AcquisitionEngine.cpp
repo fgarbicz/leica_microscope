@@ -53,16 +53,7 @@ RawFramePtr averageRawFrames(const std::deque<RawFramePtr> &frames)
     }
     auto out = std::make_shared<RawFrame>(f0);
     // promote to 16 bit to keep the extra precision
-    PixelFormat fmt = f0.format;
-    switch (f0.format) {
-    case PixelFormat::Mono8: fmt = PixelFormat::Mono16; break;
-    case PixelFormat::BayerRG8: fmt = PixelFormat::BayerRG16; break;
-    case PixelFormat::BayerGR8: fmt = PixelFormat::BayerGR16; break;
-    case PixelFormat::BayerGB8: fmt = PixelFormat::BayerGB16; break;
-    case PixelFormat::BayerBG8: fmt = PixelFormat::BayerBG16; break;
-    case PixelFormat::RGB8: fmt = PixelFormat::RGB16; break;
-    default: break;
-    }
+    const PixelFormat fmt = widenedTo16(f0.format);
     if (f0.format == PixelFormat::BGR8 || f0.format == PixelFormat::BGRA8 || f0.format == PixelFormat::YUYV
         || f0.format == PixelFormat::NV12) {
         // packed formats that we do not promote: plain average in place
@@ -178,6 +169,10 @@ void AcquisitionEngine::closeCamera()
         cam = std::move(m_camera); // worker threads may still hold a reference
         m_camera.reset();
         m_pending.reset();
+        if (m_grabWanted > 0) { // an HDR capture waiting for frames: fail it now
+            m_grabAborted = true;
+            m_grabCond.wakeAll();
+        }
     }
     cancelPendingCapture(tr("The camera was disconnected"));
     if (cam) {
@@ -428,6 +423,9 @@ void AcquisitionEngine::runAutoExposure(const RawFrame &raw, Camera *cam)
     }
     // wait until frames reflect the last change
     if (secondsSince(m_lastAeChange) < 0.15)
+        return;
+    QMutexLocker exposureLock(&m_exposureLock);
+    if (m_busy) // a capture started since the check above
         return;
     const double current = cam->exposure();
     if (raw.exposureMs > 0 && std::abs(raw.exposureMs - current) > std::max(0.01, current * 0.02))
@@ -809,6 +807,7 @@ void AcquisitionEngine::captureShots(int modeIndex)
             std::atomic<bool> &b;
             ~BusyGuard() { b = false; }
         } guard{m_busy};
+        { QMutexLocker wait(&m_exposureLock); } // let an auto exposure step in progress finish
         auto fail = [this](const QString &msg) {
             QMetaObject::invokeMethod(this, [this, msg] { emit captureFailed(msg); }, Qt::QueuedConnection);
         };
@@ -859,17 +858,22 @@ std::vector<RawFramePtr> AcquisitionEngine::grabFrames(int n, double exposureMs,
 {
     QMutexLocker l(&m_mutex);
     m_grabbed.clear();
+    m_grabAborted = false;
     m_grabExposureMs = exposureMs;
     m_grabSkip = 1; // the frame in flight when the setting changed
     m_grabWanted = n;
     QDeadlineTimer deadline(timeoutMs);
-    while (m_grabWanted > 0)
+    while (m_grabWanted > 0 && !m_grabAborted)
         if (!m_grabCond.wait(&m_mutex, deadline))
             break;
-    const bool complete = m_grabWanted == 0;
+    const bool complete = m_grabWanted == 0 && !m_grabAborted;
+    const bool aborted = m_grabAborted;
     m_grabWanted = 0;
+    m_grabAborted = false;
     std::vector<RawFramePtr> out;
     out.swap(m_grabbed);
+    if (aborted)
+        throw std::runtime_error(tr("The camera was disconnected").toStdString());
     if (!complete)
         throw std::runtime_error(tr("No image from the camera at %1 ms exposure. Check that the live image is running.")
                                      .arg(exposureMs, 0, 'f', 1)
@@ -884,8 +888,8 @@ void AcquisitionEngine::captureHdr(int exposures, double stops, int averageFrame
         emit captureFailed(tr("The camera is not streaming. Start the live image first."));
         return;
     }
-    if (!cam->canSetExposure()) {
-        emit captureFailed(tr("HDR needs a camera whose exposure time can be set."));
+    if (!cam->supportsHdr()) {
+        emit captureFailed(tr("HDR needs raw frames with a known exposure (the Leica DMC6200)."));
         return;
     }
     if (m_busy.exchange(true)) {
@@ -895,6 +899,9 @@ void AcquisitionEngine::captureHdr(int exposures, double stops, int averageFrame
     auto pipe = pipeline();
     const int avg = std::clamp(averageFrames, 1, 64);
     m_jobs.start([this, cam, exposures, stops, avg, pipe] {
+        // m_busy is set: once any auto exposure step in progress has finished, the
+        // exposure is ours until Restore below
+        { QMutexLocker wait(&m_exposureLock); }
         const double base = cam->exposure();
         struct Restore {
             std::atomic<bool> &busy;

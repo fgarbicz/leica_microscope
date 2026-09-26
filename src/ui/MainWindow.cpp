@@ -660,7 +660,7 @@ void MainWindow::buildMenus()
     refMenu->setIcon(icon(Icon::Compare));
     m_referenceAct = refMenu->addAction(tr("Show &selected image over the live image"));
     m_referenceAct->setCheckable(true);
-    m_referenceAct->setShortcut(QKeySequence(tr("Ctrl+R")));
+    m_referenceAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_R));
     connect(m_referenceAct, &QAction::triggered, this, [this](bool on) {
         if (!on) {
             showReference(QString());
@@ -997,7 +997,7 @@ void MainWindow::onCameraChanged()
     QStringList modes;
     for (const auto &m : cam->shotModes())
         modes << QString::fromStdString(m.name);
-    m_capturePanel->setShotModes(modes, cam->canSetExposure());
+    m_capturePanel->setShotModes(modes, cam->supportsHdr());
     // restore saved acquisition settings
     auto &S = AppSettings::instance();
     AutoExposureSettings ae = m_engine->autoExposure();
@@ -1153,7 +1153,7 @@ void MainWindow::capture()
     if (c.shotMode >= 0 && !m_engine->camera()->shotModes().empty()) {
         m_capturePanel->setBusy(true, tr("Pixel shift capture…"));
         m_engine->captureShots(c.shotMode);
-    } else if (c.shotMode <= -2 && m_engine->camera()->canSetExposure()) {
+    } else if (c.shotMode <= -2 && m_engine->camera()->supportsHdr()) {
         m_capturePanel->setBusy(true, tr("HDR capture…"));
         m_engine->captureHdr(-c.shotMode, 2.0, c.averageFrames);
     } else {
@@ -1426,7 +1426,13 @@ void MainWindow::showReference(const QString &path)
     m_referenceAct->setChecked(true);
     QtConcurrent::run([path] {
         LoadedImage li;
-        return loadImage(path, li) ? toQImage8(li.data) : QImage();
+        if (!loadImage(path, li))
+            return QImage();
+        // a screen never needs more; keeps a 36-shot image from costing 80 MB here
+        const QImage img = toQImage8(li.data);
+        return std::max(img.width(), img.height()) > 2560
+                   ? img.scaled(2560, 2560, Qt::KeepAspectRatio, Qt::SmoothTransformation)
+                   : img;
     }).then(this, [this, path](const QImage &img) {
         if (path != m_referencePath) // replaced or hidden while loading
             return;
@@ -1446,9 +1452,10 @@ void MainWindow::showReference(const QString &path)
                         0);
             return;
         }
-        showMessage(tr("Reference overlay: %1. Move the stage until the images match; Ctrl+R hides it. "
+        showMessage(tr("Reference overlay: %1. Move the stage until the images match; %2 hides it. "
                        "Opacity: View → Reference overlay.")
-                        .arg(QFileInfo(path).fileName()),
+                        .arg(QFileInfo(path).fileName(),
+                             m_referenceAct->shortcut().toString(QKeySequence::NativeText)),
                     0);
     });
 }

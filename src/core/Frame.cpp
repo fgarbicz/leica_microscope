@@ -102,6 +102,19 @@ bool isBayer(PixelFormat f)
     }
 }
 
+PixelFormat widenedTo16(PixelFormat f)
+{
+    switch (f) {
+    case PixelFormat::Mono8: return PixelFormat::Mono16;
+    case PixelFormat::BayerRG8: return PixelFormat::BayerRG16;
+    case PixelFormat::BayerGR8: return PixelFormat::BayerGR16;
+    case PixelFormat::BayerGB8: return PixelFormat::BayerGB16;
+    case PixelFormat::BayerBG8: return PixelFormat::BayerBG16;
+    case PixelFormat::RGB8: return PixelFormat::RGB16;
+    default: return f;
+    }
+}
+
 bool is16Bit(PixelFormat f)
 {
     switch (f) {

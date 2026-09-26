@@ -92,35 +92,60 @@ bool CompareWindow::openInto(int side, const QString &path)
     info += QStringLiteral("  ·  %1 × %2").arg(li.data.width).arg(li.data.height);
     m_label[side]->setText(info);
     // about 512 pixels wide is plenty to find a shift and takes milliseconds
-    m_grayFactor[side] = std::max(1, int(std::lround(li.data.width / 512.0)));
-    m_gray[side] = toGray(li.data, m_grayFactor[side]);
+    // a working copy with the long side near 1024 px (a tall mosaic stays small too)
+    m_size[side] = QSize(li.data.width, li.data.height);
+    m_gray[side] = toGray(li.data, std::max(1, std::max(li.data.width, li.data.height) / 1024));
     align();
     sync(m_view[0], m_view[1]);
     return true;
 }
 
+namespace {
+// bilinear resampling to w x h
+ImageF resampled(const ImageF &src, int w, int h)
+{
+    ImageF out(w, h);
+    const double sx = double(src.width) / w, sy = double(src.height) / h;
+    for (int y = 0; y < h; ++y) {
+        const double fy = std::clamp((y + 0.5) * sy - 0.5, 0.0, src.height - 1.0);
+        const int y0 = int(fy), y1 = std::min(y0 + 1, src.height - 1);
+        const float ty = float(fy - y0);
+        for (int x = 0; x < w; ++x) {
+            const double fx = std::clamp((x + 0.5) * sx - 0.5, 0.0, src.width - 1.0);
+            const int x0 = int(fx), x1 = std::min(x0 + 1, src.width - 1);
+            const float tx = float(fx - x0);
+            const float top = src.at(x0, y0) + (src.at(x1, y0) - src.at(x0, y0)) * tx;
+            const float bottom = src.at(x0, y1) + (src.at(x1, y1) - src.at(x0, y1)) * tx;
+            out.at(x, y) = top + (bottom - top) * ty;
+        }
+    }
+    return out;
+}
+} // namespace
+
 void CompareWindow::align()
 {
-    m_offset = QPointF();
+    m_aligned = false;
     m_alignInfo->clear();
     if (!m_align->isChecked() || m_gray[0].px.empty() || m_gray[1].px.empty())
         return;
-    // phase correlation needs equal sizes: crop both to the common top-left part
-    const int w = std::min(m_gray[0].width, m_gray[1].width), h = std::min(m_gray[0].height, m_gray[1].height);
-    auto crop = [w, h](const ImageF &g) {
-        ImageF c(w, h);
-        for (int y = 0; y < h; ++y)
-            std::copy_n(&g.px[size_t(y) * g.width], w, &c.px[size_t(y) * w]);
-        return c;
-    };
-    const Shift s = phaseCorrelate(crop(m_gray[0]), crop(m_gray[1]));
-    if (s.confidence < 0.03) {
+    // Both images cover the same field whatever their pixel count (pixel shift vs
+    // standard, as in sync()), so put them on one grid: the left image's long side
+    // at 512, the right image at the same width.
+    const double s = 512.0 / std::max(m_size[0].width(), m_size[0].height());
+    m_gridW = std::max(8.0, std::round(m_size[0].width() * s));
+    m_gridH[0] = std::max(8.0, std::round(m_size[0].height() * s));
+    m_gridH[1] = std::max(8.0, std::round(m_size[1].height() * m_gridW / m_size[1].width()));
+    const Shift sh = phaseCorrelate(resampled(m_gray[0], int(m_gridW), int(m_gridH[0])),
+                                    resampled(m_gray[1], int(m_gridW), int(m_gridH[1])));
+    if (sh.confidence < 0.03) {
         m_alignInfo->setText(tr("Could not align (little in common)"));
         return;
     }
-    // moving(x, y) ~ reference(x + dx, y + dy): a feature at p on the right is at p + d on the left
-    m_offset = QPointF(s.dx / m_gray[0].width, s.dy / m_gray[0].height);
-    m_alignInfo->setText(tr("Aligned: shifted %1 × %2 px").arg(std::lround(s.dx * m_grayFactor[0])).arg(std::lround(s.dy * m_grayFactor[0])));
+    // moving(x, y) ~ reference(x + dx, y + dy): a feature at q on the left is at q - d on the right
+    m_aligned = true;
+    m_shift = QPointF(sh.dx, sh.dy);
+    m_alignInfo->setText(tr("Aligned: shifted %1 × %2 px").arg(std::lround(sh.dx / s)).arg(std::lround(sh.dy / s)));
 }
 
 void CompareWindow::sync(ImageView *from, ImageView *to)
@@ -131,10 +156,16 @@ void CompareWindow::sync(ImageView *from, ImageView *to)
     // same relative position; zoom scaled so both show the same field when the
     // images have different pixel counts (e.g. pixel shift vs standard)
     const double scale = double(from->image().width()) / to->image().width();
-    const QPointF offset = from == m_view[0] ? -m_offset : m_offset;
+    QPointF rel = from->relativeCenter();
+    if (m_aligned) {
+        // through the common grid: left q -> right q - shift, and back
+        const bool fromLeft = from == m_view[0];
+        const QPointF q(rel.x() * m_gridW, rel.y() * m_gridH[fromLeft ? 0 : 1]);
+        const QPointF p = fromLeft ? q - m_shift : q + m_shift;
+        rel = QPointF(p.x() / m_gridW, p.y() / m_gridH[fromLeft ? 1 : 0]);
+    }
     // aligned images: follow the tissue even in "fit" (otherwise both just show everything)
-    const bool fit = from->isFit() && m_offset.isNull();
-    to->setViewState(from->relativeCenter() + offset, from->zoom() * scale, fit);
+    to->setViewState(rel, from->zoom() * scale, from->isFit() && !m_aligned);
     m_syncing = false;
 }
 

@@ -5,6 +5,7 @@
 #include "core/Frame.h"
 
 #include <QPointF>
+#include <QSize>
 #include <QWidget>
 
 class QCheckBox;
@@ -32,9 +33,13 @@ private:
     QCheckBox *m_sync;
     QCheckBox *m_align;
     QLabel *m_alignInfo;
-    ImageF m_gray[2];       // downscaled grayscale for alignment
-    int m_grayFactor[2] = {1, 1};
-    QPointF m_offset;       // right image position of a feature = left position - offset (relative units)
+    ImageF m_gray[2];       // downscaled grayscale for alignment (long side ~1024)
+    QSize m_size[2];        // full image sizes
+    // alignment, in a common grid where both images have the same scale: a
+    // feature at q on the left is at q - m_shift on the right
+    bool m_aligned = false;
+    QPointF m_shift;
+    double m_gridW = 0, m_gridH[2] = {0, 0};
     bool m_syncing = false;
 };
 

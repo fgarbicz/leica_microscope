@@ -180,6 +180,7 @@ private:
     // frames of a given exposure for a capture job (HDR); guarded by m_mutex
     std::vector<RawFramePtr> m_grabbed;
     int m_grabWanted = 0, m_grabSkip = 0;
+    bool m_grabAborted = false; // camera closed while a job waited for frames
     double m_grabExposureMs = 0;
     QWaitCondition m_grabCond;
     // waits (on a job thread) for `n` frames exposed at `exposureMs`
@@ -218,6 +219,9 @@ private:
     std::thread m_worker;
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_busy{false};
+    // held by auto exposure from its m_busy check to its setExposure, so a capture
+    // job that set m_busy and then passed this lock owns the exposure
+    QMutex m_exposureLock;
     std::atomic<bool> m_uiBusy{false};
     std::chrono::steady_clock::time_point m_uiBusySince{};
     std::atomic<uint64_t> m_received{0}, m_dropped{0};

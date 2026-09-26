@@ -120,8 +120,7 @@ private:
     QVector<QRectF> m_tiles;
     QString m_statusText, m_placeholder;
     QImage m_overlayImage;
-    QImage m_reference;       // as loaded
-    QImage m_referenceScaled; // resampled to m_image's size (rebuilt when that changes)
+    QImage m_reference; // drawn scaled onto the image, like the image itself
     double m_referenceOpacity = 0.5;
     double m_focus = -1, m_focusPeak = 0;
     bool m_showOverlays = true;

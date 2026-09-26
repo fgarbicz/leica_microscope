@@ -8,6 +8,7 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QMessageBox>
+#include <QMimeDatabase>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QSysInfo>
@@ -102,14 +103,27 @@ bool openInImageViewer(const QString &path, QWidget *parent)
                              QObject::tr("%1 no longer exists (moved or deleted?).").arg(QDir::toNativeSeparators(path)));
         return false;
     }
+    auto noViewer = [&] {
+        QMessageBox::warning(parent, QObject::tr("Open image"),
+                             QObject::tr("No program is set up to open %1 files. Choose a default image viewer for "
+                                         "them in the system settings, or use %2.")
+                                 .arg(QFileInfo(path).suffix().toUpper(), revealActionText()));
+        return false;
+    };
+#ifdef Q_OS_LINUX
+    // xdg-open reports success as soon as it starts, even when nothing can open
+    // the file; ask for the default application first (skipped without xdg-mime)
+    QProcess query;
+    query.start(QStringLiteral("xdg-mime"),
+                {QStringLiteral("query"), QStringLiteral("default"), QMimeDatabase().mimeTypeForFile(path).name()});
+    if (query.waitForFinished(2000) && query.exitStatus() == QProcess::NormalExit && query.exitCode() == 0
+        && query.readAllStandardOutput().trimmed().isEmpty())
+        return noViewer();
+#endif
     // ShellExecute on Windows, LaunchServices ("open") on macOS, xdg-open on Linux
     if (QDesktopServices::openUrl(QUrl::fromLocalFile(path)))
         return true;
-    QMessageBox::warning(parent, QObject::tr("Open image"),
-                         QObject::tr("No program is set up to open %1 files. Choose a default image viewer for "
-                                     "TIFF files in the system settings, or use %2.")
-                             .arg(QFileInfo(path).suffix().toUpper(), revealActionText()));
-    return false;
+    return noViewer();
 }
 
 bool cameraAccessSetupAvailable()

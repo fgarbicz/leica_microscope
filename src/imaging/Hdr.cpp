@@ -14,21 +14,6 @@ std::vector<double> hdrExposureFactors(int exposures, double stops)
     return f;
 }
 
-namespace {
-PixelFormat to16(PixelFormat f)
-{
-    switch (f) {
-    case PixelFormat::Mono8: return PixelFormat::Mono16;
-    case PixelFormat::BayerRG8: return PixelFormat::BayerRG16;
-    case PixelFormat::BayerGR8: return PixelFormat::BayerGR16;
-    case PixelFormat::BayerGB8: return PixelFormat::BayerGB16;
-    case PixelFormat::BayerBG8: return PixelFormat::BayerBG16;
-    case PixelFormat::RGB8: return PixelFormat::RGB16;
-    default: return f;
-    }
-}
-} // namespace
-
 RawFramePtr mergeExposures(const std::vector<RawFramePtr> &frames, double referenceExposureMs, double blackLevel)
 {
     std::vector<RawFramePtr> in;
@@ -44,7 +29,7 @@ RawFramePtr mergeExposures(const std::vector<RawFramePtr> &frames, double refere
         if (f->exposureMs <= 0)
             throw std::runtime_error("HDR: frame without exposure time");
     }
-    const PixelFormat outFmt = to16(f0.format);
+    const PixelFormat outFmt = widenedTo16(f0.format);
     if (!isBayer(outFmt) && outFmt != PixelFormat::Mono16 && outFmt != PixelFormat::RGB16)
         throw std::runtime_error("HDR needs raw (Bayer, mono or RGB) frames");
     if (in.size() == 1)

@@ -94,7 +94,9 @@ Capture modes (*Acquire image → Mode*):
 exposures and merges them: the background comes from the short exposure, the dark
 stain from the long ones, so dark areas are recorded with far less noise and the
 background is not clipped. Set the exposure for the background first (auto
-exposure does this), then capture. *Averaging* applies to every exposure.
+exposure does this), then capture. *Averaging* applies to every exposure. HDR is
+available with the Leica DMC6200 on Windows, macOS and Linux; other (UVC) cameras
+deliver processed images that cannot be merged this way, so they do not offer it.
 
 Keep the microscope still during pixel-shift and HDR captures. **Averaging** (e.g. 4
 frames) reduces noise in standard captures.
@@ -111,7 +113,7 @@ another marker. Right-click a thumbnail to open it in Process, show it in the fi
 manager, or delete it.
 
 **Reference overlay** (same area on the next section): right-click a thumbnail →
-*Overlay on live image*, or select it and press **Ctrl+R**. The image is shown
+*Overlay on live image*, or select it and press **Ctrl+R** (Cmd+R on a Mac). The image is shown
 semi-transparently over the live image; move the stage until the two match, then
 press Ctrl+R again to hide it and capture. The overlay is never part of the saved
 image. Its opacity (25 / 50 / 75 %) is under *View → Reference overlay*.

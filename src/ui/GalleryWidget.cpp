@@ -13,6 +13,7 @@
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QKeyEvent>
+#include <QKeySequence>
 #include <QMenu>
 #include <QMessageBox>
 #include <QPainter>
@@ -126,7 +127,9 @@ void GalleryWidget::contextMenuEvent(QContextMenuEvent *e)
     QMenu m(this);
     auto *ext = m.addAction(tr("Open in image viewer"));
     m.setDefaultAction(ext); // what a double click does
-    auto *ref = m.addAction(tr("Overlay on live image (Ctrl+R)"));
+    // the shortcut as this platform spells it (Cmd on macOS)
+    auto *ref = m.addAction(tr("Overlay on live image (%1)")
+                                .arg(QKeySequence(Qt::CTRL | Qt::Key_R).toString(QKeySequence::NativeText)));
     ref->setToolTip(tr("Shows this image semi-transparently over the live image, to find the same area "
                        "on the next section"));
     auto *open = m.addAction(tr("Open in Process"));

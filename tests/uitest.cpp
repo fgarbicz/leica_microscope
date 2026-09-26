@@ -212,23 +212,30 @@ int main(int argc, char **argv)
                 v += std::exp(-((x - b[0]) * (x - b[0]) + (y - b[1]) * (y - b[1])) / (2 * b[2] * b[2]));
             return std::clamp(1.0 - 0.6 * v, 0.0, 1.0);
         };
-        Image16 left(w, h), right(w, h);
+        Image16 left(w, h);
         for (int y = 0; y < h; ++y)
             for (int x = 0; x < w; ++x)
-                for (int c = 0; c < 3; ++c) {
+                for (int c = 0; c < 3; ++c)
                     left.row(y)[x * 3 + c] = uint16_t(tissue(x, y) * 65535);
-                    right.row(y)[x * 3 + c] = uint16_t(tissue(x + dx, y + dy) * 65535); // right(p) = left(p + d)
-                }
         QTemporaryDir dir;
-        const QString pl = dir.filePath(QStringLiteral("a.tif")), pr = dir.filePath(QStringLiteral("b.tif"));
-        SaveOptions opt;
-        CHECK(saveImage(pl, left, ImageMetadata(), opt) && saveImage(pr, right, ImageMetadata(), opt));
-        CompareWindow cw;
-        cw.resize(1200, 600);
-        CHECK(cw.openLeft(pl) && cw.openRight(pr));
-        const auto views = cw.findChildren<ImageView *>();
-        CHECK(views.size() == 2);
-        if (views.size() == 2) {
+        const QString pl = dir.filePath(QStringLiteral("a.tif"));
+        CHECK(saveImage(pl, left, ImageMetadata(), SaveOptions()));
+        // k = 2: the right image has twice the pixels of the same field (pixel shift vs standard)
+        for (int k : {1, 2}) {
+            Image16 right(w * k, h * k);
+            for (int y = 0; y < h * k; ++y)
+                for (int x = 0; x < w * k; ++x)
+                    for (int c = 0; c < 3; ++c) // right(p) = left(p / k + d)
+                        right.row(y)[x * 3 + c] = uint16_t(tissue(double(x) / k + dx, double(y) / k + dy) * 65535);
+            const QString pr = dir.filePath(QStringLiteral("b%1.tif").arg(k));
+            CHECK(saveImage(pr, right, ImageMetadata(), SaveOptions()));
+            CompareWindow cw;
+            cw.resize(1200, 600);
+            CHECK(cw.openLeft(pl) && cw.openRight(pr));
+            const auto views = cw.findChildren<ImageView *>();
+            CHECK(views.size() == 2);
+            if (views.size() != 2)
+                continue;
             // which pane shows which image (child order is not guaranteed)
             const QImage la = toQImage8(left);
             ImageView *a = views[0]->image() == la ? views[0] : views[1];
@@ -236,9 +243,9 @@ int main(int argc, char **argv)
             CHECK(a->image() == la);
             for (int i = 0; i < 3; ++i)
                 sendWheel(a, 120); // zoom in on the left pane
-            // the cell at the centre of the left pane is d pixels further up-left on the right
+            // the cell at the centre of the left pane is d (left) pixels further up-left on the right
             const QPointF ra = a->relativeCenter(), rb = b->relativeCenter();
-            std::printf("  left centre %.3f,%.3f  right centre %.3f,%.3f\n", ra.x(), ra.y(), rb.x(), rb.y());
+            std::printf("  %dx: left centre %.3f,%.3f  right centre %.3f,%.3f\n", k, ra.x(), ra.y(), rb.x(), rb.y());
             CHECK(std::abs((ra.x() - rb.x()) * w - dx) < 2 && std::abs((ra.y() - rb.y()) * h - dy) < 2);
         }
     }

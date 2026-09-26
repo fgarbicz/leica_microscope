@@ -29,7 +29,6 @@ ImageView::ImageView(QWidget *parent) : QWidget(parent)
 void ImageView::setReferenceImage(const QImage &img)
 {
     m_reference = img;
-    m_referenceScaled = QImage();
     update();
 }
 
@@ -237,14 +236,15 @@ void ImageView::paintEvent(QPaintEvent *)
                                      - double(m_image.width()) / m_image.height())
                                 < 0.02;
     if (refFits && !visibleImg.isEmpty()) {
-        // resample once per live resolution, not once per frame
-        if (m_referenceScaled.size() != m_image.size())
-            m_referenceScaled = m_reference.scaled(m_image.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-        QRectF srcR(QPointF(std::floor(visibleImg.left()), std::floor(visibleImg.top())),
-                    QPointF(std::ceil(visibleImg.right()), std::ceil(visibleImg.bottom())));
+        // the visible part of the image, in reference pixels
+        const double kx = double(m_reference.width()) / m_image.width(), ky = double(m_reference.height()) / m_image.height();
+        p.save();
         p.setOpacity(m_referenceOpacity);
-        p.drawImage(T.mapRect(srcR), m_referenceScaled, srcR);
-        p.setOpacity(1.0);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        p.drawImage(T.mapRect(visibleImg),
+                    m_reference,
+                    QRectF(visibleImg.left() * kx, visibleImg.top() * ky, visibleImg.width() * kx, visibleImg.height() * ky));
+        p.restore();
     }
     // pixel grid at high zoom
     if (m_zoom >= 16) {
