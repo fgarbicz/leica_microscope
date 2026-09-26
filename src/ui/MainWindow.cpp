@@ -1437,6 +1437,15 @@ void MainWindow::showReference(const QString &path)
         }
         m_tabs->setCurrentIndex(0);
         m_view->setReferenceImage(img);
+        const QImage live = m_view->image();
+        if (!live.isNull()
+            && std::abs(double(img.width()) / img.height() - double(live.width()) / live.height()) >= 0.02) {
+            showMessage(tr("Reference overlay: %1 has a different shape from the live image (image format or "
+                           "live stitching?); it is shown once they match.")
+                            .arg(QFileInfo(path).fileName()),
+                        0);
+            return;
+        }
         showMessage(tr("Reference overlay: %1. Move the stage until the images match; Ctrl+R hides it. "
                        "Opacity: View → Reference overlay.")
                         .arg(QFileInfo(path).fileName()),

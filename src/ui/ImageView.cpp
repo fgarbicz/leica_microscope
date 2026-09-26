@@ -230,7 +230,13 @@ void ImageView::paintEvent(QPaintEvent *)
                     QPointF(std::ceil(visibleImg.right()), std::ceil(visibleImg.bottom())));
         p.drawImage(T.mapRect(srcR), m_overlayImage, srcR);
     }
-    if (!m_reference.isNull() && !visibleImg.isEmpty()) {
+    // only over an image of the same shape (a camera frame, not a growing mosaic or
+    // a centre ROI, where it could not line up anyway)
+    const bool refFits = !m_reference.isNull()
+                         && std::abs(double(m_reference.width()) / m_reference.height()
+                                     - double(m_image.width()) / m_image.height())
+                                < 0.02;
+    if (refFits && !visibleImg.isEmpty()) {
         // resample once per live resolution, not once per frame
         if (m_referenceScaled.size() != m_image.size())
             m_referenceScaled = m_reference.scaled(m_image.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
