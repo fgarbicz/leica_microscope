@@ -1,5 +1,7 @@
 #include "Calibration.h"
 
+#include <cmath>
+
 #include <QSettings>
 #include <QUuid>
 
@@ -72,6 +74,15 @@ void MicroscopeConfig::load()
     }
     microscopeName = s.value(QStringLiteral("name"), microscopeName).toString();
     adapterFactor = s.value(QStringLiteral("adapter"), adapterFactor).toDouble();
+    // version 3: the camera adapter was assumed to be 0.7x and is really 1.0x.
+    // Only the old assumed value is replaced; a figure the user entered or
+    // measured is left alone.
+    if (s.value(QStringLiteral("objectivesVersion"), 1).toInt() < 3) {
+        if (std::abs(adapterFactor - kAssumedAdapterBefore) < 1e-6)
+            adapterFactor = 1.0;
+        s.setValue(QStringLiteral("objectivesVersion"), 3);
+        s.setValue(QStringLiteral("adapter"), adapterFactor);
+    }
     sensorPixelUm = s.value(QStringLiteral("sensorPixel"), sensorPixelUm).toDouble();
     current = s.value(QStringLiteral("current"), current).toInt();
     rememberSettings = s.value(QStringLiteral("rememberSettings"), true).toBool();

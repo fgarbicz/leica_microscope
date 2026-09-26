@@ -24,6 +24,16 @@ setting: to change a value, drag its slider, type in its box, or use the arrow k
 This is deliberate — scrolling past a control used to alter the exposure or the
 objective by accident.
 
+**Pixel size and the camera adapter.** The nominal calibration is the sensor pixel
+pitch (5.86 µm) divided by the objective magnification and the *camera adapter*
+factor in the *Microscope* panel. On this microscope the adapter is **1.0×**, which
+is what LAS X uses for the same objectives. Until version 1.1.2 the program assumed
+0.7×, which made every nominal pixel size 43 % too large. The setting is corrected
+automatically on first start; images saved before that still carry the wrong scale
+in the file, and *Tools → Correct pixel size of saved images…* rewrites it for a
+whole folder (the images themselves are not changed). Measuring a stage micrometer
+with *Calibrate…* overrides the nominal value for that objective and is unaffected.
+
 **Leica .lif files** (what LAS X saves) open like any other image: *File → Open
 image* and pick the `.lif`. It usually holds a whole session, so a list appears of
 the images inside with their sizes and pixel sizes; choose one. The calibration

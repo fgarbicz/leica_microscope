@@ -6,6 +6,7 @@
 #include "io/LifFile.h"
 #include "ui/BrowsePage.h"
 #include "ui/CameraPanel.h"
+#include "ui/CalibrationRepairDialog.h"
 #include "ui/CaptureDialog.h"
 #include "ui/CapturePanel.h"
 #include "ui/ColorPanel.h"
@@ -762,6 +763,12 @@ void MainWindow::buildMenus()
             m_cameraPanel->refreshCameras();
         });
     tools->addAction(icon(Icon::Refresh), tr("&Search cameras"), m_cameraPanel, &CameraPanel::refreshCameras);
+    tools->addSeparator();
+    tools->addAction(icon(Icon::Calibrate), tr("Correct &pixel size of saved images…"), this, [this] {
+        CalibrationRepairDialog dlg(AppSettings::instance().capture.folder, MicroscopeConfig::kAssumedAdapterBefore,
+                                    m_scope.adapterFactor, this);
+        dlg.exec();
+    });
 
     // ---- Help
     QMenu *help = menuBar()->addMenu(tr("&Help"));

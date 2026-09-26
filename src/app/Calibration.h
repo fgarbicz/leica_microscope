@@ -27,7 +27,13 @@ public:
 
     QList<Objective> objectives;
     int current = 4; // 40x
-    double adapterFactor = 0.7;   // C-mount adapter magnification
+    // C-mount adapter magnification. 1.0 is measured, not assumed: LAS X
+    // records 1124.83 um across 3840 px at 10x and 281.21 um at 40x on this
+    // microscope, which is exactly 5.86 um / (objective x 1.0). It used to
+    // default to an assumed 0.7, which made every nominal pixel size 43 % too
+    // large; MicroscopeConfig::load() corrects that value where it was stored.
+    static constexpr double kAssumedAdapterBefore = 0.7;
+    double adapterFactor = 1.0;
     double sensorPixelUm = 5.86;  // camera pixel pitch
     QString microscopeName = QStringLiteral("Leica DM2000");
     bool rememberSettings = true; // restore exposure/gain/WB when the objective changes

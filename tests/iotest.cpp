@@ -1,6 +1,7 @@
 // Image I/O tests: TIFF round trip (8/16 bit, compression, calibration and
 // metadata) and robustness against corrupted files (fuzzing).
 #include "io/ImageIO.h"
+#include "io/CalibrationRepair.h"
 #include "io/LifFile.h"
 
 #include <QCoreApplication>
@@ -192,6 +193,68 @@ int main(int argc, char **argv)
         loadMetadata(p, m);
     }
     std::printf("  %d loaded, %d rejected, no crash\n", loaded, rejected);
+
+    // ---- correcting the pixel size of images already saved
+    std::printf("calibration repair: the recorded scale is corrected, the pixels are not\n");
+    {
+        QTemporaryDir rdir;
+        Image16 small(24, 16);
+        for (int y = 0; y < small.height; ++y)
+            for (int x = 0; x < small.width * 3; ++x)
+                small.row(y)[x] = uint16_t((x * 811 + y * 313) & 0xFFFF);
+
+        // an image as it was saved with the assumed 0.7x adapter
+        ImageMetadata wrong;
+        wrong.magnification = 40;
+        wrong.adapterFactor = 0.7;
+        wrong.umPerPixel = 5.86 / (40 * 0.7); // 0.2093
+        wrong.bitDepth = 16;
+        SaveOptions so;
+        so.format = FileFormat::Tiff;
+        so.sixteenBit = true;
+        const QString tif = rdir.filePath(QStringLiteral("wrong.tif"));
+        QString err;
+        CHECK(saveImage(tif, small, wrong, so, &err));
+
+        // one that was taken with the right adapter must be left alone
+        ImageMetadata right = wrong;
+        right.adapterFactor = 1.0;
+        right.umPerPixel = 5.86 / 40.0;
+        const QString ok = rdir.filePath(QStringLiteral("already-right.tif"));
+        CHECK(saveImage(ok, small, right, so, &err));
+
+        auto fixes = findCalibrationFixes(rdir.path(), false, 0.7, 1.0);
+        CHECK(fixes.size() == 1);
+        if (fixes.size() == 1) {
+            CHECK(QFileInfo(fixes[0].path).fileName() == QLatin1String("wrong.tif"));
+            CHECK(std::abs(fixes[0].newUmPerPixel - 5.86 / 40.0) < 1e-6);
+            CHECK(applyCalibrationFix(fixes[0], 1.0, &err));
+
+            // the file now reports the corrected scale ...
+            LoadedImage li;
+            CHECK(loadImage(tif, li, &err));
+            CHECK(std::abs(li.meta.umPerPixel - 5.86 / 40.0) < 1e-4);
+            CHECK(std::abs(li.meta.adapterFactor - 1.0) < 1e-6);
+            // ... in the resolution tags as well, which is what ImageJ reads
+            Image16 back;
+            int bits = 0;
+            QString desc;
+            double umpp = 0;
+            CHECK(readTiff(tif, back, bits, desc, umpp, &err));
+            CHECK(std::abs(umpp - 5.86 / 40.0) < 1e-4);
+            CHECK(bits == 16);
+            // ... and the pixels are untouched
+            CHECK(back.width == small.width && back.height == small.height);
+            int worst = 0;
+            for (int y = 0; y < small.height; ++y)
+                for (int x = 0; x < small.width * 3; ++x)
+                    worst = std::max(worst, std::abs(int(back.row(y)[x]) - int(small.row(y)[x])));
+            CHECK(worst == 0);
+
+            // running it again finds nothing left to do
+            CHECK(findCalibrationFixes(rdir.path(), false, 0.7, 1.0).isEmpty());
+        }
+    }
 
     // ---- Leica .lif container
     std::printf("lif: write, read back, and keep the pixels and the scale\n");
