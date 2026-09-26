@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Leica .lif files can be read and written.** A .lif is the experiment file LAS X
+  saves, holding many images with their names and calibration. *File → Open image*
+  now accepts one and lists what is inside so an image can be picked; its pixel size
+  comes from the file, so scale bars and measurements are right immediately. *File →
+  Export captured images to a Leica .lif* writes a session into a single .lif.
+  The format is documented in docs/LIF_FORMAT.md, read back from the files this
+  microscope produces and checked against a 442 MB LAS X file of 16 images.
+
 - **The captured images can be a vertical list.** They were always a horizontal reel
   under the live image, which suits a wide screen but shows few images and no readable
   names. *View → Captured images in a vertical list* puts them in a column beside the

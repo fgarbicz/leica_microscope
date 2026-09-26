@@ -1,6 +1,7 @@
 // Image I/O tests: TIFF round trip (8/16 bit, compression, calibration and
 // metadata) and robustness against corrupted files (fuzzing).
 #include "io/ImageIO.h"
+#include "io/LifFile.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -191,6 +192,97 @@ int main(int argc, char **argv)
         loadMetadata(p, m);
     }
     std::printf("  %d loaded, %d rejected, no crash\n", loaded, rejected);
+
+    // ---- Leica .lif container
+    std::printf("lif: write, read back, and keep the pixels and the scale\n");
+    {
+        const QString lifPath = dir.filePath(QStringLiteral("session.lif"));
+        Image16 a(37, 19), b(64, 40);
+        for (int y = 0; y < a.height; ++y)
+            for (int x = 0; x < a.width; ++x) {
+                a.row(y)[3 * x] = uint16_t((x * 1543) & 0xFF00);       // 8-bit writing keeps
+                a.row(y)[3 * x + 1] = uint16_t((y * 2311) & 0xFF00);   // the high byte only
+                a.row(y)[3 * x + 2] = uint16_t(((x + y) * 907) & 0xFF00);
+            }
+        for (int y = 0; y < b.height; ++y)
+            for (int x = 0; x < b.width; ++x)
+                b.row(y)[3 * x] = b.row(y)[3 * x + 1] = b.row(y)[3 * x + 2] = uint16_t((x ^ y) << 8);
+
+        QList<LifImageOut> outs;
+        outs.push_back({QStringLiteral("first 10x"), a, 0.2929, true});
+        outs.push_back({QStringLiteral("second 40x"), b, 0.0732, true});
+        QString err;
+        CHECK(writeLif(lifPath, outs, QStringLiteral("test experiment"), &err));
+        // DMI_LIF_OUT keeps a copy, so another implementation can check it
+        if (const QByteArray keep = qgetenv("DMI_LIF_OUT"); !keep.isEmpty()) {
+            QFile::remove(QString::fromLocal8Bit(keep));
+            CHECK(QFile::copy(lifPath, QString::fromLocal8Bit(keep)));
+        }
+
+        QList<LifEntry> index;
+        CHECK(readLifIndex(lifPath, index, &err));
+        CHECK(index.size() == 2);
+        if (index.size() == 2) {
+            CHECK(index[0].name == QLatin1String("first 10x"));
+            CHECK(index[0].width == 37 && index[0].height == 19);
+            CHECK(index[1].width == 64 && index[1].height == 40);
+            CHECK(index[0].channels == 3);
+            CHECK(std::abs(index[0].umPerPixel - 0.2929) < 1e-4);
+            CHECK(std::abs(index[1].umPerPixel - 0.0732) < 1e-4);
+
+            LoadedImage li;
+            CHECK(readLifImage(lifPath, index[0], li, &err));
+            CHECK(li.data.width == 37 && li.data.height == 19);
+            CHECK(std::abs(li.meta.umPerPixel - 0.2929) < 1e-4);
+            // the pixels survive the round trip (8-bit: compare the high byte)
+            int worst = 0;
+            for (int y = 0; y < a.height; ++y)
+                for (int x = 0; x < a.width * 3; ++x)
+                    worst = std::max(worst, std::abs(int(li.data.row(y)[x] >> 8) - int(a.row(y)[x] >> 8)));
+            CHECK(worst == 0);
+
+            LoadedImage li2;
+            CHECK(readLifImage(lifPath, index[1], li2, &err));
+            CHECK(li2.data.width == 64 && li2.data.height == 40);
+        }
+    }
+
+    std::printf("lif: a file that is not a lif is refused, not crashed on\n");
+    {
+        const QString bogus = dir.filePath(QStringLiteral("not-a.lif"));
+        QFile bf(bogus);
+        CHECK(bf.open(QIODevice::WriteOnly));
+        bf.write(QByteArray(4096, 'x'));
+        bf.close();
+        QList<LifEntry> index;
+        QString err;
+        CHECK(!readLifIndex(bogus, index, &err));
+        CHECK(!err.isEmpty());
+        // truncated after a valid header
+        QList<LifEntry> idx2;
+        CHECK(!readLifIndex(dir.filePath(QStringLiteral("missing.lif")), idx2, &err));
+    }
+
+    // Optional: a real LAS X file, when one is available on this machine.
+    if (const QByteArray real = qgetenv("DMI_LIF_SAMPLE"); !real.isEmpty()) {
+        std::printf("lif: reading a real LAS X file\n");
+        QList<LifEntry> index;
+        QString err;
+        if (readLifIndex(QString::fromLocal8Bit(real), index, &err)) {
+            std::printf("  %lld images\n", (long long)index.size());
+            CHECK(!index.isEmpty());
+            for (const LifEntry &e : index) {
+                CHECK(e.width > 0 && e.height > 0);
+                CHECK(e.dataBytes >= e.rowStride * e.height);
+            }
+            LoadedImage li;
+            CHECK(readLifImage(QString::fromLocal8Bit(real), index.first(), li, &err));
+            CHECK(li.data.width == index.first().width);
+        } else {
+            std::printf("  could not read: %s\n", qPrintable(err));
+            ++g_failed;
+        }
+    }
 
     std::printf("\n%s (%d failures)\n", g_failed ? "FAILED" : "PASSED", g_failed);
     return g_failed ? 1 : 0;
