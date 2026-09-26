@@ -24,6 +24,13 @@ setting: to change a value, drag its slider, type in its box, or use the arrow k
 This is deliberate — scrolling past a control used to alter the exposure or the
 objective by accident.
 
+**Leica .lif files** (what LAS X saves) open like any other image: *File → Open
+image* and pick the `.lif`. It usually holds a whole session, so a list appears of
+the images inside with their sizes and pixel sizes; choose one. The calibration
+comes from the file, so the scale bar and every measurement are correct without
+setting anything. Going the other way, *File → Export captured images to a Leica
+.lif* writes this session's captures into one .lif.
+
 **The images you capture** appear as a reel of thumbnails under the live image. On a
 tall screen, *View → Captured images in a vertical list* puts them in a column beside
 the image instead, with the file name next to each one: more images visible at once,

@@ -64,7 +64,7 @@ CompareWindow::CompareWindow(QWidget *parent) : QWidget(parent, Qt::Window)
         split->addWidget(pane);
         connect(open, &QPushButton::clicked, this, [this, i] {
             const QString f = QFileDialog::getOpenFileName(this, tr("Open image"), AppSettings::instance().browseFolder,
-                                                           tr("Images (*.tif *.tiff *.png *.jpg *.jpeg *.bmp)"));
+                                                           tr("Images (*.tif *.tiff *.png *.jpg *.jpeg *.bmp *.lif)"));
             if (!f.isEmpty())
                 openInto(i, f);
         });

@@ -62,6 +62,9 @@ private:
     void applyAppearance(const QString &theme, int scalePercent, bool save = false);
     void applyColorSettings(const ColorSettings &c);
     // Captured images beside the live image (vertical list) or under it (reel).
+    // Writes this session's captures into one Leica .lif, the way LAS X keeps
+    // a session.
+    void exportSessionToLif();
     void applyGalleryLayout(bool vertical);
     void setGalleryVertical(bool vertical);
     void loadShadingForObjective();

@@ -38,7 +38,8 @@
 namespace lm {
 
 namespace {
-const QStringList kImageFilters = {QStringLiteral("*.tif"), QStringLiteral("*.tiff"), QStringLiteral("*.png"),
+const QStringList kImageFilters = {QStringLiteral("*.lif"), // a Leica session, opened image by image
+                                  QStringLiteral("*.tif"), QStringLiteral("*.tiff"), QStringLiteral("*.png"),
                                    QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"), QStringLiteral("*.bmp")};
 }
 

@@ -3,6 +3,7 @@
 #include "app/AppSettings.h"
 #include "imaging/ColorPipeline.h"
 #include "io/ImageIO.h"
+#include "io/LifFile.h"
 #include "ui/BrowsePage.h"
 #include "ui/CameraPanel.h"
 #include "ui/CaptureDialog.h"
@@ -27,6 +28,7 @@
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QDesktopServices>
+#include <QFileDialog>
 #include <QDir>
 #include <QThreadPool>
 #include <QRegularExpression>
@@ -586,6 +588,8 @@ void MainWindow::buildMenus()
     file->addAction(icon(Icon::Export), tr("&Export with overlays…"), QKeySequence(tr("Ctrl+E")), m_process,
                     &ProcessPage::exportWithOverlays);
     file->addAction(icon(Icon::Print), tr("&Print…"), QKeySequence::Print, m_process, &ProcessPage::print);
+    file->addAction(icon(Icon::Save), tr("Export captured images to a Leica &.lif…"), this,
+                    &MainWindow::exportSessionToLif);
     file->addSeparator();
     file->addAction(icon(Icon::Folder), tr("Open image &folder"), this, [] {
         const QString d = AppSettings::instance().capture.folder;
@@ -874,6 +878,64 @@ void MainWindow::setWorkspace(int index)
         applyLiveDab(); // stain settings may have changed in Process
     if (index == 1)
         m_browse->refresh();
+}
+
+void MainWindow::exportSessionToLif()
+{
+    const QStringList paths = m_gallery->paths();
+    if (paths.isEmpty()) {
+        QMessageBox::information(this, tr("Export to .lif"),
+                                 tr("No images have been captured in this session yet.\n\n"
+                                    "A .lif holds a whole session, the way LAS X saves one; capture some images "
+                                    "first, or open the files you want in Process and save them individually."));
+        return;
+    }
+    const auto &S = AppSettings::instance();
+    QString sample = S.capture.sample.trimmed();
+    if (sample.isEmpty())
+        sample = QStringLiteral("session");
+    const QString suggested =
+        QDir(S.capture.folder)
+            .filePath(QStringLiteral("%1_%2.lif").arg(sample, QDateTime::currentDateTime().toString(
+                                                                  QStringLiteral("yyyyMMdd_HHmmss"))));
+    const QString path = QFileDialog::getSaveFileName(this, tr("Export captured images to a Leica .lif"), suggested,
+                                                      tr("Leica image file (*.lif)"));
+    if (path.isEmpty())
+        return;
+
+    // Read each captured file back and collect it. The images are 8-bit in the
+    // file LAS X expects, which is also what it writes itself.
+    QList<LifImageOut> images;
+    QStringList failed;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    for (const QString &p : paths) {
+        LoadedImage li;
+        QString err;
+        if (!loadImage(p, li, &err)) {
+            failed << QFileInfo(p).fileName();
+            continue;
+        }
+        LifImageOut out;
+        out.name = QFileInfo(p).completeBaseName();
+        out.data = std::move(li.data);
+        out.umPerPixel = li.meta.umPerPixel;
+        out.eightBit = true;
+        images.push_back(std::move(out));
+    }
+    QString err;
+    const bool ok = !images.isEmpty() && writeLif(path, images, sample, &err);
+    QApplication::restoreOverrideCursor();
+
+    if (!ok) {
+        QMessageBox::warning(this, tr("Export to .lif"),
+                             images.isEmpty() ? tr("None of the captured images could be read back.")
+                                              : tr("Writing %1 failed:\n%2").arg(path, err));
+        return;
+    }
+    QString msg = tr("Wrote %n image(s) to %1", nullptr, int(images.size())).arg(QFileInfo(path).fileName());
+    if (!failed.isEmpty())
+        msg += tr(". These could not be read back and were left out: %1").arg(failed.join(QStringLiteral(", ")));
+    showMessage(msg, 10000);
 }
 
 void MainWindow::applyGalleryLayout(bool vertical)

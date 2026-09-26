@@ -1,6 +1,7 @@
 #include "ProcessPage.h"
 
 #include "ui/Icons.h"
+#include "ui/LifDialog.h"
 #include "ui/Theme.h"
 
 #include "app/AppSettings.h"
@@ -50,7 +51,8 @@
 namespace lm {
 
 namespace {
-const char *kFileFilter = "Images (*.tif *.tiff *.png *.jpg *.jpeg *.bmp);;All files (*.*)";
+const char *kFileFilter = "Images (*.tif *.tiff *.png *.jpg *.jpeg *.bmp *.lif);;"
+                          "Leica image file (*.lif);;All files (*.*)";
 QString typeLabel(Annotation::Type t)
 {
     switch (t) {
@@ -457,6 +459,17 @@ bool ProcessPage::openFile(const QString &path)
         return false;
     LoadedImage li;
     QString err;
+    if (QFileInfo(path).suffix().compare(QLatin1String("lif"), Qt::CaseInsensitive) == 0) {
+        // a Leica file holds a whole session: ask which image
+        if (!LifDialog::openFrom(path, li, this, &err)) {
+            if (!err.isEmpty())
+                QMessageBox::warning(this, tr("Open image"), tr("Cannot open %1:\n%2").arg(path, err));
+            return false; // an empty error means the user cancelled
+        }
+        openImage(li.data, li.meta, QString()); // not a file we can save back over
+        emit message(tr("Opened %1 from %2").arg(li.meta.sample, QFileInfo(path).fileName()), 5000);
+        return true;
+    }
     if (!loadImage(path, li, &err)) {
         QMessageBox::warning(this, tr("Open image"), tr("Cannot open %1:\n%2").arg(path, err));
         return false;

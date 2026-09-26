@@ -73,6 +73,9 @@ features and the same interface on all three (see [Platforms](#platforms)).
   resolution tags (ImageJ/Fiji/QuPath read the µm scale) and all acquisition
   metadata as JSON in ImageDescription.
 - PNG (8/16-bit), JPEG and BMP, with a JSON sidecar.
+- Leica **.lif** (LAS X experiment files): read any image out of one, with the name
+  and calibration LAS X stored, and write the images of a session into one .lif.
+  See [docs/LIF_FORMAT.md](docs/LIF_FORMAT.md).
 
 ## Platforms
 
