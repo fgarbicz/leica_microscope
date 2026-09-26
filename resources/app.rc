@@ -1,8 +1,9 @@
+// version numbers come from project() in CMakeLists.txt (compile definitions)
 IDI_ICON1 ICON "app.ico"
 
 1 VERSIONINFO
-FILEVERSION 1,1,0,0
-PRODUCTVERSION 1,1,0,0
+FILEVERSION DMI_VER_MAJOR,DMI_VER_MINOR,DMI_VER_PATCH,0
+PRODUCTVERSION DMI_VER_MAJOR,DMI_VER_MINOR,DMI_VER_PATCH,0
 BEGIN
   BLOCK "StringFileInfo"
   BEGIN
@@ -10,9 +11,9 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "DM Imaging"
       VALUE "FileDescription", "DM Imaging - microscope image acquisition"
-      VALUE "FileVersion", "1.1.0.0"
+      VALUE "FileVersion", DMI_VERSION
       VALUE "ProductName", "DM Imaging"
-      VALUE "ProductVersion", "1.1.0.0"
+      VALUE "ProductVersion", DMI_VERSION
       VALUE "OriginalFilename", "DMImaging.exe"
     END
   END

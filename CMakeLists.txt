@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(DMImaging VERSION 1.1.0 LANGUAGES C CXX)
+project(DMImaging VERSION 1.1.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -216,7 +216,8 @@ if(GIT_FOUND)
 endif()
 target_compile_definitions(DMImaging PRIVATE
     DMI_GIT_HASH="${DMI_GIT_HASH}"
-    DMI_VERSION="${PROJECT_VERSION}")
+    DMI_VERSION="${PROJECT_VERSION}"
+    DMI_VER_MAJOR=${PROJECT_VERSION_MAJOR} DMI_VER_MINOR=${PROJECT_VERSION_MINOR} DMI_VER_PATCH=${PROJECT_VERSION_PATCH})
 
 # engine integration test (simulated camera)
 add_executable(enginetest tests/enginetest.cpp src/app/AcquisitionEngine.cpp)

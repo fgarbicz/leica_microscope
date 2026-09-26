@@ -1,5 +1,31 @@
 # DM Imaging release notes
 
+## 1.1.1 (2026-09-26)
+
+Serial sections: finding, capturing and comparing the same area stained for
+different markers.
+
+**Reference images on a second screen.** Double-click a thumbnail in the strip below
+the live image (or press Enter) to open it in the system's image viewer (Photos,
+Preview or the desktop's viewer) while the live image keeps running, e.g. to find the
+same area on a serial section stained with another marker. *Open in Process* moved to
+the thumbnail's right-click menu. Or overlay it on the live image instead
+(right-click → *Overlay on live image*, Ctrl+R), semi-transparent, and move the stage
+until the two match. Afterwards, *Process → Compare two images* aligns the two
+sections automatically, so synchronised zoom and pan show the same cells.
+
+**HDR capture** (*Acquire image → Mode*): two or three exposures (1×, 4×, 16×) of the
+same field merged in the raw sensor data into one 16-bit image. Dark DAB and
+haematoxylin get up to 16× the signal, so they are recorded with much less noise,
+while the background stays unclipped. The camera already reads 12 bits and pixel
+shift already gives 3840 × 2400 and 5760 × 3600; HDR adds the dynamic range.
+
+**Fixes**
+- After an automatic reconnect the camera list showed the first camera (the simulator)
+  instead of the connected one.
+- The Windows installer build script found no version number after the
+  cross-platform change.
+
 ## 1.1.0 (2026-09-25)
 
 **macOS and Linux support.** DM Imaging is now one program that builds and runs on
@@ -53,21 +79,6 @@ The list in Settings previews each size as it is selected.
   "20 ms · 2.0×" for the exposure.
 - The Browse and Process tool bars show a label beside each icon.
 
-**Reference images on a second screen.** Double-click a thumbnail in the strip below
-the live image (or press Enter) to open it in the system's image viewer (Photos,
-Preview or the desktop's viewer) while the live image keeps running, e.g. to find the
-same area on a serial section stained with another marker. *Open in Process* moved to
-the thumbnail's right-click menu. Or overlay it on the live image instead
-(right-click → *Overlay on live image*, Ctrl+R), semi-transparent, and move the stage
-until the two match. Afterwards, *Process → Compare two images* aligns the two
-sections automatically, so synchronised zoom and pan show the same cells.
-
-**HDR capture** (*Acquire image → Mode*): two or three exposures (1×, 4×, 16×) of the
-same field merged in the raw sensor data into one 16-bit image. Dark DAB and
-haematoxylin get up to 16× the signal, so they are recorded with much less noise,
-while the background stays unclipped. The camera already reads 12 bits and pixel
-shift already gives 3840 × 2400 and 5760 × 3600; HDR adds the dynamic range.
-
 **Safer acquisition and analysis.**
 - *Help → User guide* (F1) opens the user guide on every platform.
 - Exposure and gain are locked while a capture collects its frames or pixel-shift shots, and
@@ -86,8 +97,6 @@ shift already gives 3840 × 2400 and 5760 × 3600; HDR adds the dynamic range.
 - The IHC panel is split into *Stained area and H-score* and *Cell counting*.
 
 **Fixes**
-- After an automatic reconnect the camera list showed the first camera (the simulator)
-  instead of the connected one.
 - The file browser no longer reads the image folder at startup; on macOS that asked for
   permission to the Pictures folder before the user had done anything.
 - Long control labels are no longer clipped at macOS and Linux font sizes.

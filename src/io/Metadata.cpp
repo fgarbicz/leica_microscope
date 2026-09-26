@@ -124,10 +124,10 @@ QList<QPair<QString, QString>> ImageMetadata::describe() const
     add(QObject::tr("Sensor"), sensor);
     add(QObject::tr("Exposure"), exposureMs > 0 ? QStringLiteral("%1 ms").arg(exposureMs, 0, 'g', 4) : QString());
     if (!exposureSeriesMs.isEmpty()) {
-        QStringList l;
+        QStringList parts;
         for (double e : exposureSeriesMs)
-            l << QString::number(e, 'g', 4);
-        add(QObject::tr("HDR exposures"), l.join(QStringLiteral(" + ")) + QStringLiteral(" ms"));
+            parts << QString::number(e, 'g', 4);
+        add(QObject::tr("HDR exposures"), parts.join(QStringLiteral(" + ")) + QStringLiteral(" ms"));
     }
     add(QObject::tr("Gain"), QStringLiteral("%1×").arg(gain, 0, 'f', 2));
     add(QObject::tr("Frames averaged"), averagedFrames > 1 ? QString::number(averagedFrames) : QString());
