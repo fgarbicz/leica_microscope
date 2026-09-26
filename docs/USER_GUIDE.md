@@ -102,6 +102,12 @@ reference, for example to find the same area on a serial section stained with
 another marker. Right-click a thumbnail to open it in Process, show it in the file
 manager, or delete it.
 
+**Reference overlay** (same area on the next section): right-click a thumbnail →
+*Overlay on live image*, or select it and press **Ctrl+R**. The image is shown
+semi-transparently over the live image; move the stage until the two match, then
+press Ctrl+R again to hide it and capture. The overlay is never part of the saved
+image. Its opacity (25 / 50 / 75 %) is under *View → Reference overlay*.
+
 ## 4. Objectives and calibration
 
 The current objective is shown in the title bar. Each objective remembers its
@@ -203,6 +209,7 @@ using the marker type, nucleus size and sensitivity set in Process.
 | Key | Action |
 |---|---|
 | F1 | user guide |
+| Ctrl+R | reference overlay on/off |
 | F5 | live on/off |
 | F6 | freeze |
 | F7 | auto white balance |

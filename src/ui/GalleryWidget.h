@@ -16,6 +16,7 @@ public:
 signals:
     void openRequested(const QString &path);
     void revealRequested(const QString &path);
+    void referenceRequested(const QString &path); // blend over the live image for alignment
 
 protected:
     void contextMenuEvent(QContextMenuEvent *e) override;

@@ -126,6 +126,9 @@ void GalleryWidget::contextMenuEvent(QContextMenuEvent *e)
     QMenu m(this);
     auto *ext = m.addAction(tr("Open in image viewer"));
     m.setDefaultAction(ext); // what a double click does
+    auto *ref = m.addAction(tr("Overlay on live image (Ctrl+R)"));
+    ref->setToolTip(tr("Shows this image semi-transparently over the live image, to find the same area "
+                       "on the next section"));
     auto *open = m.addAction(tr("Open in Process"));
     auto *reveal = m.addAction(revealActionText());
     auto *copy = m.addAction(tr("Copy path"));
@@ -136,6 +139,8 @@ void GalleryWidget::contextMenuEvent(QContextMenuEvent *e)
         emit openRequested(path);
     else if (a == ext)
         openInImageViewer(path, this);
+    else if (a == ref)
+        emit referenceRequested(path);
     else if (a == reveal)
         revealInFileManager(path);
     else if (a == copy)

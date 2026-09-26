@@ -47,6 +47,11 @@ public:
     void setPlaceholder(const QString &t) { m_placeholder = t; update(); }
     // semi-transparent analysis overlay (ARGB32, same size as the image); null = none
     void setOverlayImage(const QImage &img) { m_overlayImage = img; update(); }
+    // earlier image blended over the whole field (stretched to the current image),
+    // e.g. to find the same area on the next serial section; null = none
+    void setReferenceImage(const QImage &img);
+    void setReferenceOpacity(double opacity);
+    bool hasReferenceImage() const { return !m_reference.isNull(); }
 
     double zoom() const { return m_zoom; }
     bool isFit() const { return m_fit; }
@@ -115,6 +120,9 @@ private:
     QVector<QRectF> m_tiles;
     QString m_statusText, m_placeholder;
     QImage m_overlayImage;
+    QImage m_reference;       // as loaded
+    QImage m_referenceScaled; // resampled to m_image's size (rebuilt when that changes)
+    double m_referenceOpacity = 0.5;
     double m_focus = -1, m_focusPeak = 0;
     bool m_showOverlays = true;
     QPointF m_cursor{-1, -1};

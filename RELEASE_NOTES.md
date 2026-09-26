@@ -57,7 +57,9 @@ The list in Settings previews each size as it is selected.
 the live image (or press Enter) to open it in the system's image viewer (Photos,
 Preview or the desktop's viewer) while the live image keeps running, e.g. to find the
 same area on a serial section stained with another marker. *Open in Process* moved to
-the thumbnail's right-click menu.
+the thumbnail's right-click menu. Or overlay it on the live image instead
+(right-click → *Overlay on live image*, Ctrl+R), semi-transparent, and move the stage
+until the two match.
 
 **Safer acquisition and analysis.**
 - *Help → User guide* (F1) opens the user guide on every platform.

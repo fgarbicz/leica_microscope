@@ -38,6 +38,7 @@
 #include <QPainter>
 #include <QMessageBox>
 #include <QScrollArea>
+#include <QActionGroup>
 #include <QSettings>
 #include <QSplitter>
 #include <QStackedWidget>
@@ -254,6 +255,7 @@ MainWindow::MainWindow()
         if (m_process->openFile(p))
             m_tabs->setCurrentIndex(2);
     });
+    connect(m_gallery, &GalleryWidget::referenceRequested, this, &MainWindow::showReference);
 
     const QSettings qs;
     restoreGeometry(qs.value(QStringLiteral("ui/geometry")).toByteArray());
@@ -652,6 +654,40 @@ void MainWindow::buildMenus()
     view->addAction(icon(Icon::ZoomIn), tr("Zoom &in"), QKeySequence::ZoomIn, m_view, &ImageView::zoomIn);
     view->addAction(icon(Icon::ZoomOut), tr("Zoom &out"), QKeySequence::ZoomOut, m_view, &ImageView::zoomOut);
     view->addSeparator();
+    // reference overlay: an earlier capture over the live image, to find the same
+    // area on the next serial section
+    QMenu *refMenu = view->addMenu(tr("&Reference overlay"));
+    refMenu->setIcon(icon(Icon::Compare));
+    m_referenceAct = refMenu->addAction(tr("Show &selected image over the live image"));
+    m_referenceAct->setCheckable(true);
+    m_referenceAct->setShortcut(QKeySequence(tr("Ctrl+R")));
+    connect(m_referenceAct, &QAction::triggered, this, [this](bool on) {
+        if (!on) {
+            showReference(QString());
+            return;
+        }
+        QListWidgetItem *it = m_gallery->currentItem() ? m_gallery->currentItem() : m_gallery->item(0);
+        if (!it) {
+            m_referenceAct->setChecked(false);
+            showMessage(tr("Capture an image first (or select one in the strip below the live image)"), 6000);
+            return;
+        }
+        showReference(it->data(Qt::UserRole).toString());
+    });
+    auto *opacityGroup = new QActionGroup(this);
+    const int savedOpacity = QSettings().value(QStringLiteral("ui/referenceOpacity"), 50).toInt();
+    for (int pct : {25, 50, 75}) {
+        QAction *a = refMenu->addAction(tr("%1% opacity").arg(pct));
+        a->setCheckable(true);
+        a->setChecked(pct == savedOpacity);
+        opacityGroup->addAction(a);
+        connect(a, &QAction::triggered, this, [this, pct] {
+            QSettings().setValue(QStringLiteral("ui/referenceOpacity"), pct);
+            m_view->setReferenceOpacity(pct / 100.0);
+        });
+    }
+    m_view->setReferenceOpacity(savedOpacity / 100.0);
+    view->addSeparator();
     QMenu *size = view->addMenu(tr("&Interface size"));
     size->setIcon(icon(Icon::Settings));
     size->addAction(icon(Icon::Plus), tr("&Larger text"), QKeySequence(QStringLiteral("Ctrl+Shift+=")), this, [this] {
@@ -735,6 +771,7 @@ void MainWindow::buildMenus()
                            "F5 — live on/off · F6 — freeze<br>"
                            "F7 — auto white balance · F8 — auto exposure once<br>"
                            "F9 or Space — capture image · F1 — user guide<br>"
+                           "%1+R — reference overlay (earlier image over the live image)<br>"
                            "%1+1, %1+2, … — select objective<br><br>"
                            "<b>Workspaces</b><br>"
                            "Alt+1 / Alt+2 / Alt+3 — Acquire / Browse / Process · F11 — full screen<br><br>"
@@ -1372,6 +1409,35 @@ void MainWindow::tryReconnect()
             return;
         }
     }
+}
+
+void MainWindow::showReference(const QString &path)
+{
+    m_referencePath = path;
+    if (path.isEmpty()) {
+        m_view->setReferenceImage(QImage());
+        m_referenceAct->setChecked(false);
+        return;
+    }
+    m_referenceAct->setChecked(true);
+    QtConcurrent::run([path] {
+        LoadedImage li;
+        return loadImage(path, li) ? toQImage8(li.data) : QImage();
+    }).then(this, [this, path](const QImage &img) {
+        if (path != m_referencePath) // replaced or hidden while loading
+            return;
+        if (img.isNull()) {
+            showReference(QString());
+            showMessage(tr("Cannot read %1").arg(QDir::toNativeSeparators(path)), 8000);
+            return;
+        }
+        m_tabs->setCurrentIndex(0);
+        m_view->setReferenceImage(img);
+        showMessage(tr("Reference overlay: %1. Move the stage until the images match; Ctrl+R hides it. "
+                       "Opacity: View → Reference overlay.")
+                        .arg(QFileInfo(path).fileName()),
+                    0);
+    });
 }
 
 void MainWindow::showMessage(const QString &text, int timeoutMs)

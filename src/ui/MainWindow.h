@@ -15,6 +15,7 @@ class QStackedWidget;
 class QLabel;
 class QSplitter;
 class QScrollArea;
+class QAction;
 
 namespace lm {
 
@@ -68,6 +69,8 @@ private:
     void updateNextName();
     void onCameraLost(const QString &reason);
     void tryReconnect();
+    // blends a saved image over the live view (empty path = hide)
+    void showReference(const QString &path);
 
     AcquisitionEngine *m_engine;
     MicroscopeConfig m_scope;
@@ -83,6 +86,8 @@ private:
     GalleryWidget *m_gallery;
     BrowsePage *m_browse;
     ProcessPage *m_process;
+    QAction *m_referenceAct = nullptr;
+    QString m_referencePath;
 
     QLabel *m_statusCamera, *m_statusFps, *m_statusExposure, *m_statusCursor, *m_statusZoom;
     // A coloured dot in the status bar: grey none, blue connected, green live,

@@ -12,6 +12,7 @@
 #include <QPainter>
 #include <QWheelEvent>
 
+#include <algorithm>
 #include <cmath>
 
 namespace lm {
@@ -23,6 +24,19 @@ ImageView::ImageView(QWidget *parent) : QWidget(parent)
     setAttribute(Qt::WA_OpaquePaintEvent);
     setMinimumSize(320, 240);
     m_overlays = &AppSettings::instance().overlays;
+}
+
+void ImageView::setReferenceImage(const QImage &img)
+{
+    m_reference = img;
+    m_referenceScaled = QImage();
+    update();
+}
+
+void ImageView::setReferenceOpacity(double opacity)
+{
+    m_referenceOpacity = std::clamp(opacity, 0.05, 0.95);
+    update();
 }
 
 void ImageView::setImage(const QImage &img, bool resetView)
@@ -215,6 +229,16 @@ void ImageView::paintEvent(QPaintEvent *)
         QRectF srcR(QPointF(std::floor(visibleImg.left()), std::floor(visibleImg.top())),
                     QPointF(std::ceil(visibleImg.right()), std::ceil(visibleImg.bottom())));
         p.drawImage(T.mapRect(srcR), m_overlayImage, srcR);
+    }
+    if (!m_reference.isNull() && !visibleImg.isEmpty()) {
+        // resample once per live resolution, not once per frame
+        if (m_referenceScaled.size() != m_image.size())
+            m_referenceScaled = m_reference.scaled(m_image.size(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        QRectF srcR(QPointF(std::floor(visibleImg.left()), std::floor(visibleImg.top())),
+                    QPointF(std::ceil(visibleImg.right()), std::ceil(visibleImg.bottom())));
+        p.setOpacity(m_referenceOpacity);
+        p.drawImage(T.mapRect(srcR), m_referenceScaled, srcR);
+        p.setOpacity(1.0);
     }
     // pixel grid at high zoom
     if (m_zoom >= 16) {
