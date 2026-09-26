@@ -127,6 +127,7 @@ set(APP_SOURCES
     src/app/VideoRecorder.cpp
     src/io/AviWriter.cpp
     src/io/ImageIO.cpp
+    src/io/CalibrationRepair.cpp
     src/io/LifFile.cpp
     src/io/Metadata.cpp
     src/ui/MainWindow.cpp
@@ -145,6 +146,7 @@ set(APP_SOURCES
     src/ui/ProcessPage.cpp
     src/ui/Annotations.cpp
     src/ui/Icons.cpp
+    src/ui/CalibrationRepairDialog.cpp
     src/ui/LifDialog.cpp
     src/ui/PanelGroup.cpp
     src/ui/PlatformUi.cpp
@@ -239,7 +241,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 endif()
 add_test(NAME uitest COMMAND uitest)
 
-add_executable(iotest tests/iotest.cpp src/io/ImageIO.cpp src/io/LifFile.cpp src/io/Metadata.cpp)
+add_executable(iotest tests/iotest.cpp src/io/ImageIO.cpp src/io/CalibrationRepair.cpp src/io/LifFile.cpp
+               src/io/Metadata.cpp)
 target_include_directories(iotest PRIVATE src)
 target_link_libraries(iotest PRIVATE lmcore Qt6::Core Qt6::Gui)
 add_test(NAME iotest COMMAND iotest)

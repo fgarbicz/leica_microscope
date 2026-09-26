@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **The camera adapter was wrong, and with it every nominal pixel size.** The
+  calibration assumed a 0.7x C-mount adapter, a value nobody had measured. It is
+  1.0x: LAS X records 1124.83 um across 3840 px at 10x and 281.21 um at 40x on this
+  microscope, which is exactly 5.86 um / (objective x 1.0) for both. Everything
+  saved with the nominal scale therefore recorded a pixel size 43 % too large, in
+  the file itself, so ImageJ and QuPath read it too. Objectives calibrated with a
+  stage micrometer were never affected.
+  The setting corrects itself on first start (a value entered by hand is left
+  alone), and *Tools > Correct pixel size of saved images…* rewrites the scale
+  recorded in images already saved - the TIFF resolution tags, the pixel density
+  and the metadata - for a whole folder at a time. The pixels are not touched.
+
 - **Leica .lif files can be read and written.** A .lif is the experiment file LAS X
   saves, holding many images with their names and calibration. *File → Open image*
   now accepts one and lists what is inside so an image can be picked; its pixel size
