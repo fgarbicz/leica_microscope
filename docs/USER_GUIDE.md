@@ -94,6 +94,14 @@ frames) reduces noise in standard captures.
 Images are saved as **16-bit TIFF** by default. The calibration is stored in the
 file, so ImageJ/Fiji and QuPath show the correct µm scale.
 
+Saved images appear in the strip below the live image. **Double-click** one (or
+select it and press Enter) to open it in the computer's image viewer (Photos on
+Windows, Preview on macOS, the desktop's viewer on Linux) in its own window, while
+the live image keeps running. Drag that window to a second screen to use it as a
+reference, for example to find the same area on a serial section stained with
+another marker. Right-click a thumbnail to open it in Process, show it in the file
+manager, or delete it.
+
 ## 4. Objectives and calibration
 
 The current objective is shown in the title bar. Each objective remembers its
@@ -130,7 +138,7 @@ saved in the image folder and plays in VLC, QuickTime, Windows Media Player and 
 
 Choose a folder on the left. Thumbnails, a preview and all metadata (objective,
 pixel size, exposure, date, …) are shown. Double-click an image to open it in
-Process.
+Process, or use **Open in image viewer** to open it in a window of its own.
 
 ## 9. Process: measure and annotate
 

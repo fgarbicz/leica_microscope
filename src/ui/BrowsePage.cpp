@@ -57,7 +57,7 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
     auto *refreshAct = tb->addAction(icon(Icon::Refresh, theme().subText, 16), tr("Refresh"));
     tb->addSeparator();
     auto *openProc = tb->addAction(icon(Icon::Process, theme().subText, 16), tr("Open in Process"));
-    auto *openExt = tb->addAction(icon(Icon::Open, theme().subText, 16), tr("Open externally"));
+    auto *openExt = tb->addAction(icon(Icon::Open, theme().subText, 16), tr("Open in image viewer"));
     auto *reveal = tb->addAction(icon(Icon::Folder, theme().subText, 16), revealActionText());
     tb->addSeparator();
     auto *exportAct = tb->addAction(icon(Icon::Export, theme().subText, 16), tr("Export…"));
@@ -128,7 +128,8 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
     });
     connect(openExt, &QAction::triggered, this, [this] {
         for (const auto &p : selectedPaths())
-            QDesktopServices::openUrl(QUrl::fromLocalFile(p));
+            if (!openInImageViewer(p, this))
+                break;
     });
     connect(reveal, &QAction::triggered, this, [this] {
         const auto sel = selectedPaths();

@@ -95,6 +95,23 @@ void revealInFileManager(const QString &path)
     QDesktopServices::openUrl(QUrl::fromLocalFile(fi.absolutePath()));
 }
 
+bool openInImageViewer(const QString &path, QWidget *parent)
+{
+    if (!QFileInfo::exists(path)) {
+        QMessageBox::warning(parent, QObject::tr("Open image"),
+                             QObject::tr("%1 no longer exists (moved or deleted?).").arg(QDir::toNativeSeparators(path)));
+        return false;
+    }
+    // ShellExecute on Windows, LaunchServices ("open") on macOS, xdg-open on Linux
+    if (QDesktopServices::openUrl(QUrl::fromLocalFile(path)))
+        return true;
+    QMessageBox::warning(parent, QObject::tr("Open image"),
+                         QObject::tr("No program is set up to open %1 files. Choose a default image viewer for "
+                                     "TIFF files in the system settings, or use %2.")
+                             .arg(QFileInfo(path).suffix().toUpper(), revealActionText()));
+    return false;
+}
+
 bool cameraAccessSetupAvailable()
 {
 #if defined(Q_OS_WIN) || defined(Q_OS_LINUX)

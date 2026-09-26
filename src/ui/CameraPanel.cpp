@@ -272,7 +272,6 @@ void CameraPanel::autoConnect()
                 break;
             }
     if (idx >= 0 && m_cameras[size_t(idx)].backend != "Simulator") {
-        m_cameraCombo->setCurrentIndex(idx);
         if (connectCamera(idx)) {
             QString err;
             m_engine->startLive(err);
@@ -297,6 +296,8 @@ bool CameraPanel::connectCamera(int index)
         updateEnabled();
         return false;
     }
+    // the list must show the open camera, also when connected by the automatic reconnect
+    m_cameraCombo->setCurrentIndex(index);
     auto &S = AppSettings::instance();
     S.lastCameraId = QString::fromStdString(m_cameras[size_t(index)].id);
     Camera *cam = m_engine->camera();

@@ -19,6 +19,7 @@ signals:
 
 protected:
     void contextMenuEvent(QContextMenuEvent *e) override;
+    void keyPressEvent(QKeyEvent *e) override;
 };
 
 QImage makeThumbnail(const QImage &src, int size = 160);

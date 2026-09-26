@@ -53,6 +53,12 @@ The list in Settings previews each size as it is selected.
   "20 ms · 2.0×" for the exposure.
 - The Browse and Process tool bars show a label beside each icon.
 
+**Reference images on a second screen.** Double-click a thumbnail in the strip below
+the live image (or press Enter) to open it in the system's image viewer (Photos,
+Preview or the desktop's viewer) while the live image keeps running, e.g. to find the
+same area on a serial section stained with another marker. *Open in Process* moved to
+the thumbnail's right-click menu.
+
 **Safer acquisition and analysis.**
 - *Help → User guide* (F1) opens the user guide on every platform.
 - Exposure and gain are locked while a capture collects its frames or pixel-shift shots, and
@@ -71,6 +77,8 @@ The list in Settings previews each size as it is selected.
 - The IHC panel is split into *Stained area and H-score* and *Cell counting*.
 
 **Fixes**
+- After an automatic reconnect the camera list showed the first camera (the simulator)
+  instead of the connected one.
 - The file browser no longer reads the image folder at startup; on macOS that asked for
   permission to the Pictures folder before the user had done anything.
 - Long control labels are no longer clipped at macOS and Linux font sizes.

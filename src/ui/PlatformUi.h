@@ -14,6 +14,11 @@ namespace lm {
 // containing folder where selecting is not supported.
 void revealInFileManager(const QString &path);
 
+// Opens an image in the desktop's default image viewer (Photos on Windows,
+// Preview on macOS, the desktop's viewer on Linux) in a window of its own, e.g.
+// as a reference on a second screen. Explains the problem when that fails.
+bool openInImageViewer(const QString &path, QWidget *parent);
+
 // Whether this platform needs a one-off step before the Leica camera can be
 // opened. False on macOS: a vendor-class device needs no driver there.
 bool cameraAccessSetupAvailable();

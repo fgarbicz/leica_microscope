@@ -9,15 +9,14 @@
 #include <QClipboard>
 #include <QContextMenuEvent>
 #include <QDir>
-#include <QDesktopServices>
 #include <QFile>
 #include <QFileInfo>
 #include <QFutureWatcher>
+#include <QKeyEvent>
 #include <QMenu>
 #include <QMessageBox>
 #include <QPainter>
 #include <QProcess>
-#include <QUrl>
 #include <QtConcurrent/QtConcurrentRun>
 
 namespace lm {
@@ -40,6 +39,15 @@ QIcon thumbnailIcon(const QImage &thumb)
     return icon;
 }
 
+namespace {
+QString itemToolTip(const QString &path)
+{
+    return QDir::toNativeSeparators(path) + QLatin1Char('\n')
+           + GalleryWidget::tr("Double click: open in the image viewer (e.g. as a reference on another screen)\n"
+                               "Right click: open in Process, show the file, delete…");
+}
+} // namespace
+
 GalleryWidget::GalleryWidget(QWidget *parent) : QListWidget(parent)
 {
     setObjectName(QStringLiteral("Gallery"));
@@ -54,16 +62,26 @@ GalleryWidget::GalleryWidget(QWidget *parent) : QListWidget(parent)
     setSelectionMode(QAbstractItemView::ExtendedSelection);
     setTextElideMode(Qt::ElideMiddle);
     setMinimumHeight(px(140));
-    connect(this, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *it) {
-        emit openRequested(it->data(Qt::UserRole).toString());
-    });
+    // double click opens the image in the system viewer, in its own window (e.g. a
+    // reference on a second screen while the next marker is imaged); live keeps running
+    connect(this, &QListWidget::itemDoubleClicked, this,
+            [this](QListWidgetItem *it) { openInImageViewer(it->data(Qt::UserRole).toString(), this); });
+}
+
+void GalleryWidget::keyPressEvent(QKeyEvent *e)
+{
+    if ((e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter) && currentItem()) {
+        openInImageViewer(currentItem()->data(Qt::UserRole).toString(), this);
+        return;
+    }
+    QListWidget::keyPressEvent(e);
 }
 
 void GalleryWidget::addImage(const QString &path, const QImage &src)
 {
     auto *it = new QListWidgetItem(thumbnailIcon(makeThumbnail(src)), QFileInfo(path).fileName());
     it->setData(Qt::UserRole, path);
-    it->setToolTip(path);
+    it->setToolTip(itemToolTip(path));
     insertItem(0, it);
     setCurrentItem(it);
     scrollToItem(it);
@@ -73,7 +91,7 @@ void GalleryWidget::addFile(const QString &path)
 {
     auto *it = new QListWidgetItem(QFileInfo(path).fileName());
     it->setData(Qt::UserRole, path);
-    it->setToolTip(path);
+    it->setToolTip(itemToolTip(path));
     addItem(it);
     auto *watcher = new QFutureWatcher<QImage>(this);
     connect(watcher, &QFutureWatcher<QImage>::finished, this, [this, watcher, path] {
@@ -106,8 +124,9 @@ void GalleryWidget::contextMenuEvent(QContextMenuEvent *e)
         return;
     const QString path = it->data(Qt::UserRole).toString();
     QMenu m(this);
+    auto *ext = m.addAction(tr("Open in image viewer"));
+    m.setDefaultAction(ext); // what a double click does
     auto *open = m.addAction(tr("Open in Process"));
-    auto *ext = m.addAction(tr("Open with default application"));
     auto *reveal = m.addAction(revealActionText());
     auto *copy = m.addAction(tr("Copy path"));
     m.addSeparator();
@@ -116,7 +135,7 @@ void GalleryWidget::contextMenuEvent(QContextMenuEvent *e)
     if (a == open)
         emit openRequested(path);
     else if (a == ext)
-        QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+        openInImageViewer(path, this);
     else if (a == reveal)
         revealInFileManager(path);
     else if (a == copy)
