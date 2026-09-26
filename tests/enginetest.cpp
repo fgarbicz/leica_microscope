@@ -8,6 +8,7 @@
 #include <QEventLoop>
 #include <QTimer>
 
+#include <cmath>
 #include <cstdio>
 #include <functional>
 
