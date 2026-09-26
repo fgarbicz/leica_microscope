@@ -5,6 +5,7 @@
 #include <QDateTime>
 #include <QJsonObject>
 #include <QString>
+#include <QVector>
 
 namespace lm {
 
@@ -22,6 +23,7 @@ struct ImageMetadata {
     double adapterFactor = 1.0;  // C-mount / camera adapter magnification
     double umPerPixel = 0.0;     // calibrated pixel size in the specimen plane
     double exposureMs = 0.0;
+    QVector<double> exposureSeriesMs; // HDR: every exposure merged (exposureMs = the reference)
     double gain = 1.0;
     int bitDepth = 8;
     int averagedFrames = 1;

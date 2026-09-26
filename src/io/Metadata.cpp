@@ -1,5 +1,6 @@
 #include "Metadata.h"
 
+#include <QJsonArray>
 #include <QJsonDocument>
 
 namespace lm {
@@ -35,6 +36,12 @@ QJsonObject ImageMetadata::toJson() const
         o["colorCorrection"] = colorCorrection;
     if (!lightFilter.isEmpty())
         o["lightFilter"] = lightFilter;
+    if (!exposureSeriesMs.isEmpty()) {
+        QJsonArray a;
+        for (double e : exposureSeriesMs)
+            a.append(e);
+        o["exposureSeriesMs"] = a;
+    }
     o["sample"] = sample;
     o["operator"] = operatorName;
     o["notes"] = notes;
@@ -73,6 +80,8 @@ ImageMetadata ImageMetadata::fromJson(const QJsonObject &o)
     m.shadingCorrected = o["shadingCorrected"].toBool();
     m.colorCorrection = o["colorCorrection"].toString();
     m.lightFilter = o["lightFilter"].toString();
+    for (const auto &v : o["exposureSeriesMs"].toArray())
+        m.exposureSeriesMs.append(v.toDouble());
     m.sample = o["sample"].toString();
     m.operatorName = o["operator"].toString();
     m.notes = o["notes"].toString();
@@ -114,6 +123,12 @@ QList<QPair<QString, QString>> ImageMetadata::describe() const
     add(QObject::tr("Camera"), camera + (cameraSerial.isEmpty() || camera.contains(cameraSerial) ? QString() : QStringLiteral(" (%1)").arg(cameraSerial)));
     add(QObject::tr("Sensor"), sensor);
     add(QObject::tr("Exposure"), exposureMs > 0 ? QStringLiteral("%1 ms").arg(exposureMs, 0, 'g', 4) : QString());
+    if (!exposureSeriesMs.isEmpty()) {
+        QStringList l;
+        for (double e : exposureSeriesMs)
+            l << QString::number(e, 'g', 4);
+        add(QObject::tr("HDR exposures"), l.join(QStringLiteral(" + ")) + QStringLiteral(" ms"));
+    }
     add(QObject::tr("Gain"), QStringLiteral("%1×").arg(gain, 0, 'f', 2));
     add(QObject::tr("Frames averaged"), averagedFrames > 1 ? QString::number(averagedFrames) : QString());
     add(QObject::tr("White balance"), QStringLiteral("R %1  G %2  B %3").arg(wbRed, 0, 'f', 3).arg(wbGreen, 0, 'f', 3).arg(wbBlue, 0, 'f', 3));

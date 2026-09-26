@@ -932,6 +932,8 @@ void AcquisitionEngine::captureHdr(int exposures, double stops, int averageFrame
             res->exposureMs = raw->exposureMs;
             res->gain = raw->gain;
             res->kind = "hdr-" + std::to_string(merged.size());
+            for (const auto &f : merged)
+                res->exposureSeriesMs.push_back(f->exposureMs);
             merged.clear();
             res->linear = toLinearRGB(*raw, DemosaicMethod::MalvarHeCutler);
             pipe->applyLinear(res->linear);

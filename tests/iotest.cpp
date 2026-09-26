@@ -36,6 +36,9 @@ int main(int argc, char **argv)
     meta.umPerPixel = 0.2093;
     meta.objective = QStringLiteral("N PLAN 40x/0.65");
     meta.notes = QStringLiteral("Unicode ✓ µm ß");
+    meta.captureMode = QStringLiteral("hdr-3");
+    meta.exposureMs = 10;
+    meta.exposureSeriesMs = {10, 40, 160};
 
     std::printf("TIFF round trip\n");
     for (bool sixteen : {true, false})
@@ -51,6 +54,7 @@ int main(int argc, char **argv)
             CHECK(loadImage(p, li, &err));
             CHECK(li.data.width == img.width && li.data.height == img.height);
             CHECK(li.hasMeta && li.meta.objective == meta.objective && li.meta.notes == meta.notes);
+            CHECK(li.meta.exposureSeriesMs == meta.exposureSeriesMs);
             CHECK(std::abs(li.meta.umPerPixel - meta.umPerPixel) < 1e-6);
             int maxDiff = 0;
             for (size_t i = 0; i < img.px.size() && li.data.px.size() == img.px.size(); ++i) {

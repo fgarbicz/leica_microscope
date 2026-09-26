@@ -60,6 +60,7 @@ struct CaptureResult {
     double gain = 1;
     int averagedFrames = 1;
     int upscale = 1;           // output pixels per sensor pixel (pixel shift)
+    std::vector<double> exposureSeriesMs; // HDR: the merged exposures
     std::string kind;          // "single", "multifocus", "mosaic", "pixelshift-N"
 };
 

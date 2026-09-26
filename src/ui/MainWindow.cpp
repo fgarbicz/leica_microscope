@@ -1194,6 +1194,7 @@ ImageMetadata MainWindow::currentMetadata(const CaptureResult &r) const
     m.adapterFactor = m_scope.adapterFactor;
     m.umPerPixel = m_scope.umPerPixel() / std::max(1, r.upscale);
     m.exposureMs = r.exposureMs;
+    m.exposureSeriesMs = QVector<double>(r.exposureSeriesMs.begin(), r.exposureSeriesMs.end());
     m.gain = r.gain;
     m.averagedFrames = r.averagedFrames;
     m.captureMode = QString::fromStdString(r.kind);
