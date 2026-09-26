@@ -30,6 +30,16 @@ static void spin(int ms)
     loop.exec();
 }
 
+// spins until done() or maxMs; the simulator advances per frame, so tests wait
+// for frames or distance rather than a fixed time (slow or busy machines)
+static void spinUntil(const std::function<bool()> &done, int maxMs, int stepMs = 50)
+{
+    QElapsedTimer t;
+    t.start();
+    while (!done() && t.elapsed() < maxMs)
+        spin(stepMs);
+}
+
 static std::shared_ptr<CaptureResult> waitCapture(AcquisitionEngine &e, int timeoutMs,
                                                   const std::function<void()> &trigger)
 {
@@ -110,7 +120,7 @@ int main(int argc, char **argv)
     std::printf("HDR capture (3 exposures)\n");
     {
         const double before = cam->exposure();
-        auto hdr = waitCapture(e, 20000, [&] { e.captureHdr(3, 2.0, 1); });
+        auto hdr = waitCapture(e, 20000, [&] { e.captureHdr(3, 1); });
         CHECK(hdr && hdr->kind == "hdr-3" && hdr->rendered16.width == 1024);
         CHECK(std::abs(cam->exposure() - before) < 0.01);
         spin(300);
@@ -128,11 +138,8 @@ int main(int argc, char **argv)
         cam->setProperty("focus", f);
         // at least 120 ms and two new frames per focus step (slow machines deliver fewer)
         const uint64_t n0 = e.framesReceived();
-        QElapsedTimer t;
-        t.start();
         spin(120);
-        while (e.framesReceived() < n0 + 2 && t.elapsed() < 1500)
-            spin(20);
+        spinUntil([&] { return e.framesReceived() >= n0 + 2; }, 1400, 20);
     }
     std::printf("  frames merged: %d\n", e.focusStacker().frameCount());
     CHECK(e.focusStacker().frameCount() >= 8);
@@ -165,12 +172,6 @@ int main(int argc, char **argv)
             if (p.key == key)
                 return p.value;
         return 0.0;
-    };
-    auto spinUntil = [&](const std::function<bool()> &done, int maxMs) {
-        QElapsedTimer t;
-        t.start();
-        while (!done() && t.elapsed() < maxMs)
-            spin(50);
     };
     const double x0 = stage("stage_x"), y0 = stage("stage_y");
     cam->setProperty("drift_x", 5.0);

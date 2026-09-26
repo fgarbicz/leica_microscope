@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 
 #include "app/AppSettings.h"
+#include "imaging/ColorPipeline.h"
 #include "io/ImageIO.h"
 #include "ui/BrowsePage.h"
 #include "ui/CameraPanel.h"
@@ -660,7 +661,7 @@ void MainWindow::buildMenus()
     refMenu->setIcon(icon(Icon::Compare));
     m_referenceAct = refMenu->addAction(tr("Show &selected image over the live image"));
     m_referenceAct->setCheckable(true);
-    m_referenceAct->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_R));
+    m_referenceAct->setShortcut(referenceOverlayShortcut());
     connect(m_referenceAct, &QAction::triggered, this, [this](bool on) {
         if (!on) {
             showReference(QString());
@@ -675,14 +676,15 @@ void MainWindow::buildMenus()
         showReference(it->data(Qt::UserRole).toString());
     });
     auto *opacityGroup = new QActionGroup(this);
-    const int savedOpacity = QSettings().value(QStringLiteral("ui/referenceOpacity"), 50).toInt();
+    static const QString opacityKey = QStringLiteral("ui/referenceOpacity");
+    const int savedOpacity = QSettings().value(opacityKey, 50).toInt();
     for (int pct : {25, 50, 75}) {
         QAction *a = refMenu->addAction(tr("%1% opacity").arg(pct));
         a->setCheckable(true);
         a->setChecked(pct == savedOpacity);
         opacityGroup->addAction(a);
         connect(a, &QAction::triggered, this, [this, pct] {
-            QSettings().setValue(QStringLiteral("ui/referenceOpacity"), pct);
+            QSettings().setValue(opacityKey, pct);
             m_view->setReferenceOpacity(pct / 100.0);
         });
     }
@@ -1153,9 +1155,9 @@ void MainWindow::capture()
     if (c.shotMode >= 0 && !m_engine->camera()->shotModes().empty()) {
         m_capturePanel->setBusy(true, tr("Pixel shift capture…"));
         m_engine->captureShots(c.shotMode);
-    } else if (c.shotMode <= -2 && m_engine->camera()->supportsHdr()) {
+    } else if (isHdrMode(c.shotMode) && m_engine->camera()->supportsHdr()) {
         m_capturePanel->setBusy(true, tr("HDR capture…"));
-        m_engine->captureHdr(-c.shotMode, 2.0, c.averageFrames);
+        m_engine->captureHdr(hdrExposures(c.shotMode), c.averageFrames);
     } else {
         m_capturePanel->setBusy(true);
         m_engine->capture(c.averageFrames);
@@ -1428,11 +1430,12 @@ void MainWindow::showReference(const QString &path)
         LoadedImage li;
         if (!loadImage(path, li))
             return QImage();
-        // a screen never needs more; keeps a 36-shot image from costing 80 MB here
-        const QImage img = toQImage8(li.data);
-        return std::max(img.width(), img.height()) > 2560
-                   ? img.scaled(2560, 2560, Qt::KeepAspectRatio, Qt::SmoothTransformation)
-                   : img;
+        // a screen never needs more than ~2560 px; reduce before converting, and
+        // store as RGB32, which QPainter blends with opacity on its fast path
+        const int factor = (std::max(li.data.width, li.data.height) + 2559) / 2560;
+        if (factor > 1)
+            li.data = downscale(li.data, factor);
+        return toQImage8(li.data).convertToFormat(QImage::Format_RGB32);
     }).then(this, [this, path](const QImage &img) {
         if (path != m_referencePath) // replaced or hidden while loading
             return;
@@ -1443,9 +1446,7 @@ void MainWindow::showReference(const QString &path)
         }
         m_tabs->setCurrentIndex(0);
         m_view->setReferenceImage(img);
-        const QImage live = m_view->image();
-        if (!live.isNull()
-            && std::abs(double(img.width()) / img.height() - double(live.width()) / live.height()) >= 0.02) {
+        if (!m_view->image().isNull() && !m_view->referenceFits()) {
             showMessage(tr("Reference overlay: %1 has a different shape from the live image (image format or "
                            "live stitching?); it is shown once they match.")
                             .arg(QFileInfo(path).fileName()),

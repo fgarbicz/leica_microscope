@@ -678,7 +678,7 @@ static void testHdr()
         frames.push_back(f);
     }
     CHECK(hdrExposureFactors(3, 2.0) == (std::vector<double>{1, 4, 16}));
-    auto m = mergeExposures(frames, 10.0, black);
+    auto m = mergeExposures(frames, black);
     CHECK(m && m->bitDepth == 16 && m->format == PixelFormat::BayerGB16 && m->exposureMs == 10.0);
     if (!m)
         return;

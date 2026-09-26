@@ -52,6 +52,9 @@ public:
     void setReferenceImage(const QImage &img);
     void setReferenceOpacity(double opacity);
     bool hasReferenceImage() const { return !m_reference.isNull(); }
+    // whether the reference has the shape of the current image and is drawn (not
+    // over a growing mosaic or a centre ROI, where it could not line up)
+    bool referenceFits() const;
 
     double zoom() const { return m_zoom; }
     bool isFit() const { return m_fit; }

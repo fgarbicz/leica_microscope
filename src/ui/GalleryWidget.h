@@ -1,6 +1,7 @@
 #pragma once
 // Thumbnail strip of images captured in this session.
 
+#include <QKeySequence>
 #include <QListWidget>
 
 namespace lm {
@@ -24,6 +25,8 @@ protected:
 };
 
 QImage makeThumbnail(const QImage &src, int size = 160);
+// View -> Reference overlay; shown in the thumbnail menu as the platform spells it
+QKeySequence referenceOverlayShortcut();
 // Icon that keeps its true colours when the item is selected.
 QIcon thumbnailIcon(const QImage &thumb);
 

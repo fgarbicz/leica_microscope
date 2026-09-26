@@ -11,6 +11,12 @@
 
 namespace lm {
 
+// CaptureSettings::shotMode: -1 single shot, >= 0 a camera pixel-shift mode,
+// <= -2 HDR with -shotMode exposures.
+inline int hdrShotMode(int exposures) { return -exposures; }
+inline bool isHdrMode(int shotMode) { return shotMode <= -2; }
+inline int hdrExposures(int shotMode) { return -shotMode; }
+
 struct CaptureSettings {
     QString folder;                          // output directory
     QString pattern = QStringLiteral("{sample}_{objective}_{date}_{counter}"); // file name template
@@ -18,7 +24,7 @@ struct CaptureSettings {
     int counterDigits = 3;
     SaveOptions save;
     int averageFrames = 1;                   // frame averaging for noise reduction
-    int shotMode = -1;                       // -1 = single shot, else camera shot mode (pixel shift)
+    int shotMode = -1;                       // see isHdrMode() above
     bool burnScaleBar = false;               // render scale bar into exported pixels
     bool burnAnnotations = false;
     bool promptAfterCapture = true;          // ask for magnification + name after each capture

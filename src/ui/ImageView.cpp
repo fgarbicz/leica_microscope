@@ -32,6 +32,13 @@ void ImageView::setReferenceImage(const QImage &img)
     update();
 }
 
+bool ImageView::referenceFits() const
+{
+    return !m_reference.isNull() && !m_image.isNull()
+           && std::abs(double(m_reference.width()) / m_reference.height() - double(m_image.width()) / m_image.height())
+                  < 0.02;
+}
+
 void ImageView::setReferenceOpacity(double opacity)
 {
     m_referenceOpacity = std::clamp(opacity, 0.05, 0.95);
@@ -229,13 +236,7 @@ void ImageView::paintEvent(QPaintEvent *)
                     QPointF(std::ceil(visibleImg.right()), std::ceil(visibleImg.bottom())));
         p.drawImage(T.mapRect(srcR), m_overlayImage, srcR);
     }
-    // only over an image of the same shape (a camera frame, not a growing mosaic or
-    // a centre ROI, where it could not line up anyway)
-    const bool refFits = !m_reference.isNull()
-                         && std::abs(double(m_reference.width()) / m_reference.height()
-                                     - double(m_image.width()) / m_image.height())
-                                < 0.02;
-    if (refFits && !visibleImg.isEmpty()) {
+    if (referenceFits() && !visibleImg.isEmpty()) {
         // the visible part of the image, in reference pixels
         const double kx = double(m_reference.width()) / m_image.width(), ky = double(m_reference.height()) / m_image.height();
         p.save();

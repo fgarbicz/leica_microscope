@@ -16,6 +16,9 @@ void fft2d(std::vector<std::complex<float>> &data, int w, int h, bool inverse);
 // Grayscale float image for registration, downscaled by `factor` (box filter).
 ImageF toGray(const Image16 &img, int factor = 1);
 
+// Bilinear resampling to any size (e.g. to put two images on one grid).
+ImageF resample(const ImageF &src, int width, int height);
+
 struct Shift {
     double dx = 0.0;         // displacement of `moving` relative to `reference`
     double dy = 0.0;         // i.e. moving(x,y) ~ reference(x+dx, y+dy)

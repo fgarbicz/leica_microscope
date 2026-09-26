@@ -114,9 +114,9 @@ public:
     void capture(int averageFrames = 1);
     // multi-shot sensor-shift capture (camera shot mode index)
     void captureShots(int modeIndex);
-    // high dynamic range: `exposures` exposures `stops` EV apart from the current
-    // one upwards, `averageFrames` each, merged in raw (needs manual exposure)
-    void captureHdr(int exposures, double stops = 2.0, int averageFrames = 1);
+    // high dynamic range: `exposures` exposures kHdrStops EV apart from the current
+    // one upwards, `averageFrames` each, merged in raw (camera must supportsHdr())
+    void captureHdr(int exposures, int averageFrames = 1);
     bool isBusy() const { return m_busy; }
     uint64_t framesReceived() const { return m_received; }
     std::shared_ptr<const ColorPipeline> pipeline() const;
@@ -178,13 +178,15 @@ private:
     int m_captureWanted = 0;    // frames still needed for a capture
     int m_captureAverage = 1;
     // frames of a given exposure for a capture job (HDR); guarded by m_mutex
-    std::vector<RawFramePtr> m_grabbed;
+    std::deque<RawFramePtr> m_grabbed;
     int m_grabWanted = 0, m_grabSkip = 0;
-    bool m_grabAborted = false; // camera closed while a job waited for frames
     double m_grabExposureMs = 0;
     QWaitCondition m_grabCond;
-    // waits (on a job thread) for `n` frames exposed at `exposureMs`
-    std::vector<RawFramePtr> grabFrames(int n, double exposureMs, int timeoutMs);
+    // waits (on a job thread) for `n` frames of `cam` exposed at `exposureMs`
+    std::deque<RawFramePtr> grabFrames(const std::shared_ptr<Camera> &cam, int n, double exposureMs, int timeoutMs);
+    // capture job progress / failure, delivered on the GUI thread
+    void postProgress(int done, int total, const QString &what);
+    void postFailure(const QString &message);
 
     ColorSettings m_color;
     std::shared_ptr<const ColorPipeline> m_pipeline; // immutable, swapped on change

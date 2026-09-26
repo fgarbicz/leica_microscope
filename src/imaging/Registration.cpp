@@ -71,6 +71,28 @@ void fft2d(std::vector<std::complex<float>> &d, int w, int h, bool inverse)
     }, 4);
 }
 
+ImageF resample(const ImageF &src, int w, int h)
+{
+    ImageF out(w, h);
+    if (src.px.empty())
+        return out;
+    const double sx = double(src.width) / w, sy = double(src.height) / h;
+    for (int y = 0; y < h; ++y) {
+        const double fy = std::clamp((y + 0.5) * sy - 0.5, 0.0, src.height - 1.0);
+        const int y0 = int(fy), y1 = std::min(y0 + 1, src.height - 1);
+        const float ty = float(fy - y0);
+        for (int x = 0; x < w; ++x) {
+            const double fx = std::clamp((x + 0.5) * sx - 0.5, 0.0, src.width - 1.0);
+            const int x0 = int(fx), x1 = std::min(x0 + 1, src.width - 1);
+            const float tx = float(fx - x0);
+            const float top = src.at(x0, y0) + (src.at(x1, y0) - src.at(x0, y0)) * tx;
+            const float bottom = src.at(x0, y1) + (src.at(x1, y1) - src.at(x0, y1)) * tx;
+            out.at(x, y) = top + (bottom - top) * ty;
+        }
+    }
+    return out;
+}
+
 ImageF toGray(const Image16 &img, int f)
 {
     f = std::max(1, f);

@@ -7,6 +7,7 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
+#include <QHash>
 #include <QMessageBox>
 #include <QMimeDatabase>
 #include <QProcess>
@@ -112,12 +113,17 @@ bool openInImageViewer(const QString &path, QWidget *parent)
     };
 #ifdef Q_OS_LINUX
     // xdg-open reports success as soon as it starts, even when nothing can open
-    // the file; ask for the default application first (skipped without xdg-mime)
-    QProcess query;
-    query.start(QStringLiteral("xdg-mime"),
-                {QStringLiteral("query"), QStringLiteral("default"), QMimeDatabase().mimeTypeForFile(path).name()});
-    if (query.waitForFinished(2000) && query.exitStatus() == QProcess::NormalExit && query.exitCode() == 0
-        && query.readAllStandardOutput().trimmed().isEmpty())
+    // the file; ask for the default application first (skipped without xdg-mime),
+    // once per file type and session
+    static QHash<QString, bool> hasViewer;
+    const QString mime = QMimeDatabase().mimeTypeForFile(path).name();
+    if (!hasViewer.contains(mime)) {
+        QProcess query;
+        query.start(QStringLiteral("xdg-mime"), {QStringLiteral("query"), QStringLiteral("default"), mime});
+        hasViewer[mime] = !(query.waitForFinished(2000) && query.exitStatus() == QProcess::NormalExit
+                            && query.exitCode() == 0 && query.readAllStandardOutput().trimmed().isEmpty());
+    }
+    if (!hasViewer[mime])
         return noViewer();
 #endif
     // ShellExecute on Windows, LaunchServices ("open") on macOS, xdg-open on Linux

@@ -30,6 +30,11 @@ QImage makeThumbnail(const QImage &src, int size)
     return t.convertToFormat(QImage::Format_RGB888);
 }
 
+QKeySequence referenceOverlayShortcut()
+{
+    return QKeySequence(Qt::CTRL | Qt::Key_R); // Cmd+R on macOS
+}
+
 QIcon thumbnailIcon(const QImage &thumb)
 {
     const QPixmap pm = QPixmap::fromImage(thumb);
@@ -128,8 +133,8 @@ void GalleryWidget::contextMenuEvent(QContextMenuEvent *e)
     auto *ext = m.addAction(tr("Open in image viewer"));
     m.setDefaultAction(ext); // what a double click does
     // the shortcut as this platform spells it (Cmd on macOS)
-    auto *ref = m.addAction(tr("Overlay on live image (%1)")
-                                .arg(QKeySequence(Qt::CTRL | Qt::Key_R).toString(QKeySequence::NativeText)));
+    auto *ref = m.addAction(
+        tr("Overlay on live image (%1)").arg(referenceOverlayShortcut().toString(QKeySequence::NativeText)));
     ref->setToolTip(tr("Shows this image semi-transparently over the live image, to find the same area "
                        "on the next section"));
     auto *open = m.addAction(tr("Open in Process"));

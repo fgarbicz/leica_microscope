@@ -40,7 +40,7 @@ CompareWindow::CompareWindow(QWidget *parent) : QWidget(parent, Qt::Window)
     top->addWidget(m_alignInfo);
     top->addStretch();
     connect(m_align, &QCheckBox::toggled, this, [this] {
-        align();
+        showAlignment();
         sync(m_view[0], m_view[1]);
     });
     root->addLayout(top);
@@ -92,7 +92,8 @@ bool CompareWindow::openInto(int side, const QString &path)
     info += QStringLiteral("  ·  %1 × %2").arg(li.data.width).arg(li.data.height);
     m_label[side]->setText(info);
     // about 512 pixels wide is plenty to find a shift and takes milliseconds
-    // a working copy with the long side near 1024 px (a tall mosaic stays small too)
+    // a working copy with the long side near 1024 px (a tall mosaic stays small too);
+    // align() puts both on a common 512 px grid
     m_size[side] = QSize(li.data.width, li.data.height);
     m_gray[side] = toGray(li.data, std::max(1, std::max(li.data.width, li.data.height) / 1024));
     align();
@@ -100,35 +101,24 @@ bool CompareWindow::openInto(int side, const QString &path)
     return true;
 }
 
-namespace {
-// bilinear resampling to w x h
-ImageF resampled(const ImageF &src, int w, int h)
+bool CompareWindow::aligned() const
 {
-    ImageF out(w, h);
-    const double sx = double(src.width) / w, sy = double(src.height) / h;
-    for (int y = 0; y < h; ++y) {
-        const double fy = std::clamp((y + 0.5) * sy - 0.5, 0.0, src.height - 1.0);
-        const int y0 = int(fy), y1 = std::min(y0 + 1, src.height - 1);
-        const float ty = float(fy - y0);
-        for (int x = 0; x < w; ++x) {
-            const double fx = std::clamp((x + 0.5) * sx - 0.5, 0.0, src.width - 1.0);
-            const int x0 = int(fx), x1 = std::min(x0 + 1, src.width - 1);
-            const float tx = float(fx - x0);
-            const float top = src.at(x0, y0) + (src.at(x1, y0) - src.at(x0, y0)) * tx;
-            const float bottom = src.at(x0, y1) + (src.at(x1, y1) - src.at(x0, y1)) * tx;
-            out.at(x, y) = top + (bottom - top) * ty;
-        }
-    }
-    return out;
+    return m_shiftFound && m_align->isChecked();
 }
-} // namespace
+
+void CompareWindow::showAlignment()
+{
+    m_alignInfo->setText(m_align->isChecked() ? m_alignText : QString());
+}
 
 void CompareWindow::align()
 {
-    m_aligned = false;
-    m_alignInfo->clear();
-    if (!m_align->isChecked() || m_gray[0].px.empty() || m_gray[1].px.empty())
+    m_shiftFound = false;
+    m_alignText.clear();
+    if (m_gray[0].px.empty() || m_gray[1].px.empty()) {
+        showAlignment();
         return;
+    }
     // Both images cover the same field whatever their pixel count (pixel shift vs
     // standard, as in sync()), so put them on one grid: the left image's long side
     // at 512, the right image at the same width.
@@ -136,16 +126,17 @@ void CompareWindow::align()
     m_gridW = std::max(8.0, std::round(m_size[0].width() * s));
     m_gridH[0] = std::max(8.0, std::round(m_size[0].height() * s));
     m_gridH[1] = std::max(8.0, std::round(m_size[1].height() * m_gridW / m_size[1].width()));
-    const Shift sh = phaseCorrelate(resampled(m_gray[0], int(m_gridW), int(m_gridH[0])),
-                                    resampled(m_gray[1], int(m_gridW), int(m_gridH[1])));
+    const Shift sh = phaseCorrelate(resample(m_gray[0], int(m_gridW), int(m_gridH[0])),
+                                    resample(m_gray[1], int(m_gridW), int(m_gridH[1])));
     if (sh.confidence < 0.03) {
-        m_alignInfo->setText(tr("Could not align (little in common)"));
-        return;
+        m_alignText = tr("Could not align (little in common)");
+    } else {
+        // moving(x, y) ~ reference(x + dx, y + dy): a feature at q on the left is at q - d on the right
+        m_shiftFound = true;
+        m_shift = QPointF(sh.dx, sh.dy);
+        m_alignText = tr("Aligned: shifted %1 × %2 px").arg(std::lround(sh.dx / s)).arg(std::lround(sh.dy / s));
     }
-    // moving(x, y) ~ reference(x + dx, y + dy): a feature at q on the left is at q - d on the right
-    m_aligned = true;
-    m_shift = QPointF(sh.dx, sh.dy);
-    m_alignInfo->setText(tr("Aligned: shifted %1 × %2 px").arg(std::lround(sh.dx / s)).arg(std::lround(sh.dy / s)));
+    showAlignment();
 }
 
 void CompareWindow::sync(ImageView *from, ImageView *to)
@@ -157,7 +148,7 @@ void CompareWindow::sync(ImageView *from, ImageView *to)
     // images have different pixel counts (e.g. pixel shift vs standard)
     const double scale = double(from->image().width()) / to->image().width();
     QPointF rel = from->relativeCenter();
-    if (m_aligned) {
+    if (aligned()) {
         // through the common grid: left q -> right q - shift, and back
         const bool fromLeft = from == m_view[0];
         const QPointF q(rel.x() * m_gridW, rel.y() * m_gridH[fromLeft ? 0 : 1]);
@@ -165,7 +156,7 @@ void CompareWindow::sync(ImageView *from, ImageView *to)
         rel = QPointF(p.x() / m_gridW, p.y() / m_gridH[fromLeft ? 1 : 0]);
     }
     // aligned images: follow the tissue even in "fit" (otherwise both just show everything)
-    to->setViewState(rel, from->zoom() * scale, from->isFit() && !m_aligned);
+    to->setViewState(rel, from->zoom() * scale, from->isFit() && !aligned());
     m_syncing = false;
 }
 

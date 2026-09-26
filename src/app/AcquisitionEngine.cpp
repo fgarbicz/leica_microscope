@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <utility>
 
 namespace lm {
 
@@ -72,6 +73,19 @@ RawFramePtr averageRawFrames(const std::deque<RawFramePtr> &frames)
     for (size_t i = 0; i < samples; ++i)
         o[i] = uint16_t(std::min(65535.0, acc[i] * scale + 0.5));
     return out;
+}
+
+// Colour, geometry, tone curve and sharpening of a capture whose res.linear is
+// set (sharpenScale: output pixels per sensor pixel, for pixel shift).
+void renderCapture(CaptureResult &res, const ColorPipeline &pipe, int sharpenScale = 1)
+{
+    pipe.applyLinear(res.linear);
+    const auto &cs = pipe.settings();
+    res.linear = applyGeometry(res.linear, cs.flipHorizontal, cs.flipVertical, cs.rotation);
+    res.rendered16 = pipe.toDisplay16(res.linear);
+    unsharpMask(res.rendered16, cs.sharpenAmount, cs.sharpenRadius * sharpenScale);
+    res.rendered8 = pipe.toDisplay8(res.linear);
+    unsharpMask(res.rendered8, cs.sharpenAmount, cs.sharpenRadius * sharpenScale);
 }
 } // namespace
 
@@ -169,10 +183,7 @@ void AcquisitionEngine::closeCamera()
         cam = std::move(m_camera); // worker threads may still hold a reference
         m_camera.reset();
         m_pending.reset();
-        if (m_grabWanted > 0) { // an HDR capture waiting for frames: fail it now
-            m_grabAborted = true;
-            m_grabCond.wakeAll();
-        }
+        m_grabCond.wakeAll(); // an HDR capture waiting for frames sees the camera gone
     }
     cancelPendingCapture(tr("The camera was disconnected"));
     if (cam) {
@@ -388,13 +399,7 @@ void AcquisitionEngine::onRawFrame(RawFramePtr f)
                 res->gain = raw->gain;
                 res->kind = "single";
                 res->linear = toLinearRGB(*raw, DemosaicMethod::MalvarHeCutler);
-                pipeline->applyLinear(res->linear);
-                const auto &cs = pipeline->settings();
-                res->linear = applyGeometry(res->linear, cs.flipHorizontal, cs.flipVertical, cs.rotation);
-                res->rendered16 = pipeline->toDisplay16(res->linear);
-                unsharpMask(res->rendered16, cs.sharpenAmount, cs.sharpenRadius);
-                res->rendered8 = pipeline->toDisplay8(res->linear);
-                unsharpMask(res->rendered8, cs.sharpenAmount, cs.sharpenRadius);
+                renderCapture(*res, *pipeline);
                 emit captureFinished(res);
             } catch (const std::exception &e) {
                 emit captureFailed(QString::fromUtf8(e.what()));
@@ -808,24 +813,17 @@ void AcquisitionEngine::captureShots(int modeIndex)
             ~BusyGuard() { b = false; }
         } guard{m_busy};
         { QMutexLocker wait(&m_exposureLock); } // let an auto exposure step in progress finish
-        auto fail = [this](const QString &msg) {
-            QMetaObject::invokeMethod(this, [this, msg] { emit captureFailed(msg); }, Qt::QueuedConnection);
-        };
         try {
             std::vector<RawFramePtr> shots;
             std::string err;
             const bool ok = cam->captureShots(modeIndex, shots, err, [this, &mode](int done, int total) {
-                QMetaObject::invokeMethod(this, [this, done, total, name = mode.name] {
-                    emit captureProgress(done, total, QString::fromStdString(name));
-                }, Qt::QueuedConnection);
+                postProgress(done, total, QString::fromStdString(mode.name));
             });
             if (!ok) {
-                fail(QString::fromStdString(err));
+                postFailure(QString::fromStdString(err));
                 return;
             }
-            QMetaObject::invokeMethod(this, [this, total = int(shots.size())] {
-                emit captureProgress(total, total, tr("Reconstructing…"));
-            }, Qt::QueuedConnection);
+            postProgress(int(shots.size()), int(shots.size()), tr("Reconstructing…"));
             auto res = std::make_shared<CaptureResult>();
             PixelShiftOptions opt;
             opt.upscale = mode.upscale;
@@ -836,43 +834,47 @@ void AcquisitionEngine::captureShots(int modeIndex)
             res->gain = shots.empty() ? 1 : shots[0]->gain;
             res->averagedFrames = int(shots.size());
             shots.clear(); // release the raw shots before allocating the outputs
-            pipe->applyLinear(res->linear);
-            const auto &cs = pipe->settings();
-            res->linear = applyGeometry(res->linear, cs.flipHorizontal, cs.flipVertical, cs.rotation);
-            res->rendered16 = pipe->toDisplay16(res->linear);
-            unsharpMask(res->rendered16, cs.sharpenAmount, cs.sharpenRadius * mode.upscale);
-            res->rendered8 = pipe->toDisplay8(res->linear);
-            unsharpMask(res->rendered8, cs.sharpenAmount, cs.sharpenRadius * mode.upscale);
+            renderCapture(*res, *pipe, mode.upscale);
             res->upscale = mode.upscale;
             res->kind = "pixelshift-" + std::to_string(mode.shots);
             emit captureFinished(res);
         } catch (const std::bad_alloc &) {
-            fail(tr("Not enough memory for this capture mode. Close other programs or use a mode with fewer shots."));
+            postFailure(tr("Not enough memory for this capture mode. Close other programs or use a mode with fewer shots."));
         } catch (const std::exception &e) {
-            fail(QString::fromUtf8(e.what()));
+            postFailure(QString::fromUtf8(e.what()));
         }
     });
 }
 
-std::vector<RawFramePtr> AcquisitionEngine::grabFrames(int n, double exposureMs, int timeoutMs)
+void AcquisitionEngine::postProgress(int done, int total, const QString &what)
+{
+    QMetaObject::invokeMethod(this, [this, done, total, what] { emit captureProgress(done, total, what); },
+                              Qt::QueuedConnection);
+}
+
+void AcquisitionEngine::postFailure(const QString &message)
+{
+    QMetaObject::invokeMethod(this, [this, message] { emit captureFailed(message); }, Qt::QueuedConnection);
+}
+
+std::deque<RawFramePtr> AcquisitionEngine::grabFrames(const std::shared_ptr<Camera> &cam, int n, double exposureMs,
+                                                      int timeoutMs)
 {
     QMutexLocker l(&m_mutex);
     m_grabbed.clear();
-    m_grabAborted = false;
     m_grabExposureMs = exposureMs;
     m_grabSkip = 1; // the frame in flight when the setting changed
     m_grabWanted = n;
     QDeadlineTimer deadline(timeoutMs);
-    while (m_grabWanted > 0 && !m_grabAborted)
+    // closeCamera() wakes us; a camera that is gone (or replaced) ends the wait
+    while (m_grabWanted > 0 && m_camera == cam)
         if (!m_grabCond.wait(&m_mutex, deadline))
             break;
-    const bool complete = m_grabWanted == 0 && !m_grabAborted;
-    const bool aborted = m_grabAborted;
+    const bool complete = m_grabWanted == 0;
     m_grabWanted = 0;
-    m_grabAborted = false;
-    std::vector<RawFramePtr> out;
+    std::deque<RawFramePtr> out;
     out.swap(m_grabbed);
-    if (aborted)
+    if (m_camera != cam)
         throw std::runtime_error(tr("The camera was disconnected").toStdString());
     if (!complete)
         throw std::runtime_error(tr("No image from the camera at %1 ms exposure. Check that the live image is running.")
@@ -881,7 +883,7 @@ std::vector<RawFramePtr> AcquisitionEngine::grabFrames(int n, double exposureMs,
     return out;
 }
 
-void AcquisitionEngine::captureHdr(int exposures, double stops, int averageFrames)
+void AcquisitionEngine::captureHdr(int exposures, int averageFrames)
 {
     std::shared_ptr<Camera> cam = cameraRef();
     if (!cam || !cam->isStreaming()) {
@@ -898,42 +900,41 @@ void AcquisitionEngine::captureHdr(int exposures, double stops, int averageFrame
     }
     auto pipe = pipeline();
     const int avg = std::clamp(averageFrames, 1, 64);
-    m_jobs.start([this, cam, exposures, stops, avg, pipe] {
+    m_jobs.start([this, cam, exposures, avg, pipe] {
         // m_busy is set: once any auto exposure step in progress has finished, the
         // exposure is ours until Restore below
         { QMutexLocker wait(&m_exposureLock); }
         const double base = cam->exposure();
-        struct Restore {
+        struct Restore { // base exposure back (once) and m_busy cleared, also on errors
             std::atomic<bool> &busy;
             Camera &cam;
             double exposure;
+            bool pending = true;
+            void now() {
+                if (std::exchange(pending, false))
+                    cam.setExposure(exposure);
+            }
             ~Restore() {
-                cam.setExposure(exposure);
+                now();
                 busy = false;
             }
         } restore{m_busy, *cam, base};
-        auto fail = [this](const QString &msg) {
-            QMetaObject::invokeMethod(this, [this, msg] { emit captureFailed(msg); }, Qt::QueuedConnection);
-        };
         try {
             const double maxMs = std::min(cam->exposureRange().max, 4000.0);
             std::vector<RawFramePtr> merged;
-            const auto factors = hdrExposureFactors(exposures, stops);
-            for (size_t i = 0; i < factors.size(); ++i) {
-                const double ms = std::min(base * factors[i], maxMs);
+            const auto factors = hdrExposureFactors(exposures);
+            const int n = int(factors.size());
+            for (int i = 0; i < n; ++i) {
+                const double ms = std::min(base * factors[size_t(i)], maxMs);
                 if (i > 0 && ms <= merged.back()->exposureMs * 1.05)
                     break; // exposure limit reached
-                QMetaObject::invokeMethod(this, [this, i, n = int(factors.size()), ms] {
-                    emit captureProgress(int(i), n, tr("HDR exposure %1 ms").arg(ms, 0, 'f', 1));
-                }, Qt::QueuedConnection);
+                postProgress(i, n, tr("HDR exposure %1 ms").arg(ms, 0, 'f', 1));
                 cam->setExposure(ms);
-                auto frames = grabFrames(avg, cam->exposure(), int(avg * (ms + 100) * 3) + 4000);
-                merged.push_back(averageRawFrames(std::deque<RawFramePtr>(frames.begin(), frames.end())));
+                merged.push_back(averageRawFrames(grabFrames(cam, avg, cam->exposure(), int(avg * (ms + 100) * 3) + 4000)));
             }
-            cam->setExposure(base); // live image back to normal while merging
-            QMetaObject::invokeMethod(this, [this, n = int(factors.size())] { emit captureProgress(n, n, tr("Merging…")); },
-                                      Qt::QueuedConnection);
-            auto raw = mergeExposures(merged, merged.front()->exposureMs, cam->blackLevel());
+            restore.now(); // live image back to normal while merging
+            postProgress(n, n, tr("Merging…"));
+            auto raw = mergeExposures(merged, cam->blackLevel());
             auto res = std::make_shared<CaptureResult>();
             res->averagedFrames = int(merged.size()) * avg;
             res->exposureMs = raw->exposureMs;
@@ -943,18 +944,12 @@ void AcquisitionEngine::captureHdr(int exposures, double stops, int averageFrame
                 res->exposureSeriesMs.push_back(f->exposureMs);
             merged.clear();
             res->linear = toLinearRGB(*raw, DemosaicMethod::MalvarHeCutler);
-            pipe->applyLinear(res->linear);
-            const auto &cs = pipe->settings();
-            res->linear = applyGeometry(res->linear, cs.flipHorizontal, cs.flipVertical, cs.rotation);
-            res->rendered16 = pipe->toDisplay16(res->linear);
-            unsharpMask(res->rendered16, cs.sharpenAmount, cs.sharpenRadius);
-            res->rendered8 = pipe->toDisplay8(res->linear);
-            unsharpMask(res->rendered8, cs.sharpenAmount, cs.sharpenRadius);
+            renderCapture(*res, *pipe);
             emit captureFinished(res);
         } catch (const std::bad_alloc &) {
-            fail(tr("Not enough memory for the HDR capture."));
+            postFailure(tr("Not enough memory for the HDR capture."));
         } catch (const std::exception &e) {
-            fail(QString::fromUtf8(e.what()));
+            postFailure(QString::fromUtf8(e.what()));
         }
     });
 }
