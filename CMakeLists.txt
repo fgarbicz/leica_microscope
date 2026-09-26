@@ -227,7 +227,7 @@ add_test(NAME enginetest COMMAND enginetest)
 # user interface behaviour (the wheel guard, the icon set, image view overlays)
 add_executable(uitest tests/uitest.cpp src/ui/WheelGuard.cpp src/ui/Theme.cpp src/ui/Icons.cpp
                src/ui/ImageView.cpp src/ui/Annotations.cpp src/ui/Overlays.cpp src/app/AppSettings.cpp
-               src/io/ImageIO.cpp src/io/Metadata.cpp)
+               src/io/ImageIO.cpp src/io/Metadata.cpp src/ui/CompareWindow.cpp)
 target_include_directories(uitest PRIVATE src)
 target_link_libraries(uitest PRIVATE lmcore Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg)
 add_test(NAME uitest COMMAND uitest)

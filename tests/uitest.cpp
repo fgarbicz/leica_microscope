@@ -3,6 +3,8 @@
 // Above all: the mouse wheel must never change a value. Scrolling a side panel
 // used to alter whichever slider, spin box, combo box or tab sat under the
 // pointer, silently changing the exposure or the objective.
+#include "io/ImageIO.h"
+#include "ui/CompareWindow.h"
 #include "ui/Icons.h"
 #include "ui/ImageView.h"
 #include "ui/Theme.h"
@@ -20,7 +22,14 @@
 #include <QStyle>
 #include <QWheelEvent>
 
+#include <QTemporaryDir>
+
+#include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstdio>
+#include <random>
+#include <vector>
 
 using namespace lm;
 
@@ -185,6 +194,53 @@ int main(int argc, char **argv)
         CHECK(centre() < 10);
         v.setReferenceImage(QImage());
         CHECK(!v.hasReferenceImage() && centre() < 10);
+    }
+
+    std::printf("compare: aligned views follow the tissue, in the right direction\n");
+    {
+        // textured "tissue", and the same tissue shifted as on the next section
+        const int w = 512, h = 384, dx = 40, dy = -25;
+        std::mt19937 rng(3);
+        std::vector<std::array<double, 3>> blobs;
+        for (int i = 0; i < 160; ++i)
+            blobs.push_back({std::uniform_real_distribution<double>(-60, w + 60)(rng),
+                             std::uniform_real_distribution<double>(-60, h + 60)(rng),
+                             std::uniform_real_distribution<double>(4, 14)(rng)});
+        auto tissue = [&](double x, double y) {
+            double v = 0;
+            for (const auto &b : blobs)
+                v += std::exp(-((x - b[0]) * (x - b[0]) + (y - b[1]) * (y - b[1])) / (2 * b[2] * b[2]));
+            return std::clamp(1.0 - 0.6 * v, 0.0, 1.0);
+        };
+        Image16 left(w, h), right(w, h);
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x)
+                for (int c = 0; c < 3; ++c) {
+                    left.row(y)[x * 3 + c] = uint16_t(tissue(x, y) * 65535);
+                    right.row(y)[x * 3 + c] = uint16_t(tissue(x + dx, y + dy) * 65535); // right(p) = left(p + d)
+                }
+        QTemporaryDir dir;
+        const QString pl = dir.filePath(QStringLiteral("a.tif")), pr = dir.filePath(QStringLiteral("b.tif"));
+        SaveOptions opt;
+        CHECK(saveImage(pl, left, ImageMetadata(), opt) && saveImage(pr, right, ImageMetadata(), opt));
+        CompareWindow cw;
+        cw.resize(1200, 600);
+        CHECK(cw.openLeft(pl) && cw.openRight(pr));
+        const auto views = cw.findChildren<ImageView *>();
+        CHECK(views.size() == 2);
+        if (views.size() == 2) {
+            // which pane shows which image (child order is not guaranteed)
+            const QImage la = toQImage8(left);
+            ImageView *a = views[0]->image() == la ? views[0] : views[1];
+            ImageView *b = a == views[0] ? views[1] : views[0];
+            CHECK(a->image() == la);
+            for (int i = 0; i < 3; ++i)
+                sendWheel(a, 120); // zoom in on the left pane
+            // the cell at the centre of the left pane is d pixels further up-left on the right
+            const QPointF ra = a->relativeCenter(), rb = b->relativeCenter();
+            std::printf("  left centre %.3f,%.3f  right centre %.3f,%.3f\n", ra.x(), ra.y(), rb.x(), rb.y());
+            CHECK(std::abs((ra.x() - rb.x()) * w - dx) < 2 && std::abs((ra.y() - rb.y()) * h - dy) < 2);
+        }
     }
 
     std::printf(g_failed ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", g_failed);
