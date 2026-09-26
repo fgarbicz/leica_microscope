@@ -1,3 +1,4 @@
+#include "ui/Theme.h"
 #include "BatchExportDialog.h"
 
 #include "app/AppSettings.h"
@@ -32,7 +33,7 @@ namespace lm {
 BatchExportDialog::BatchExportDialog(const QStringList &files, QWidget *parent) : QDialog(parent), m_files(files)
 {
     setWindowTitle(tr("Export %n image(s)", nullptr, int(files.size())));
-    resize(560, 360);
+    resize(px(560), px(360));
     auto *lay = new QVBoxLayout(this);
     auto *form = new QFormLayout;
     m_format = new QComboBox(this);

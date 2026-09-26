@@ -1,3 +1,4 @@
+#include "ui/Theme.h"
 #include "BatchIhcDialog.h"
 
 #include "app/AppSettings.h"
@@ -91,7 +92,7 @@ double stddev(const std::vector<double> &v)
 BatchIhcDialog::BatchIhcDialog(const QStringList &files, QWidget *parent) : QDialog(parent), m_files(files)
 {
     setWindowTitle(tr("IHC quantification of %n image(s)", nullptr, int(files.size())));
-    resize(1000, 600);
+    resize(px(1000), px(600));
     auto *lay = new QVBoxLayout(this);
     auto *form = new QFormLayout;
     m_threshold = new QDoubleSpinBox(this);

@@ -78,6 +78,10 @@ Requirements: macOS 12 or newer; Qt 6 and libusb to build (`brew install qt libu
   xcrun notarytool submit … && xcrun stapler staple "/Applications/DM Imaging.app"
   ```
   Without that, a copied bundle opens via right-click → *Open* the first time.
+- While developing on a Mac, note that every rebuild re-signs the bundle with a
+  fresh ad-hoc identity, so macOS forgets the camera permission and asks again on
+  the next launch. An installed, properly signed build asks once. The application
+  says what is happening instead of showing a connected camera with a dead image.
 - macOS asks for camera permission the first time a **UVC** camera is used (not for the
   DMC6200), and for access to the Pictures folder the first time an image is saved there.
   Both are one-off and can be reviewed in *System Settings → Privacy & Security*.

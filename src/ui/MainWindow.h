@@ -111,6 +111,7 @@ private:
     QList<QPoint> m_calibPoints;
     QSet<QString> m_pendingSaves; // images being written in the background
     LiveStats m_lastStats;
+    QSize m_liveFrameSize; // size actually delivered, to spot a mis-reporting camera
     int m_prevObjective = -1;
     bool m_objectiveFromCapture = false;
     void storeObjectiveSettings(int index);

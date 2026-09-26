@@ -13,6 +13,8 @@ class QListWidget;
 class QTableWidget;
 class QLabel;
 
+class QToolBar;
+
 namespace lm {
 
 class ImageView;
@@ -33,7 +35,11 @@ public:
 signals:
     void openInProcess(const QString &path);
 
+protected:
+    void resizeEvent(QResizeEvent *e) override;
+
 private:
+    QToolBar *m_toolbar = nullptr;
     void showPreview(const QString &path);
     QStringList selectedPaths() const;
 

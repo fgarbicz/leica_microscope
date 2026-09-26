@@ -4,6 +4,7 @@
 #include "app/AppSettings.h"
 #include "ui/CollapsibleSection.h"
 #include "ui/Icons.h"
+#include "ui/PlatformUi.h"
 #include "ui/PanelGroup.h"
 #include "ui/SliderSpin.h"
 #include "ui/Theme.h"
@@ -286,10 +287,18 @@ bool CameraPanel::connectCamera(int index)
     QString err;
     emit message(tr("Connecting to %1…").arg(QString::fromStdString(m_cameras[size_t(index)].name)), 0);
     if (!m_engine->openCamera(m_cameras[size_t(index)], err)) {
-        emit message(tr("Cannot open camera: %1. Unplug the camera for 5 seconds and plug it in again, or use "
-                        "Tools → Install / repair camera driver.")
-                         .arg(err),
-                     15000);
+        // The backend's message already says what went wrong and usually what to
+        // do; only add the driver hint where there is a driver to install, and
+        // do not glue a second full stop onto a sentence that has one.
+        QString text = tr("Cannot open camera: %1").arg(err);
+        if (!text.endsWith(QLatin1Char('.')))
+            text += QLatin1Char('.');
+        if (cameraAccessSetupAvailable())
+            text += QLatin1Char(' ')
+                    + tr("If it stays unavailable, unplug the camera for 5 seconds and plug it in again, or use "
+                         "Tools → %1")
+                          .arg(cameraAccessSetupLabel().remove(QLatin1Char('&')));
+        emit message(text, 15000);
         m_info->clear();
         setStatus(tr("Could not connect"), "StatusError");
         m_info->setText(err);

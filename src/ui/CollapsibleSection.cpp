@@ -2,9 +2,11 @@
 
 #include "ui/Theme.h"
 
+#include <QEvent>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMouseEvent>
 #include <QSettings>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -13,7 +15,8 @@ namespace lm {
 
 CollapsibleSection::CollapsibleSection(const QString &title, QWidget *parent, bool expanded, Icon iconId,
                                        const QColor &accent)
-    : QWidget(parent), m_accent(accent.isValid() ? accent : theme().subText)
+    : QWidget(parent), m_accent(accent.isValid() ? accent : theme().subText), m_iconId(iconId),
+      m_settingsKey(QStringLiteral("ui/section/") + title)
 {
     setObjectName(QStringLiteral("CollapsibleSection"));
     auto *outer = new QVBoxLayout(this);
@@ -22,43 +25,40 @@ CollapsibleSection::CollapsibleSection(const QString &title, QWidget *parent, bo
 
     m_header = new QWidget(this);
     m_header->setObjectName(QStringLiteral("SectionHeader"));
+    m_header->setCursor(Qt::PointingHandCursor);
+    m_header->installEventFilter(this); // a click anywhere on it folds the section
     auto *hl = new QHBoxLayout(m_header);
-    hl->setContentsMargins(px(8), px(1), px(8), px(1));
-    hl->setSpacing(px(4));
+    hl->setContentsMargins(px(8), px(3), px(8), px(3));
+    hl->setSpacing(px(5));
 
-    // The disclosure chevron sits at the far left, ahead of the icon and the
-    // title, and toggles the section like the title does.
+    // The disclosure chevron. It is a button so it is reachable from the
+    // keyboard; the rest of the header is a click target too.
     m_chevron = new QToolButton(m_header);
     m_chevron->setObjectName(QStringLiteral("SectionChevron"));
     m_chevron->setAutoRaise(true);
     m_chevron->setCursor(Qt::PointingHandCursor);
-    m_chevron->setFocusPolicy(Qt::NoFocus);
     m_chevron->setProperty("lmIconBase", 13); // read by applyUiScaleTo()
     m_chevron->setIconSize(iconSize(13));
+    m_chevron->setToolTip(title);
     hl->addWidget(m_chevron);
+    connect(m_chevron, &QToolButton::clicked, this, [this] { setExpanded(!m_expanded); });
 
-    m_button = new QToolButton(m_header);
-    m_button->setObjectName(QStringLiteral("SectionButton"));
-    // '&' in a title (e.g. "Brightness & contrast") would become a mnemonic
-    m_button->setText(QString(title).replace(QLatin1Char('&'), QStringLiteral("&&")));
-    m_button->setCheckable(true);
-    m_button->setAutoRaise(true);
-    m_button->setCursor(Qt::PointingHandCursor);
-    m_button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-    // the section's own icon, drawn in the enclosing group's colour
     if (iconId != Icon::None) {
-        m_button->setIcon(icon(iconId, m_accent, 15));
-        m_button->setProperty("lmIconBase", 15);
-        m_button->setIconSize(iconSize(15));
-        m_button->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    } else {
-        m_button->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        m_iconLabel = new QLabel(m_header);
+        m_iconLabel->setAttribute(Qt::WA_TransparentForMouseEvents);
+        updateIcon();
+        hl->addWidget(m_iconLabel);
     }
-    hl->addWidget(m_button, 1);
-    connect(m_chevron, &QToolButton::clicked, m_button, &QToolButton::toggle);
+
+    m_title = new QLabel(title, m_header);
+    m_title->setObjectName(QStringLiteral("SectionTitle"));
+    m_title->setAttribute(Qt::WA_TransparentForMouseEvents); // clicks reach the header
+    m_title->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    hl->addWidget(m_title, 1);
 
     m_summary = new QLabel(m_header);
-    m_summary->setObjectName(QStringLiteral("Hint"));
+    m_summary->setObjectName(QStringLiteral("SectionSummary"));
+    m_summary->setAttribute(Qt::WA_TransparentForMouseEvents);
     m_summary->hide();
     hl->addWidget(m_summary);
     outer->addWidget(m_header);
@@ -76,34 +76,55 @@ CollapsibleSection::CollapsibleSection(const QString &title, QWidget *parent, bo
     rule->setFixedHeight(px(1));
     outer->addWidget(rule);
 
-    const QString key = QStringLiteral("ui/section/") + title;
-    expanded = QSettings().value(key, expanded).toBool();
-    connect(m_button, &QToolButton::toggled, this, [this, key](bool on) {
-        m_content->setVisible(on);
-        updateChevron(on);
-        m_summary->setVisible(!on && !m_summary->text().isEmpty());
-        QSettings().setValue(key, on);
-    });
-    m_button->setChecked(expanded);
-    m_content->setVisible(expanded);
-    updateChevron(expanded);
+    m_expanded = QSettings().value(m_settingsKey, expanded).toBool();
+    m_content->setVisible(m_expanded);
+    updateChevron();
 }
 
-void CollapsibleSection::updateChevron(bool expanded)
+bool CollapsibleSection::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_header && event->type() == QEvent::MouseButtonRelease) {
+        auto *me = static_cast<QMouseEvent *>(event);
+        if (me->button() == Qt::LeftButton && m_header->rect().contains(me->position().toPoint())) {
+            setExpanded(!m_expanded);
+            return true;
+        }
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
+void CollapsibleSection::changeEvent(QEvent *event)
+{
+    QWidget::changeEvent(event);
+    // the interface size or the theme changed: the drawn icons carry the old ones
+    if (event->type() == QEvent::StyleChange || event->type() == QEvent::FontChange) {
+        updateChevron();
+        updateIcon();
+    }
+}
+
+void CollapsibleSection::updateChevron()
 {
     // A chevron from the shared icon set, so the panels look the same on every
     // platform (Qt's own arrow primitives differ between styles).
-    m_chevron->setIcon(icon(expanded ? Icon::ChevronDown : Icon::ChevronRight, theme().subText, 13));
+    m_chevron->setIcon(icon(m_expanded ? Icon::ChevronDown : Icon::ChevronRight, theme().subText, 13));
+}
+
+void CollapsibleSection::updateIcon()
+{
+    if (m_iconLabel)
+        m_iconLabel->setPixmap(iconPixmap(m_iconId, m_accent, px(15)));
 }
 
 void CollapsibleSection::setExpanded(bool on)
 {
-    m_button->setChecked(on);
-}
-
-bool CollapsibleSection::isExpanded() const
-{
-    return m_button->isChecked();
+    if (on == m_expanded && m_content->isVisible() == on)
+        return;
+    m_expanded = on;
+    m_content->setVisible(on);
+    updateChevron();
+    m_summary->setVisible(!on && !m_summary->text().isEmpty());
+    QSettings().setValue(m_settingsKey, on);
 }
 
 void CollapsibleSection::setHeaderWidget(QWidget *w)
@@ -115,7 +136,7 @@ void CollapsibleSection::setHeaderWidget(QWidget *w)
 void CollapsibleSection::setSummary(const QString &text)
 {
     m_summary->setText(text);
-    m_summary->setVisible(!isExpanded() && !text.isEmpty());
+    m_summary->setVisible(!m_expanded && !text.isEmpty());
 }
 
 } // namespace lm

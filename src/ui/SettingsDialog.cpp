@@ -1,3 +1,4 @@
+#include "ui/Theme.h"
 #include "SettingsDialog.h"
 
 #include "app/AppSettings.h"
@@ -28,7 +29,7 @@ namespace lm {
 SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent)
 {
     setWindowTitle(tr("Settings"));
-    resize(560, 400);
+    resize(px(560), px(400));
     auto &S = AppSettings::instance();
     m_themeOnEntry = S.theme;
     m_scaleOnEntry = S.uiScale;
@@ -149,7 +150,7 @@ AboutDialog::AboutDialog(const QString &cameraInfo, QWidget *parent) : QDialog(p
     setWindowTitle(tr("About DM Imaging"));
     auto *lay = new QVBoxLayout(this);
     auto *logo = new QLabel(this);
-    logo->setPixmap(QIcon(QStringLiteral(":/icons/app.png")).pixmap(56, 56));
+    logo->setPixmap(QIcon(QStringLiteral(":/icons/app.png")).pixmap(lm::iconSize(56)));
     auto *head = new QHBoxLayout;
     head->addWidget(logo);
     auto *title = new QLabel(QStringLiteral("<h2>DM Imaging %1</h2><p>build " DMI_GIT_HASH "</p>")
@@ -168,7 +169,7 @@ AboutDialog::AboutDialog(const QString &cameraInfo, QWidget *parent) : QDialog(p
                                      platformDescription().toHtmlEscaped(), QString::fromLatin1(qVersion())),
                             this);
     text->setWordWrap(true);
-    text->setMinimumWidth(420);
+    text->setMinimumWidth(px(420));
     lay->addWidget(text);
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Close, this);
     connect(bb, &QDialogButtonBox::rejected, this, &QDialog::reject);

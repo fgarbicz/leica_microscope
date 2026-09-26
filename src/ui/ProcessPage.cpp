@@ -81,6 +81,11 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     // icon plus label: the icons help people find an action again, the words
     // say what it does the first time
     tb->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    // allowed to be narrower than its contents: QToolBar then shows its
+    // overflow button rather than letting the last actions fall off the edge
+    // (which is what happened at a large interface size)
+    tb->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    m_toolbar = tb;
     tb->setToolButtonStyle(Qt::ToolButtonTextOnly);
     tb->addAction(icon(Icon::Open, theme().subText, 16), tr("Open…"), this, &ProcessPage::openDialog);
     tb->addAction(icon(Icon::Save, theme().subText, 16), tr("Save as…"), this, &ProcessPage::saveAs);
@@ -107,7 +112,7 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
         {"Text", "Text label", AnnotationLayer::TextTool, "text"},
     };
     tb->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    tb->setIconSize(QSize(20, 20));
+    tb->setIconSize(lm::iconSize(20));
     for (const auto &t : tools) {
         QAction *a = tb->addAction(QIcon(QStringLiteral(":/icons/tool_%1.svg").arg(QLatin1String(t.icon))), tr(t.label));
         a->setToolTip(tr(t.tip));
@@ -164,27 +169,27 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     auto *side = new QScrollArea(split);
     side->setObjectName(QStringLiteral("PanelScroll"));
     side->setWidgetResizable(true);
-    side->setMinimumWidth(300);
+    side->setMinimumWidth(px(300));
     auto *sideContent = new QWidget(side);
     sideContent->setObjectName(QStringLiteral("PanelContent"));
     auto *sl = new QVBoxLayout(sideContent);
     sl->setContentsMargins(0, 0, 0, 0);
     sl->setSpacing(0);
 
-    auto *ms = new CollapsibleSection(tr("Measurements"), sideContent);
+    auto *ms = new CollapsibleSection(tr("Measurements"), sideContent, true, Icon::Measure, theme().groupImage);
     m_table = new QTableWidget(0, 2, sideContent);
     m_table->setHorizontalHeaderLabels({tr("Type"), tr("Result")});
     m_table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
     m_table->verticalHeader()->setVisible(false);
     m_table->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    m_table->setMinimumHeight(180);
+    m_table->setMinimumHeight(px(180));
     ms->contentLayout()->addWidget(m_table);
     auto *csv = new QPushButton(tr("Export measurements (CSV)…"), sideContent);
     ms->contentLayout()->addWidget(csv);
     sl->addWidget(ms);
 
-    auto *adj = new CollapsibleSection(tr("Adjust"), sideContent, false);
+    auto *adj = new CollapsibleSection(tr("Adjust"), sideContent, false, Icon::Adjust, theme().groupAdjust);
     {
         auto *hint = new QLabel(tr("For display and export only. IHC analysis always uses the original image."), sideContent);
         hint->setObjectName(QStringLiteral("Hint"));
@@ -215,7 +220,8 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     adj->contentLayout()->addWidget(resetAdj);
     sl->addWidget(adj);
 
-    auto *ihc = new CollapsibleSection(tr("IHC quantification (DAB)"), sideContent);
+    auto *ihc = new CollapsibleSection(tr("IHC quantification (DAB)"), sideContent, true, Icon::Ihc,
+                                      theme().groupOverlay);
     auto *ihcHint = new QLabel(tr("Colour deconvolution into haematoxylin and DAB. Analyses the whole image, or the "
                                   "selected rectangle / ellipse / area annotation."), sideContent);
     ihcHint->setObjectName(QStringLiteral("Hint"));
@@ -343,7 +349,7 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
             QApplication::clipboard()->setText(m_ihcText);
     });
 
-    auto *inf = new CollapsibleSection(tr("Image information"), sideContent);
+    auto *inf = new CollapsibleSection(tr("Image information"), sideContent, true, Icon::Info, theme().groupCamera);
     m_info = new QLabel(sideContent);
     m_info->setObjectName(QStringLiteral("Hint"));
     m_info->setWordWrap(true);
@@ -885,6 +891,12 @@ void ProcessPage::stitchFromFiles()
     meta.captureMode = tr("stitched (%1 images)").arg(files.size());
     meta.acquired = QDateTime::currentDateTime();
     openImage(mb.result(), meta, QString());
+}
+
+void ProcessPage::resizeEvent(QResizeEvent *e)
+{
+    QWidget::resizeEvent(e);
+    fitToolBar(m_toolbar, width());
 }
 
 } // namespace lm

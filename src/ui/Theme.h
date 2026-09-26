@@ -10,6 +10,7 @@
 
 class QApplication;
 class QWidget;
+class QToolBar;
 
 namespace lm {
 
@@ -74,6 +75,13 @@ int baseFontPointSize();
 
 // Icon edge length for a control, scaled. `base` is the size at 100%.
 QSize iconSize(int base);
+
+// Keeps a tool bar usable when it is wider than the space it has: the labels
+// are dropped so the actions still fit. QToolBar only grows an overflow button
+// inside a QMainWindow, and these bars sit in ordinary layouts, so without this
+// the last actions simply fall off the right edge - which is what happened at a
+// large interface size. Call it from the page's resizeEvent().
+void fitToolBar(QToolBar *bar, int availableWidth);
 
 // Applies the current interface size to a widget tree that already exists:
 // Qt takes the new font, palette and style sheet by itself, but the icon size

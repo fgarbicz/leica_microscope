@@ -168,7 +168,7 @@ void MicroscopePanel::editObjectives()
 {
     QDialog dlg(this);
     dlg.setWindowTitle(tr("Objectives"));
-    dlg.resize(720, 380);
+    dlg.resize(px(720), px(380));
     auto *lay = new QVBoxLayout(&dlg);
     auto *table = new QTableWidget(int(m_cfg->objectives.size()), 5, &dlg);
     table->setHorizontalHeaderLabels({tr("Name"), tr("Magnification"), tr("NA"), tr("Immersion"), tr("Calibrated µm/pixel (0 = use nominal)")});
