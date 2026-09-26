@@ -22,6 +22,8 @@
 #include "ui/ToolsPanel.h"
 
 #include <QApplication>
+#include <QGuiApplication>
+#include <QScreen>
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QDesktopServices>
@@ -90,7 +92,15 @@ MainWindow::MainWindow()
     m_engine->setColorSettings(S.color);
 
     setWindowTitle(QStringLiteral("DM Imaging"));
-    setMinimumSize(px(1100), px(700));
+    // The minimum grows with the interface size, but never past the screen: at
+    // 200% an unclamped px(1100) asks for a 2200 px window, and everything to
+    // the right of it is simply unreachable.
+    if (const QScreen *screen = QGuiApplication::primaryScreen()) {
+        const QSize avail = screen->availableGeometry().size();
+        setMinimumSize(std::min(px(1100), int(avail.width() * 0.95)), std::min(px(700), int(avail.height() * 0.95)));
+    } else {
+        setMinimumSize(px(1100), px(700));
+    }
 
     // ---- top bar with workflow tabs
     auto *central = new QWidget(this);
@@ -924,6 +934,14 @@ void MainWindow::onFrame(const QImage &img, const LiveStats &stats)
     if (profile)
         timer.start();
     m_lastStats = stats;
+    // A camera can report a resolution it then does not deliver: a MacBook
+    // camera hands out 1920x1080 from a square sensor format. The backend
+    // corrects its list from the first frame of a new size, so the panel that
+    // shows it has to be refreshed once.
+    if (stats.width > 0 && stats.height > 0 && QSize(stats.width, stats.height) != m_liveFrameSize) {
+        m_liveFrameSize = QSize(stats.width, stats.height);
+        m_cameraPanel->syncFromCamera();
+    }
     m_view->setSensorScale(stats.displayScale);
     m_view->setImage(img);
     m_view->setOverlayImage(stats.dabOverlay);

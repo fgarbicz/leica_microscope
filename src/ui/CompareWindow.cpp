@@ -1,3 +1,4 @@
+#include "ui/Theme.h"
 #include "CompareWindow.h"
 
 #include "app/AppSettings.h"
@@ -24,7 +25,7 @@ CompareWindow::CompareWindow(QWidget *parent) : QWidget(parent, Qt::Window)
 {
     setWindowTitle(tr("Compare images"));
     setAttribute(Qt::WA_DeleteOnClose);
-    resize(1600, 900);
+    resize(px(1600), px(900));
     auto *root = new QVBoxLayout(this);
     auto *top = new QHBoxLayout;
     m_sync = new QCheckBox(tr("Synchronise zoom && pan"), this);

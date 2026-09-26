@@ -145,9 +145,22 @@ bool AvfCamera::open(std::string &error)
             error = "The camera is no longer connected";
             return false;
         }
-        // macOS asks the user once; a denial must not look like a device fault.
-        if ([AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo] == AVAuthorizationStatusDenied) {
-            error = "Camera access is denied for DM Imaging. Allow it in System Settings > Privacy & Security > Camera.";
+        // macOS asks the user once. Without permission a capture session still
+        // reports itself as running and simply delivers nothing, which looked
+        // like a connected camera with a dead image, so the answer is settled
+        // here before the session is built.
+        const AVAuthorizationStatus status = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
+        if (status == AVAuthorizationStatusNotDetermined) {
+            // Ask, but do not block the interface waiting for the answer: the
+            // application retries by itself, and Connect works once allowed.
+            [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo
+                                    completionHandler:^(BOOL granted) { (void)granted; }];
+            error = "macOS is asking whether DM Imaging may use the camera. Allow it, then connect again.";
+            return false;
+        }
+        if (status != AVAuthorizationStatusAuthorized) {
+            error = "Camera access is turned off for DM Imaging. Switch it on in System Settings > Privacy & "
+                    "Security > Camera, then connect again.";
             return false;
         }
 
@@ -171,6 +184,7 @@ bool AvfCamera::open(std::string &error)
         impl->output.videoSettings = @{
             (NSString *)kCVPixelBufferPixelFormatTypeKey : @(kCVPixelFormatType_32BGRA)
         };
+        // the requested size is added in setResolutionIndex(), once a format is chosen
         impl->delegate = [[LmAvfDelegate alloc] init];
         impl->delegate.owner = this;
         impl->queue = dispatch_queue_create("com.dmimaging.capture", DISPATCH_QUEUE_SERIAL);
@@ -290,8 +304,19 @@ bool AvfCamera::setResolutionIndex(int index)
         NSError *err = nil;
         if (![m_impl->device lockForConfiguration:&err])
             return false;
-        m_impl->device.activeFormat = m_impl->formats[size_t(index)];
+        AVCaptureDeviceFormat *format = m_impl->formats[size_t(index)];
+        m_impl->device.activeFormat = format;
         [m_impl->device unlockForConfiguration];
+        // Ask the data output for that size as well. A device with a square
+        // sensor and a framing feature (Centre Stage on a MacBook camera) hands
+        // out 1920x1080 whatever its active format says, so the size has to be
+        // requested and then checked against what actually arrives.
+        const CMVideoDimensions d = CMVideoFormatDescriptionGetDimensions(format.formatDescription);
+        m_impl->output.videoSettings = @{
+            (NSString *)kCVPixelBufferPixelFormatTypeKey : @(kCVPixelFormatType_32BGRA),
+            (NSString *)kCVPixelBufferWidthKey : @(d.width),
+            (NSString *)kCVPixelBufferHeightKey : @(d.height)
+        };
     }
     m_resIndex = index;
     return true;
@@ -382,9 +407,21 @@ std::vector<std::pair<std::string, std::string>> AvfCamera::details() const
         d.emplace_back("Model", m_info.model);
     d.emplace_back("Backend", "AVFoundation");
     if (m_impl) {
+        // the entry corrected by deliverFrame(), i.e. what the camera really sends
+        if (m_resIndex >= 0 && m_resIndex < int(m_resolutions.size())) {
+            const Resolution &r = m_resolutions[size_t(m_resIndex)];
+            d.emplace_back("Format", std::to_string(r.width) + " x " + std::to_string(r.height) + " BGRA");
+        }
         @autoreleasepool {
-            const CMVideoDimensions dim = CMVideoFormatDescriptionGetDimensions(m_impl->device.activeFormat.formatDescription);
-            d.emplace_back("Format", std::to_string(dim.width) + " x " + std::to_string(dim.height) + " BGRA");
+            const CMVideoDimensions dim =
+                CMVideoFormatDescriptionGetDimensions(m_impl->device.activeFormat.formatDescription);
+            if (m_resIndex >= 0 && m_resIndex < int(m_resolutions.size())
+                && (dim.width != m_resolutions[size_t(m_resIndex)].width
+                    || dim.height != m_resolutions[size_t(m_resIndex)].height)) {
+                // worth saying: the device is reframing (Centre Stage and the like)
+                d.emplace_back("Sensor format", std::to_string(dim.width) + " x " + std::to_string(dim.height)
+                                                    + " (the camera reframes it)");
+            }
         }
     }
     d.emplace_back("Exposure control", "automatic (macOS has no manual UVC exposure API)");
@@ -396,6 +433,22 @@ void AvfCamera::deliverFrame(const void *bgra, int width, int height, int stride
 {
     if (!m_streaming)
         return;
+    // What the device hands over wins over what its format description claimed.
+    // Other parts of the program size themselves from resolutions() - the live
+    // stitching outline, for one - and a wrong size there draws in the wrong
+    // place.
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (m_resIndex >= 0 && m_resIndex < int(m_resolutions.size())) {
+            Resolution &r = m_resolutions[size_t(m_resIndex)];
+            if (r.width != width || r.height != height) {
+                const bool wasFull = r.label.find("(full)") != std::string::npos;
+                r.width = width;
+                r.height = height;
+                r.label = std::to_string(width) + " x " + std::to_string(height) + (wasFull ? " (full)" : "");
+            }
+        }
+    }
     const size_t need = size_t(width) * 4 * height;
     auto f = m_pool->acquire(need);
     f->width = width;

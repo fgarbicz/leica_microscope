@@ -53,6 +53,11 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
     // icon plus label: the icons help people find an action again, the words
     // say what it does the first time
     tb->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    // allowed to be narrower than its contents: QToolBar then shows its
+    // overflow button rather than letting the last actions fall off the edge
+    // (which is what happened at a large interface size)
+    tb->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    m_toolbar = tb;
     auto *up = tb->addAction(icon(Icon::Up, theme().subText, 16), tr("Up"));
     auto *refreshAct = tb->addAction(icon(Icon::Refresh, theme().subText, 16), tr("Refresh"));
     tb->addSeparator();
@@ -104,7 +109,7 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
     split->setStretchFactor(0, 1);
     split->setStretchFactor(1, 3);
     split->setStretchFactor(2, 3);
-    split->setSizes({220, 600, 520});
+    split->setSizes({px(220), px(600), px(520)});
     root->addWidget(split, 1);
 
     // (the tree's selection model only exists once ensureLoaded() sets a model)
@@ -365,6 +370,12 @@ void BrowsePage::showPreview(const QString &path)
         m_meta->setItem(i, 1, new QTableWidgetItem(rows[i].second));
     }
     m_meta->resizeColumnToContents(0);
+}
+
+void BrowsePage::resizeEvent(QResizeEvent *e)
+{
+    QWidget::resizeEvent(e);
+    fitToolBar(m_toolbar, width());
 }
 
 } // namespace lm

@@ -1,3 +1,4 @@
+#include "ui/Theme.h"
 #include "HistogramWidget.h"
 
 #include <QContextMenuEvent>
@@ -12,7 +13,7 @@ namespace lm {
 
 HistogramWidget::HistogramWidget(QWidget *parent) : QWidget(parent)
 {
-    setMinimumHeight(90);
+    setMinimumHeight(px(90));
     setMouseTracking(true);
 }
 

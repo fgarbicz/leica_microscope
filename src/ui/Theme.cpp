@@ -13,6 +13,7 @@
 #include <QProxyStyle>
 #include <QStyleFactory>
 #include <QTabBar>
+#include <QLayout>
 #include <QToolBar>
 #include <QStringList>
 #include <QWidget>
@@ -205,6 +206,25 @@ QSize iconSize(int base)
     return QSize(n, n);
 }
 
+void fitToolBar(QToolBar *bar, int availableWidth)
+{
+    if (!bar || availableWidth <= 0)
+        return;
+    // Measure with the labels on. The hint is cached, so the layout has to be
+    // invalidated after each change for the next measurement to be honest.
+    const auto hintWith = [bar](Qt::ToolButtonStyle style) {
+        if (bar->toolButtonStyle() != style) {
+            bar->setToolButtonStyle(style);
+            if (bar->layout())
+                bar->layout()->invalidate();
+            bar->layout()->activate();
+        }
+        return bar->sizeHint().width();
+    };
+    if (hintWith(Qt::ToolButtonTextBesideIcon) > availableWidth)
+        hintWith(Qt::ToolButtonIconOnly); // the tooltips still say what each one does
+}
+
 void applyUiScaleTo(QWidget *root)
 {
     if (!root)
@@ -312,8 +332,8 @@ QLabel#GroupTitle { color: %SUB%; font-size: %SMALLPT%pt; font-weight: 700; lett
 /* section: the second level */
 QWidget#SectionHeader { background: %PANEL%; }
 QWidget#SectionHeader:hover { background: %HOVERWASH%; }
-QToolButton#SectionButton { font-weight: 600; color: %TEXT%; padding: 5px 2px; border: none; text-align: left; }
-QToolButton#SectionButton:hover { color: %ACCENT%; }
+QLabel#SectionTitle { font-weight: 600; color: %TEXT%; }
+QLabel#SectionSummary { color: %SUB%; font-size: %SMALLPT%pt; }
 QWidget#SectionContent { background: %PANEL%; }
 QFrame#SectionRule { background: %BORDER%; border: none; }
 
@@ -347,12 +367,10 @@ QToolButton:hover { background: %HOVERWASH2%; }
 QToolButton:pressed { background: %ACCENTPRESSED%; }
 QToolButton:checked { background: %ACCENT%; color: white; }
 QToolButton::menu-indicator { image: none; }
-/* a section header is checkable, but it is a heading, not a toggle button:
-   it must never fill with the accent colour */
-QToolButton#SectionButton, QToolButton#SectionButton:checked, QToolButton#SectionButton:pressed,
-QToolButton#SectionChevron, QToolButton#SectionChevron:checked, QToolButton#SectionChevron:pressed {
-    background: transparent; color: %TEXT%; }
-QToolButton#SectionButton:hover, QToolButton#SectionChevron:hover { background: transparent; color: %ACCENT%; }
+/* the chevron is part of a heading, not a button in its own right: it must
+   never fill with the accent colour */
+QToolButton#SectionChevron, QToolButton#SectionChevron:checked, QToolButton#SectionChevron:pressed,
+QToolButton#SectionChevron:hover { background: transparent; border: none; }
 
 /* ---------- inputs ---------- */
 QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox, QPlainTextEdit, QTextEdit {

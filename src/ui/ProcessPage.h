@@ -16,6 +16,8 @@ class QToolButton;
 class QDoubleSpinBox;
 class QCheckBox;
 
+class QToolBar;
+
 namespace lm {
 
 class ImageView;
@@ -53,7 +55,11 @@ signals:
     void message(const QString &text, int timeoutMs);
     void fileSaved(const QString &path);
 
+protected:
+    void resizeEvent(QResizeEvent *e) override;
+
 private:
+    QToolBar *m_toolbar = nullptr;
     void rerender();
     void updateMeasurements();
     void updateInfo();

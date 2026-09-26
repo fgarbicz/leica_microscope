@@ -1,3 +1,4 @@
+#include "ui/Theme.h"
 #include "CaptureDialog.h"
 
 #include "app/Calibration.h"
@@ -47,7 +48,7 @@ CaptureDialog::CaptureDialog(const QImage &preview, const MicroscopeConfig &scop
         const Objective &o = scope.objectives[i];
         auto *b = new QPushButton(QStringLiteral("%1×").arg(o.magnification), this);
         b->setCheckable(true);
-        b->setMinimumSize(72, 44);
+        b->setMinimumSize(px(72), px(44));
         b->setToolTip(QStringLiteral("%1   (key %2)").arg(scope.objectiveLabel(o)).arg(i + 1));
         b->setStyleSheet(QStringLiteral("QPushButton{font-size:12pt;font-weight:700;}"));
         m_group->addButton(b, i);
@@ -57,7 +58,7 @@ CaptureDialog::CaptureDialog(const QImage &preview, const MicroscopeConfig &scop
 
     auto *form = new QFormLayout;
     m_name = new QLineEdit(this);
-    m_name->setMinimumWidth(420);
+    m_name->setMinimumWidth(px(420));
     // no characters that are invalid in Windows file names
     m_name->setValidator(new QRegularExpressionValidator(QRegularExpression(QStringLiteral("[^\\\\/:*?\"<>|]*")), m_name));
     form->addRow(tr("Image name"), m_name);

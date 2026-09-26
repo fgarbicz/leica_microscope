@@ -22,7 +22,7 @@ ImageView::ImageView(QWidget *parent) : QWidget(parent)
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setAttribute(Qt::WA_OpaquePaintEvent);
-    setMinimumSize(320, 240);
+    setMinimumSize(px(320), px(240));
     m_overlays = &AppSettings::instance().overlays;
 }
 
