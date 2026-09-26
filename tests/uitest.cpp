@@ -4,6 +4,7 @@
 // used to alter whichever slider, spin box, combo box or tab sat under the
 // pointer, silently changing the exposure or the objective.
 #include "ui/Icons.h"
+#include "ui/ImageView.h"
 #include "ui/Theme.h"
 #include "ui/WheelGuard.h"
 
@@ -158,6 +159,32 @@ int main(int argc, char **argv)
             ++g_failed;
             std::printf("  FAILED: icon %d does not render\n", i);
         }
+    }
+
+    std::printf("the reference overlay blends over a matching image only\n");
+    {
+        ImageView v;
+        v.resize(240, 150);
+        QImage black(240, 150, QImage::Format_RGB32), white(240, 150, QImage::Format_RGB32);
+        black.fill(Qt::black);
+        white.fill(Qt::white);
+        v.setImage(black, true);
+        auto centre = [&v] { return qGray(v.grab().toImage().pixel(v.width() / 2, v.height() / 2)); };
+        CHECK(centre() < 10);
+        v.setReferenceOpacity(0.5);
+        v.setReferenceImage(white);
+        CHECK(v.hasReferenceImage());
+        const int half = centre();
+        CHECK(half > 100 && half < 155);
+        v.setReferenceOpacity(0.25);
+        CHECK(centre() < half - 30);
+        // a reference of another shape (e.g. over a mosaic preview) is not drawn
+        QImage square(150, 150, QImage::Format_RGB32);
+        square.fill(Qt::white);
+        v.setReferenceImage(square);
+        CHECK(centre() < 10);
+        v.setReferenceImage(QImage());
+        CHECK(!v.hasReferenceImage() && centre() < 10);
     }
 
     std::printf(g_failed ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", g_failed);
