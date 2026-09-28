@@ -1,0 +1,19 @@
+# Store text with LF in the repository, whatever the platform that committed it.
+# Without this, files edited on Windows and on the Mac flip between CRLF and LF and
+# show as entirely rewritten.
+* text=auto
+
+# Windows-only formats keep CRLF in the working tree on every platform
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.iss text eol=crlf
+*.inf text eol=crlf
+*.rc  text eol=crlf
+
+# shell scripts must stay LF, or bash fails on "\r" when they are checked out on Windows
+*.sh    text eol=lf
+*.rules text eol=lf
+
+*.png binary
+*.ico binary
