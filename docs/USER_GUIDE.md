@@ -7,9 +7,13 @@
 - *Windows:* run `DMImaging-Setup-<version>.exe` once on the microscope PC (Windows asks
   for administrator permission). Keep *Install the camera driver* ticked. Afterwards DM
   Imaging is in the Start menu and on the desktop.
-- *macOS:* run `./install.sh`; the app lands in Applications. No driver is needed.
-- *Linux:* run `./install.sh`, then `sudo bash driver/install_udev_rule.sh` once so the
-  camera can be opened without root, and replug the camera.
+- *macOS:* open `DMImaging-macOS-arm64.dmg` and drag DM Imaging onto Applications
+  (the first time, open it with right-click → *Open*). No driver is needed.
+- *Linux:* make `DMImaging-Linux-x86_64.AppImage` executable and start it; then install
+  the camera access rule once (*Tools → Install camera access rule*, or
+  `sudo bash driver/install_udev_rule.sh`) and replug the camera.
+
+The downloads are on the project's GitHub releases page (see the README).
 
 DM Imaging looks and works the same on all three; only the installation differs.
 Where this guide says **Ctrl**, use **Cmd** on a Mac.
