@@ -70,7 +70,12 @@ reinstall the Leica driver / LAS X.
 
 ## macOS
 
-Requirements: Qt 6 and libusb to build (`brew install qt libusb`), Apple silicon or Intel.
+The release disk image `DMImaging-<version>-macOS-arm64.dmg` (made with
+`tools/make_dmg.sh`): drag *DM Imaging* onto *Applications*, then open it the first time
+with right-click → *Open* (it is signed ad hoc, see below). It runs on the macOS version
+it was built on, or newer.
+
+To build it yourself: Qt 6 and libusb (`brew install qt libusb`), Apple silicon or Intel.
 
 The app bundles the Homebrew Qt and libusb it was built with, so it runs on the macOS
 version those were built for, or newer: with current Homebrew that is the macOS of
@@ -103,7 +108,13 @@ build there.
 
 ## Linux
 
-Requirements: Qt 6.4+, libusb-1.0, CMake 3.24+, a C++20 compiler (GCC 12 or newer).
+The release AppImage `DMImaging-<version>-x86_64.AppImage` (made with
+`tools/make_appimage.sh --docker`) carries its own Qt and libusb and runs on x86_64
+distributions with glibc 2.36 or newer (Debian 12, Ubuntu 24.04 and later):
+`chmod +x` it and start it. Then install the udev rule once (*Tools → Install camera
+access rule*, or the script below) and replug the camera.
+
+To build from source instead, requirements: Qt 6.4+, libusb-1.0, CMake 3.24+, a C++20 compiler (GCC 12 or newer).
 Built and tested on Debian 12 (Qt 6.4) and Debian 13 (Qt 6.8). Other distributions
 with Qt 6.4 or newer should work (Ubuntu 24.04, current Fedora); Ubuntu 22.04 ships
 Qt 6.2, which is too old.

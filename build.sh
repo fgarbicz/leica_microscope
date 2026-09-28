@@ -98,6 +98,11 @@ if [[ $deploy -eq 1 && "$build_app" == "ON" ]]; then
         # ("resource fork, Finder information, or similar detritus not allowed")
         xattr -cr "$deployed"
         "$qt_prefix/bin/macdeployqt" "$deployed" -always-overwrite -no-strip
+        # the user guide (Help > User guide looks in Resources) and the licences
+        # of the program and of the Qt and libusb it now carries; before signing,
+        # which any later change to the bundle would break
+        cp "$root/docs/USER_GUIDE.md" "$root/LICENSE" "$root/THIRD_PARTY_NOTICES.md" "$deployed/Contents/Resources/"
+        cp -R "$root/licenses" "$deployed/Contents/Resources/"
         xattr -cr "$deployed"
         # Ad-hoc signature: enough to run on the machine that built it.
         # Distributing it to other Macs needs a Developer ID certificate, see

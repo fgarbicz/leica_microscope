@@ -7,12 +7,23 @@ daily imaging and includes its own native camera driver.
 Runs on **Windows, macOS and Linux** from one source tree, with the same
 features and the same interface on all three (see [Platforms](#platforms)).
 
-**Download:** the Windows installer is attached to each
-[release](https://github.com/fgarbicz/leica_microscope/releases/latest). macOS and
-Linux are built from source with one script ([Install](#install)).
-What changed: [RELEASE_NOTES.md](RELEASE_NOTES.md).
+## Download
 
-![workflow](docs/workflow.png)
+The latest version, ready to install:
+
+| System | Download | Then |
+|---|---|---|
+| **Windows** 10/11 (64-bit) | [DMImaging-Setup-Windows-x64.exe](https://github.com/fgarbicz/leica_microscope/releases/latest/download/DMImaging-Setup-Windows-x64.exe) | run it; keep *Install the camera driver* ticked |
+| **macOS** (Apple silicon) | [DMImaging-macOS-arm64.dmg](https://github.com/fgarbicz/leica_microscope/releases/latest/download/DMImaging-macOS-arm64.dmg) | drag *DM Imaging* onto *Applications*; open it the first time with right-click → *Open* |
+| **Linux** (x86_64) | [DMImaging-Linux-x86_64.AppImage](https://github.com/fgarbicz/leica_microscope/releases/latest/download/DMImaging-Linux-x86_64.AppImage) | `chmod +x` it and run it; then *Tools → Install camera access rule* |
+
+Details for each system are under [Install](#install); earlier versions are on the
+[releases page](https://github.com/fgarbicz/leica_microscope/releases). What changed: [RELEASE_NOTES.md](RELEASE_NOTES.md).
+
+![DM Imaging measuring and quantifying DAB staining on a 3840 × 2400 pixel-shift capture from the Leica DMC6200](docs/screenshot.png)
+
+*A 20× 16-shot capture (3840 × 2400) from the DMC6200 in Process: a region measured
+and quantified, 59.8 % of the tissue DAB-positive (red), with the intensity classes on the right.*
 
 ## Features
 
@@ -42,7 +53,8 @@ What changed: [RELEASE_NOTES.md](RELEASE_NOTES.md).
 - Colour presets (IHC/DAB, H&E, publication), plus your own.
 - Shading (flat-field) correction, stored per objective.
 - Frame averaging for low-noise captures.
-- Over/under-exposure display, live histogram with draggable level handles, focus assistant.
+- Over/under-exposure display, live histogram with draggable level handles, focus
+  assistant whose peak follows the specimen (it restarts on a new field or objective).
 
 **Microscope**
 - Objectives 2.5×, 5×, 10×, 20×, 40× and 100×.
@@ -50,7 +62,8 @@ What changed: [RELEASE_NOTES.md](RELEASE_NOTES.md).
 - *Tools → Correct pixel size of saved images* repairs the scale recorded in images saved
   with the old 0.7× adapter assumption, and leaves calibrated images alone.
 - After every capture, a dialog asks for the **magnification and image name**.
-- Exposure, gain and white balance are remembered per objective.
+- Exposure, gain and white balance are remembered per objective; auto exposure starts
+  from that exposure when the objective changes.
 - Calibrated scale bar, grid and crosshair overlays.
 
 **Serial sections (the same area, stained for another marker)**
@@ -83,8 +96,10 @@ What changed: [RELEASE_NOTES.md](RELEASE_NOTES.md).
   together), applied immediately and remembered.
 - Side panels grouped by function, with the mouse wheel reserved for scrolling so it
   cannot change a setting by accident.
-- Captured images shown as a reel under the live image or as a vertical list beside it,
-  whichever suits the screen, in the order they were taken.
+- Capturing comes first on the Acquire page; the save window asks for the objective,
+  the name and the folder, and a "Saving…" wheel shows until the file is written.
+- Captured images shown as a reel under the live image, a list beside it with names,
+  or a compact list of small thumbnails to see many at once, in the order they were taken.
 - Projects: in the list, images are grouped under the folder they were saved in; the
   project name renames the folder, and *File → Open project folder* lists an existing
   one to continue it. Captured images can be renamed (F2), file and metadata together.
@@ -134,9 +149,8 @@ builds look alike.
 
 ### Windows
 
-Download **`DMImaging-Setup-<version>.exe`** from the
-[latest release](https://github.com/fgarbicz/leica_microscope/releases/latest) (or make it
-yourself, see [below](#making-the-windows-installer)), run it on the microscope PC and follow the
+Download **[DMImaging-Setup-Windows-x64.exe](https://github.com/fgarbicz/leica_microscope/releases/latest/download/DMImaging-Setup-Windows-x64.exe)**
+(or make it yourself, see [below](#making-the-installers)), run it on the microscope PC and follow the
 wizard. Windows asks for administrator permission once. Setup:
 
 - installs DM Imaging for all users to `C:\Program Files\DM Imaging`, with Start-menu
@@ -156,6 +170,11 @@ driver* in the app.
 
 ### macOS
 
+Open **[DMImaging-macOS-arm64.dmg](https://github.com/fgarbicz/leica_microscope/releases/latest/download/DMImaging-macOS-arm64.dmg)** and drag *DM Imaging* onto *Applications*.
+The image is signed ad hoc, not by an Apple developer, so the first time open the app
+with right-click → *Open*. It runs on the macOS version it was built on, or newer
+(it carries the Homebrew Qt and libusb of that Mac). Or build and install from source:
+
 ```bash
 brew install qt libusb          # build requirements
 ./install.sh                    # build, bundle the Qt runtime, install to /Applications
@@ -163,12 +182,19 @@ brew install qt libusb          # build requirements
 
 No driver is needed: macOS lets the application talk to the camera directly. The first
 time a UVC camera is used, macOS asks for camera permission; the DMC6200 does not need
-it. Apple silicon or Intel.
+it. The download is for Apple silicon; on an Intel Mac, or an older macOS than the one
+it was built on, build from source with the two commands above.
 
 `./install.sh --uninstall` removes the app. Settings (`~/Library/Preferences`) and your
 images are kept.
 
 ### Linux
+
+**[DMImaging-Linux-x86_64.AppImage](https://github.com/fgarbicz/leica_microscope/releases/latest/download/DMImaging-Linux-x86_64.AppImage)**
+runs without installing anything, on Debian 12, Ubuntu 24.04 and newer (any x86_64
+distribution with glibc 2.36 or later): `chmod +x DMImaging-Linux-x86_64.AppImage` and
+start it. It carries its own Qt and libusb; the camera still needs the udev rule below
+(*Tools → Install camera access rule* installs it). Or build and install from source:
 
 ```bash
 sudo apt install qt6-base-dev qt6-svg-dev libusb-1.0-0-dev cmake ninja-build build-essential
@@ -182,16 +208,27 @@ opened. The same rule can be installed from *Tools → Install camera access rul
 
 `./install.sh --uninstall` removes it again.
 
-### Making the Windows installer
+### Making the installers
 
 ```powershell
-.\tools\make_installer.ps1     # build, run all tests, package -> dist\DMImaging-Setup-<version>.exe
+.\tools\make_installer.ps1     # Windows: build, run all tests, package -> dist\DMImaging-Setup-<version>.exe
 ```
 
-Needs the build requirements below plus Inno Setup 6 (`ISCC.exe`), and Python with the
-`markdown` package for the HTML user guide (optional). It builds, runs all four tests and
-refuses to package if any fails. `-Arch arm64` makes a Windows-on-ARM installer
-(`DMImaging-Setup-<version>-arm64.exe`) from an ARM64 Qt.
+The Windows installer needs the build requirements below plus Inno Setup 6 (`ISCC.exe`),
+and Python with the `markdown` package for the HTML user guide (optional). `-Arch arm64`
+makes a Windows-on-ARM installer (`DMImaging-Setup-<version>-arm64.exe`) from an ARM64 Qt.
+
+```bash
+tools/make_dmg.sh               # macOS: build, test, bundle -> dist/DMImaging-<version>-macOS-<arch>.dmg
+tools/make_appimage.sh          # Linux: build, test, bundle -> dist/DMImaging-<version>-<arch>.AppImage
+tools/make_appimage.sh --docker # the same from macOS or any Docker host, in a Debian 12 x86_64 container
+```
+
+Each refuses to package if a test fails. To publish, create the GitHub release, then
+
+```bash
+tools/publish_release.sh v<version>   # uploads them under the fixed names the Download links use
+```
 
 ## Build from source
 
@@ -261,7 +298,7 @@ dmctest          # command-line test of the native camera driver
 | `src/ui/` | Qt user interface |
 | `driver/` | WinUSB INF and installer (Windows), udev rule and installer (Linux) |
 | `tests/` | unit, hardware and integration tests |
-| `tools/` | build helpers and reverse-engineering tools used to document the camera protocol |
+| `tools/` | installer and release scripts (`make_installer.ps1`, `make_dmg.sh`, `make_appimage.sh`, `publish_release.sh`), build helpers, and the reverse-engineering tools used to document the camera protocol |
 | `resources/` | icons, Windows version info, macOS `Info.plist`, Linux desktop entry |
 | `docs/` | user guide, deployment checklist, camera protocol and `.lif` format |
 
