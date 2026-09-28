@@ -90,6 +90,10 @@ private:
     void tryReconnect();
     // blends a saved image over the live view (empty path = hide)
     void showReference(const QString &path);
+    // pane sizes are remembered between sessions (per gallery layout for the centre)
+    QString centreSplitKey() const;
+    void saveSplitters();
+    void restoreSplitters();
 
     AcquisitionEngine *m_engine;
     MicroscopeConfig m_scope;

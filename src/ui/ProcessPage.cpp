@@ -162,6 +162,7 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
 
     // ---- content
     auto *split = new QSplitter(Qt::Horizontal, this);
+    split->setObjectName(QStringLiteral("processSplit")); // size remembered by the main window
     m_view = new ImageView(split);
     m_view->setPlaceholder(tr("Open an image (Ctrl+O) or capture one in Acquire"));
     m_view->setAnnotationLayer(m_layer);

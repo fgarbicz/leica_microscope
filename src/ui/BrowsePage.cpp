@@ -123,6 +123,7 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
     root->addWidget(m_header);
 
     auto *split = new QSplitter(Qt::Horizontal, this);
+    split->setObjectName(QStringLiteral("browseSplit")); // size remembered by the main window
     // the model is created in ensureLoaded(); see the header
     m_tree = new QTreeView(split);
     m_tree->setHeaderHidden(true);
@@ -139,6 +140,7 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
     m_grid->setWordWrap(true);
 
     auto *right = new QSplitter(Qt::Vertical, split);
+    right->setObjectName(QStringLiteral("browseRightSplit"));
     m_preview = new ImageView(right);
     m_preview->setPlaceholder(tr("Select an image"));
     m_meta = new QTableWidget(0, 2, right);

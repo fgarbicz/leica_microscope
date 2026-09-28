@@ -84,7 +84,11 @@ What changed: [RELEASE_NOTES.md](RELEASE_NOTES.md).
 - Side panels grouped by function, with the mouse wheel reserved for scrolling so it
   cannot change a setting by accident.
 - Captured images shown as a reel under the live image or as a vertical list beside it,
-  whichever suits the screen.
+  whichever suits the screen, in the order they were taken.
+- Projects: in the list, images are grouped under the folder they were saved in; the
+  project name renames the folder, and *File → Open project folder* lists an existing
+  one to continue it. Captured images can be renamed (F2), file and metadata together.
+- Pane sizes are remembered between sessions.
 
 **Files**
 - TIFF output: 16-bit or 8-bit, lossless Deflate, with the calibration in the

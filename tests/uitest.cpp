@@ -194,10 +194,19 @@ int main(int argc, char **argv)
         // neither layout may lose the images
         gallery.addImage(QStringLiteral("/tmp/a.tif"), QImage(64, 48, QImage::Format_RGB888));
         gallery.addImage(QStringLiteral("/tmp/b.tif"), QImage(64, 48, QImage::Format_RGB888));
-        CHECK(gallery.count() == 2);
-        gallery.setVertical(true);
-        CHECK(gallery.count() == 2);
         CHECK(gallery.paths().size() == 2);
+        gallery.setVertical(true);
+        CHECK(gallery.paths().size() == 2);
+        // projects: one heading per folder, images oldest first, another folder is a
+        // new group after the first; headings only show in the list layouts
+        gallery.addImage(QStringLiteral("/tmp/p2/c.tif"), QImage(64, 48, QImage::Format_RGB888));
+        CHECK(gallery.paths() == (QStringList{QStringLiteral("/tmp/a.tif"), QStringLiteral("/tmp/b.tif"),
+                                              QStringLiteral("/tmp/p2/c.tif")}));
+        CHECK(gallery.count() == 5); // two headings
+        CHECK(gallery.item(0)->text() == QStringLiteral("tmp") && gallery.item(3)->text() == QStringLiteral("p2"));
+        CHECK(!gallery.isRowHidden(0) && !gallery.isRowHidden(3));
+        gallery.setVertical(false);
+        CHECK(gallery.isRowHidden(0) && gallery.isRowHidden(3) && !gallery.isRowHidden(1));
     }
 
     std::printf("thumbnails are made for the pixels the icon covers\n");

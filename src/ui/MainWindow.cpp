@@ -278,6 +278,31 @@ MainWindow::MainWindow()
             m_tabs->setCurrentIndex(2);
     });
     connect(m_gallery, &GalleryWidget::referenceRequested, this, &MainWindow::showReference);
+    connect(m_gallery, &GalleryWidget::folderRenamed, this, [this](const QString &from, const QString &to) {
+        // everything that points into the renamed folder follows it
+        auto moved = [&](const QString &p) -> QString {
+            const QString c = QDir::cleanPath(p);
+            if (c.compare(from, Qt::CaseInsensitive) == 0)
+                return to;
+            if (c.startsWith(from + QLatin1Char('/'), Qt::CaseInsensitive))
+                return to + c.mid(from.size());
+            return {};
+        };
+        auto &S = AppSettings::instance();
+        if (const QString f = moved(S.capture.folder); !f.isEmpty()) {
+            S.capture.folder = f;
+            S.save();
+            m_capturePanel->refreshFromSettings();
+            updateNextName();
+        }
+        if (const QString f = moved(m_browse->folder()); !f.isEmpty())
+            m_browse->setFolder(f);
+        if (const QString f = moved(m_process->currentPath()); !f.isEmpty())
+            m_process->fileRenamed(m_process->currentPath(), f);
+        if (const QString f = moved(m_referencePath); !f.isEmpty())
+            m_referencePath = f;
+        showMessage(tr("Project folder renamed to %1").arg(QFileInfo(to).fileName()), 6000);
+    });
     connect(m_gallery, &GalleryWidget::renamed, this, [this](const QString &from, const QString &to) {
         m_process->fileRenamed(from, to);
         if (m_referencePath == from)
@@ -287,6 +312,8 @@ MainWindow::MainWindow()
 
     const QSettings qs;
     restoreGeometry(qs.value(QStringLiteral("ui/geometry")).toByteArray());
+    // pane sizes as they were left (after the window has its size, like the gallery split)
+    QTimer::singleShot(0, this, &MainWindow::restoreSplitters);
     loadShadingForObjective();
     onCalibrationChanged();
     updateNextName();
@@ -303,6 +330,7 @@ QWidget *MainWindow::buildAcquirePage()
     auto *split = new QSplitter(Qt::Horizontal, page);
     split->setObjectName(QStringLiteral("AcquireSplitter"));
     m_acquireSplitter = split;
+    split->setObjectName(QStringLiteral("acquireSplit"));
 
     // left: camera, microscope, capture
     auto *left = new QWidget;
@@ -325,6 +353,7 @@ QWidget *MainWindow::buildAcquirePage()
     // or beside it (list); see setGalleryVertical()
     auto *centre = new QSplitter(Qt::Vertical, split);
     m_centreSplitter = centre;
+    centre->setObjectName(QStringLiteral("centreSplit")); // saved per gallery layout, see centreSplitKey()
     m_view = new ImageView(centre);
     m_view->setPlaceholder(tr("No camera connected\n\nConnect the camera in the Camera panel (or use the simulator)."));
     m_view->installEventFilter(this);
@@ -650,6 +679,21 @@ void MainWindow::buildMenus()
     file->addAction(icon(Icon::Save), tr("Export captured images to a Leica &.lif…"), this,
                     &MainWindow::exportSessionToLif);
     file->addSeparator();
+    // a project is a folder of images: list them (oldest first) and save new captures there
+    file->addAction(icon(Icon::Folder), tr("Open pro&ject folder…"), QKeySequence(tr("Ctrl+Shift+O")), this, [this] {
+        auto &S = AppSettings::instance();
+        const QString d = QFileDialog::getExistingDirectory(this, tr("Open project folder"), S.capture.folder);
+        if (d.isEmpty())
+            return;
+        const int n = m_gallery->addFolder(d);
+        S.capture.folder = d;
+        S.save();
+        m_capturePanel->refreshFromSettings();
+        updateNextName();
+        showMessage(tr("Project %1: %n image(s) listed; new captures are saved here", nullptr, n)
+                        .arg(QFileInfo(d).fileName()),
+                    8000);
+    });
     file->addAction(icon(Icon::Folder), tr("Open image &folder"), this, [] {
         const QString d = AppSettings::instance().capture.folder;
         QDir().mkpath(d);
@@ -761,13 +805,15 @@ void MainWindow::buildMenus()
             showReference(QString());
             return;
         }
-        QListWidgetItem *it = m_gallery->currentItem() ? m_gallery->currentItem() : m_gallery->item(0);
-        if (!it) {
+        QListWidgetItem *cur = m_gallery->currentItem();
+        const QString path = cur && !cur->data(Qt::UserRole + 1).toBool() ? cur->data(Qt::UserRole).toString()
+                                                                         : m_gallery->paths().value(0);
+        if (path.isEmpty()) {
             m_referenceAct->setChecked(false);
             showMessage(tr("Capture an image first (or select one in the strip below the live image)"), 6000);
             return;
         }
-        showReference(it->data(Qt::UserRole).toString());
+        showReference(path);
     });
     auto *opacityGroup = new QActionGroup(this);
     static const QString opacityKey = QStringLiteral("ui/referenceOpacity");
@@ -1083,6 +1129,41 @@ void MainWindow::applyGalleryLayout(bool vertical)
     const int strip = !vertical ? px(150) : AppSettings::instance().galleryCompact ? px(200) : px(250);
     const int image = std::max(px(200), (total > 0 ? total : px(950)) - strip);
     m_centreSplitter->setSizes({image, strip});
+    // the size this layout was left at, if any (restoreState also sets the orientation it was saved with)
+    const QByteArray saved = QSettings().value(centreSplitKey()).toByteArray();
+    if (!saved.isEmpty())
+        m_centreSplitter->restoreState(saved);
+}
+
+QString MainWindow::centreSplitKey() const
+{
+    const auto &S = AppSettings::instance();
+    return QStringLiteral("ui/splitter/centre-%1")
+        .arg(!S.galleryVertical ? QStringLiteral("reel") : S.galleryCompact ? QStringLiteral("compact") : QStringLiteral("list"));
+}
+
+void MainWindow::saveSplitters()
+{
+    QSettings qs;
+    // named splitters of every page (Acquire, Browse, Process); the image / captured
+    // images split has one size per layout
+    for (QSplitter *s : findChildren<QSplitter *>())
+        if (!s->objectName().isEmpty() && s != m_centreSplitter)
+            qs.setValue(QStringLiteral("ui/splitter/") + s->objectName(), s->saveState());
+    if (m_centreSplitter)
+        qs.setValue(centreSplitKey(), m_centreSplitter->saveState());
+}
+
+void MainWindow::restoreSplitters()
+{
+    const QSettings qs;
+    for (QSplitter *s : findChildren<QSplitter *>())
+        if (!s->objectName().isEmpty() && s != m_centreSplitter) {
+            const QByteArray state = qs.value(QStringLiteral("ui/splitter/") + s->objectName()).toByteArray();
+            if (!state.isEmpty())
+                s->restoreState(state);
+        }
+    applyGalleryLayout(AppSettings::instance().galleryVertical); // restores the centre split of the layout
 }
 
 void MainWindow::syncGalleryControls(int mode)
@@ -1106,6 +1187,8 @@ void MainWindow::setGalleryMode(int mode)
     if (vertical == S.galleryVertical && compact == S.galleryCompact && m_gallery
         && m_gallery->isVertical() == vertical && m_gallery->isCompact() == compact)
         return;
+    if (m_centreSplitter) // the layout being left keeps its size for next time
+        QSettings().setValue(centreSplitKey(), m_centreSplitter->saveState());
     S.galleryVertical = vertical;
     S.galleryCompact = compact;
     S.save();
@@ -1843,6 +1926,7 @@ void MainWindow::closeEvent(QCloseEvent *e)
     }
     QSettings qs;
     qs.setValue(QStringLiteral("ui/geometry"), saveGeometry());
+    saveSplitters();
     AppSettings::instance().save();
     if (m_scope.rememberSettings && m_engine->camera())
         storeObjectiveSettings(m_scope.current);

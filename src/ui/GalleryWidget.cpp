@@ -1,6 +1,7 @@
 #include "ui/Theme.h"
 #include "GalleryWidget.h"
 
+#include "ui/Icons.h"
 #include "ui/PlatformUi.h"
 
 #include "io/ImageIO.h"
@@ -8,6 +9,8 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QContextMenuEvent>
+#include <QDesktopServices>
+#include <QUrl>
 #include <QEvent>
 #include <QDir>
 #include <QFile>
@@ -54,6 +57,9 @@ QIcon thumbnailIcon(const QImage &thumb)
 }
 
 namespace {
+// Qt::UserRole holds the image path (for a heading: the folder path)
+constexpr int kHeaderRole = Qt::UserRole + 1;
+
 QString itemToolTip(const QString &path)
 {
     return QDir::toNativeSeparators(path) + QLatin1Char('\n')
@@ -72,8 +78,12 @@ GalleryWidget::GalleryWidget(QWidget *parent) : QListWidget(parent)
     applyLayout();
     // double click opens the image in the system viewer, in its own window (e.g. a
     // reference on a second screen while the next marker is imaged); live keeps running
-    connect(this, &QListWidget::itemDoubleClicked, this,
-            [this](QListWidgetItem *it) { openInImageViewer(it->data(Qt::UserRole).toString(), this); });
+    connect(this, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *it) {
+        if (isHeader(it))
+            renameFolder(it);
+        else
+            openInImageViewer(it->data(Qt::UserRole).toString(), this);
+    });
 }
 
 void GalleryWidget::applyLayout()
@@ -85,7 +95,7 @@ void GalleryWidget::applyLayout()
         setWrapping(false);
         setIconSize(QSize(px(40), px(27)));
         setGridSize(QSize());
-        setUniformItemSizes(true);
+        setUniformItemSizes(false); // project headings are shorter than image rows
         setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
         setWordWrap(false);
         setMinimumHeight(0);
@@ -98,7 +108,7 @@ void GalleryWidget::applyLayout()
         setWrapping(false);
         setIconSize(QSize(px(112), px(76)));
         setGridSize(QSize()); // let each row size itself around the icon and the name
-        setUniformItemSizes(true);
+        setUniformItemSizes(false); // project headings are shorter than image rows
         setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
         setWordWrap(true);
         setMinimumHeight(0);
@@ -110,7 +120,7 @@ void GalleryWidget::applyLayout()
         setWrapping(false);
         setIconSize(QSize(px(150), px(100)));
         setGridSize(QSize(px(170), px(132)));
-        setUniformItemSizes(true);
+        setUniformItemSizes(false); // project headings are shorter than image rows
         setHorizontalScrollMode(QAbstractItemView::ScrollPerPixel);
         setWordWrap(false);
         setMinimumWidth(0);
@@ -125,6 +135,81 @@ void GalleryWidget::setVertical(bool on)
         return;
     m_vertical = on;
     applyLayout();
+    updateHeaderVisibility();
+}
+
+bool GalleryWidget::isHeader(const QListWidgetItem *it)
+{
+    return it && it->data(kHeaderRole).toBool();
+}
+
+QListWidgetItem *GalleryWidget::headerFor(const QString &folder) const
+{
+    for (int i = 0; i < count(); ++i)
+        if (isHeader(item(i)) && QDir::cleanPath(item(i)->data(Qt::UserRole).toString()) == QDir::cleanPath(folder))
+            return item(i);
+    return nullptr;
+}
+
+QListWidgetItem *GalleryWidget::addHeader(const QString &folder, int row)
+{
+    auto *h = new QListWidgetItem(icon(Icon::Folder, theme().subText, 16), QFileInfo(folder).fileName());
+    h->setData(Qt::UserRole, folder);
+    h->setData(kHeaderRole, true);
+    h->setFlags(Qt::ItemIsEnabled); // a heading, not an image: not selectable
+    QFont f = font();
+    f.setBold(true);
+    h->setFont(f);
+    h->setToolTip(tr("Project folder %1\nDouble click or right click to rename it (renames the folder on disk)")
+                      .arg(QDir::toNativeSeparators(folder)));
+    insertItem(row, h);
+    setRowHidden(row, !m_vertical);
+    return h;
+}
+
+void GalleryWidget::placeInGroup(QListWidgetItem *it)
+{
+    // chronological: a new project's group goes last, a new image at the end of its group
+    const QString folder = QFileInfo(it->data(Qt::UserRole).toString()).absolutePath();
+    QListWidgetItem *h = headerFor(folder);
+    if (!h)
+        h = addHeader(folder, count());
+    int r = row(h) + 1;
+    while (r < count() && !isHeader(item(r)))
+        ++r;
+    insertItem(r, it);
+}
+
+int GalleryWidget::addFolder(const QString &folder)
+{
+    const QStringList listed = paths();
+    const QFileInfoList files =
+        QDir(folder).entryInfoList({QStringLiteral("*.tif"), QStringLiteral("*.tiff"), QStringLiteral("*.png"),
+                                    QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"), QStringLiteral("*.bmp")},
+                                   QDir::Files, QDir::Time | QDir::Reversed); // oldest first
+    int added = 0;
+    for (const QFileInfo &fi : files)
+        if (!listed.contains(fi.absoluteFilePath())) {
+            addFile(fi.absoluteFilePath());
+            ++added;
+        }
+    if (QListWidgetItem *h = headerFor(folder))
+        scrollToItem(h, QAbstractItemView::PositionAtTop);
+    return added;
+}
+
+void GalleryWidget::removeEmptyHeaders()
+{
+    for (int i = count() - 1; i >= 0; --i)
+        if (isHeader(item(i)) && (i + 1 >= count() || isHeader(item(i + 1))))
+            delete takeItem(i);
+}
+
+void GalleryWidget::updateHeaderVisibility()
+{
+    for (int i = 0; i < count(); ++i)
+        if (isHeader(item(i)))
+            setRowHidden(i, !m_vertical);
 }
 
 void GalleryWidget::setCompact(bool on)
@@ -157,7 +242,12 @@ void GalleryWidget::paintEvent(QPaintEvent *e)
 
 void GalleryWidget::keyPressEvent(QKeyEvent *e)
 {
-    if ((e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter) && currentItem()) {
+    if (isHeader(currentItem())) {
+        if (e->key() == Qt::Key_F2 || e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter) {
+            renameFolder(currentItem());
+            return;
+        }
+    } else if ((e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter) && currentItem()) {
         openInImageViewer(currentItem()->data(Qt::UserRole).toString(), this);
         return;
     }
@@ -180,7 +270,7 @@ void GalleryWidget::addImage(const QString &path, const QImage &src)
                                    QFileInfo(path).fileName());
     it->setData(Qt::UserRole, path);
     it->setToolTip(itemToolTip(path));
-    insertItem(0, it);
+    placeInGroup(it);
     // the new image alone: without the explicit command an extended selection
     // kept every earlier capture selected too
     setCurrentItem(it, QItemSelectionModel::ClearAndSelect);
@@ -192,7 +282,7 @@ void GalleryWidget::addFile(const QString &path)
     auto *it = new QListWidgetItem(QFileInfo(path).fileName());
     it->setData(Qt::UserRole, path);
     it->setToolTip(itemToolTip(path));
-    addItem(it);
+    placeInGroup(it);
     auto *watcher = new QFutureWatcher<QImage>(this);
     connect(watcher, &QFutureWatcher<QImage>::finished, this, [this, watcher, path] {
         const QImage img = watcher->result();
@@ -215,7 +305,8 @@ QStringList GalleryWidget::paths() const
 {
     QStringList l;
     for (int i = 0; i < count(); ++i)
-        l << item(i)->data(Qt::UserRole).toString();
+        if (!isHeader(item(i)))
+            l << item(i)->data(Qt::UserRole).toString();
     return l;
 }
 
@@ -225,6 +316,18 @@ void GalleryWidget::contextMenuEvent(QContextMenuEvent *e)
     if (!it)
         return;
     const QString path = it->data(Qt::UserRole).toString();
+    if (isHeader(it)) {
+        QMenu m(this);
+        auto *ren = m.addAction(tr("Rename project folder…"));
+        m.setDefaultAction(ren);
+        auto *show = m.addAction(tr("Open folder"));
+        QAction *a = m.exec(e->globalPos());
+        if (a == ren)
+            renameFolder(it);
+        else if (a == show)
+            QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+        return;
+    }
     QMenu m(this);
     auto *ext = m.addAction(tr("Open in image viewer"));
     m.setDefaultAction(ext); // what a double click does
@@ -256,8 +359,10 @@ void GalleryWidget::contextMenuEvent(QContextMenuEvent *e)
     else if (a == del) {
         if (QMessageBox::question(this, tr("Delete"), tr("Move %1 to the %2?").arg(QFileInfo(path).fileName(), trashName()))
             == QMessageBox::Yes) {
-            if (moveImageToTrash(path))
+            if (moveImageToTrash(path)) {
                 delete it;
+                removeEmptyHeaders();
+            }
             else
                 QMessageBox::warning(this, tr("Delete"),
                                      tr("%1 could not be moved to the %2 (in use, or no permission?).")
@@ -295,6 +400,67 @@ void GalleryWidget::renameItem(QListWidgetItem *it)
     it->setText(QFileInfo(to).fileName());
     it->setToolTip(itemToolTip(to));
     emit renamed(path, to);
+}
+
+void GalleryWidget::renameFolder(QListWidgetItem *header)
+{
+    const QString from = QDir::cleanPath(header->data(Qt::UserRole).toString());
+    const QFileInfo fi(from);
+    QInputDialog dlg(this);
+    dlg.setWindowTitle(tr("Rename project folder"));
+    dlg.setLabelText(tr("New name for the folder %1 (renamed on disk, with every image in it):")
+                         .arg(QDir::toNativeSeparators(from)));
+    dlg.setTextValue(fi.fileName());
+    dlg.resize(px(480), dlg.sizeHint().height());
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+    const QString name = dlg.textValue().trimmed();
+    if (name == fi.fileName())
+        return;
+    if (const QString why = invalidFileName(name); !why.isEmpty()) {
+        QMessageBox::warning(this, tr("Rename project folder"), why);
+        return;
+    }
+    const QString to = QDir::cleanPath(fi.dir().filePath(name));
+    const bool caseOnly = to.compare(from, Qt::CaseInsensitive) == 0;
+    if (QFileInfo::exists(to) && !caseOnly) {
+        QMessageBox::warning(this, tr("Rename project folder"), tr("%1 already exists.").arg(QDir::toNativeSeparators(to)));
+        return;
+    }
+    // a change of case only is the same folder on Windows and macOS: via a temporary name
+    const bool ok = caseOnly ? (QDir().rename(from, from + QStringLiteral(".renaming"))
+                                && (QDir().rename(from + QStringLiteral(".renaming"), to)
+                                    || (QDir().rename(from + QStringLiteral(".renaming"), from), false)))
+                             : QDir().rename(from, to);
+    if (!ok) {
+        QMessageBox::warning(this, tr("Rename project folder"),
+                             tr("%1 could not be renamed. A file in it may be open in another program (an image "
+                                "viewer, Explorer or Finder), or the folder may be synchronising.")
+                                 .arg(QDir::toNativeSeparators(from)));
+        return;
+    }
+    // the heading and every image of the group (and of subfolders) follow
+    const QString prefix = from + QLatin1Char('/');
+    for (int i = 0; i < count(); ++i) {
+        QListWidgetItem *it = item(i);
+        const QString p = QDir::cleanPath(it->data(Qt::UserRole).toString());
+        QString np;
+        if (p == from)
+            np = to;
+        else if (p.startsWith(prefix, Qt::CaseInsensitive))
+            np = to + p.mid(from.size());
+        else
+            continue;
+        it->setData(Qt::UserRole, np);
+        if (isHeader(it)) {
+            it->setText(QFileInfo(np).fileName());
+            it->setToolTip(tr("Project folder %1\nDouble click or right click to rename it (renames the folder on disk)")
+                               .arg(QDir::toNativeSeparators(np)));
+        } else {
+            it->setToolTip(itemToolTip(np));
+        }
+    }
+    emit folderRenamed(from, to);
 }
 
 } // namespace lm

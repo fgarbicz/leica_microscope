@@ -18,6 +18,9 @@ public:
     explicit GalleryWidget(QWidget *parent = nullptr);
     void addImage(const QString &path, const QImage &thumbnailSource);
     void addFile(const QString &path); // loads the thumbnail asynchronously
+    // A project: every image in `folder` (oldest first) that is not listed yet;
+    // returns how many were added.
+    int addFolder(const QString &folder);
     QStringList paths() const;
 
     // Vertical list beside the image, or horizontal reel below it.
@@ -32,6 +35,7 @@ signals:
     void revealRequested(const QString &path);
     void referenceRequested(const QString &path); // blend over the live image for alignment
     void renamed(const QString &from, const QString &to); // file (and sidecars) renamed on disk
+    void folderRenamed(const QString &from, const QString &to); // a project folder renamed on disk
 
 protected:
     void contextMenuEvent(QContextMenuEvent *e) override;
@@ -45,6 +49,17 @@ protected:
 private:
     void applyLayout();
     void renameItem(QListWidgetItem *it); // asks for the new name (F2 / context menu)
+
+    // Project folders: in the list layouts the images are grouped under a
+    // heading row per folder they were saved in (the "project"); saving in
+    // another folder starts a new group. The heading is hidden in the reel.
+    static bool isHeader(const QListWidgetItem *it);
+    QListWidgetItem *headerFor(const QString &folder) const;
+    QListWidgetItem *addHeader(const QString &folder, int row);
+    void placeInGroup(QListWidgetItem *it); // at the end of its folder's group (chronological)
+    void removeEmptyHeaders();
+    void updateHeaderVisibility();
+    void renameFolder(QListWidgetItem *header); // renames the folder on disk
     // the icon size thumbnails are made for (the larger of the two layouts)
     QSize thumbnailSize() const;
 

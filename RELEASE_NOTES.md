@@ -1,5 +1,28 @@
 # DM Imaging release notes
 
+## 1.1.3 (2026-09-28)
+
+- **Projects.** The captured images are listed in the order they were taken, oldest
+  first (they were newest first). In the *List* and *Compact* layouts they are grouped
+  under the folder they were saved in, which serves as the project name; saving into
+  another folder starts a new project. Double-click or right-click the project name to
+  rename it: the folder is renamed on disk and the save folder follows. *File → Open
+  project folder…* (Ctrl+Shift+O) lists the images already in a folder, oldest first,
+  and saves new captures there.
+- **Rename a captured image** from its right-click menu or with F2: the file, its
+  metadata and its annotations are renamed together; Process and the reference
+  overlay follow the new name.
+- **Pane sizes are remembered** between sessions: the side panels, the split between
+  the image and the captured images (separately for the reel and the lists), Browse
+  and Process.
+- **License.** DM Imaging is free software under the GNU GPL v3 or later. The license
+  and the licenses of the libraries it ships with (Qt, libusb) are installed with it
+  and listed in THIRD_PARTY_NOTICES.md; the About box says so.
+
+**Fixes**
+- Renaming an image to a name that differs only in upper/lower case (liver.tif ->
+  Liver.tif) was refused as "already exists" on Windows and macOS.
+
 ## 1.1.2 (2026-09-27)
 
 - **The camera adapter was wrong, and with it every nominal pixel size.** The

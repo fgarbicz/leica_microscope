@@ -170,7 +170,21 @@ Windows, Preview on macOS, the desktop's viewer on Linux) in its own window, whi
 the live image keeps running. Drag that window to a second screen to use it as a
 reference, for example to find the same area on a serial section stained with
 another marker. Right-click a thumbnail to open it in Process, show it in the file
-manager, or delete it.
+manager, rename it or delete it.
+
+**Rename** (right-click → *Rename…*, or F2) renames the image file on disk together
+with its metadata and annotations; only the name is typed, the extension stays.
+
+**Projects.** Images are listed in the order they were taken, oldest first. In the
+*List* and *Compact* layouts they are grouped under the name of the folder they were
+saved in, which works as the project name: saving into another folder starts a new
+project below. Double-click a project name (or right-click it) to rename it; this
+renames the folder on disk, and the save folder follows. *File → Open project
+folder…* (Ctrl+Shift+O) lists the images already in a folder and saves new captures
+there, so a project can be continued another day.
+
+The sizes of the panes (side panels, the image and the list of captured images,
+Browse and Process) are remembered when DM Imaging is closed.
 
 **Reference overlay** (same area on the next section): right-click a thumbnail →
 *Overlay on live image*, or select it and press **Ctrl+R** (Cmd+R on a Mac). The image is shown
@@ -296,6 +310,8 @@ using the marker type, nucleus size and sensitivity set in Process.
 |---|---|
 | F1 | user guide |
 | Ctrl+R | reference overlay on/off |
+| F2 | rename the selected captured image |
+| Ctrl+Shift+O | open a project folder |
 | F5 | live on/off |
 | F6 | freeze |
 | F7 | auto white balance |
