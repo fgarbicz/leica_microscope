@@ -1,6 +1,6 @@
 # DM Imaging release notes
 
-## Unreleased
+## 1.1.2 (2026-09-27)
 
 - **The camera adapter was wrong, and with it every nominal pixel size.** The
   calibration assumed a 0.7x C-mount adapter, a value nobody had measured. It is
@@ -60,6 +60,9 @@
   run to very long exposures and back). The default brightness target is 80 %.
 
 **Fixes**
+- A failed pixel-shift shot said only "Shot 2 failed:", and a lost live image
+  "Camera stopped delivering images ()". Both now say what happened: no frame
+  within the timeout, an implausible frame announcement, or a short read.
 - Browse froze, for many seconds, on a folder in OneDrive or iCloud or with a large
   .lif: the folder tree read the start of each file to name its type, and the
   preview and folder listing ran on the interface thread. All three now happen in

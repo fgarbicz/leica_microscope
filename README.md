@@ -7,6 +7,11 @@ daily imaging and includes its own native camera driver.
 Runs on **Windows, macOS and Linux** from one source tree, with the same
 features and the same interface on all three (see [Platforms](#platforms)).
 
+**Download:** the Windows installer is attached to each
+[release](https://github.com/fgarbicz/leica_microscope/releases/latest). macOS and
+Linux are built from source with one script ([Install](#install)).
+What changed: [RELEASE_NOTES.md](RELEASE_NOTES.md).
+
 ![workflow](docs/workflow.png)
 
 ## Features
@@ -15,13 +20,16 @@ features and the same interface on all three (see [Platforms](#platforms)).
 - Native USB 3.0 driver for the DMC6200 (Jenoptik GRYPHAX platform, Sony IMX174,
   1920 × 1200, 12-bit). No Leica software is needed, on any platform: WinUSB on
   Windows, libusb on macOS and Linux. See [docs/DMC6200_PROTOCOL.md](docs/DMC6200_PROTOCOL.md).
-- Live image at up to 50 fps at full resolution, with a smooth zoom/pan view, minimap and pixel readout.
+- Live image at about 58 fps at full resolution, with a smooth zoom/pan view, minimap and pixel readout.
 - Exposure from 26 µs to 60 s, analog gain up to 16×, and auto exposure (continuous or once).
 - Centre ROI mode for faster frame rates.
 - Pixel-shift capture:
   - 4-shot true colour, where every pixel records measured R, G and B
   - 16-shot 3840 × 2400
   - 36-shot 5760 × 3600
+- HDR capture: 2 or 3 exposures (1×, 4×, 16×) merged in the raw sensor data into
+  one 16-bit image, so dark DAB and haematoxylin are recorded with far less noise
+  while the background stays unclipped.
 - Automatic reconnection if the USB connection drops.
 - Video recording of the live image (Motion-JPEG AVI, optional scale bar).
 - Also supports any UVC camera (Media Foundation on Windows, AVFoundation on macOS,
@@ -45,6 +53,14 @@ features and the same interface on all three (see [Platforms](#platforms)).
 - Exposure, gain and white balance are remembered per objective.
 - Calibrated scale bar, grid and crosshair overlays.
 
+**Serial sections (the same area, stained for another marker)**
+- Double-click a captured image to open it in the system viewer (Photos, Preview or
+  the desktop's viewer), e.g. on a second screen, while the live image keeps running.
+- Reference overlay (Ctrl+R / Cmd+R): an earlier capture shown semi-transparently over
+  the live image, to find the same area on the next slide.
+- *Compare two images* aligns the two sections automatically, so synchronised zoom
+  and pan show the same cells in both.
+
 **Advanced acquisition**
 - Multifocus (extended depth of field) from a manual focus sweep, with drift compensation.
 - Live Image Builder: stitching while you move the stage by hand.
@@ -56,7 +72,7 @@ features and the same interface on all three (see [Platforms](#platforms)).
   - Undo/redo; annotations are stored next to the image.
   - CSV export of measurements.
 - IHC quantification: colour deconvolution (haematoxylin/DAB), DAB-positive area %, intensity classes and H-score, for the whole image or a region, with overlay.
-- Side-by-side comparison with synchronised zoom; batch export for presentations.
+- Side-by-side comparison with synchronised, aligned zoom and pan; batch export for presentations.
 - Non-destructive adjustments.
 - Export with burned-in scale bar and annotations; copy to clipboard; print.
 - Multifocus and stitching from existing image files.
@@ -114,7 +130,9 @@ builds look alike.
 
 ### Windows
 
-Run **`DMImaging-Setup-<version>.exe`** (from `dist\`) on the microscope PC and follow the
+Download **`DMImaging-Setup-<version>.exe`** from the
+[latest release](https://github.com/fgarbicz/leica_microscope/releases/latest) (or make it
+yourself, see [below](#making-the-windows-installer)), run it on the microscope PC and follow the
 wizard. Windows asks for administrator permission once. Setup:
 
 - installs DM Imaging for all users to `C:\Program Files\DM Imaging`, with Start-menu
@@ -243,4 +261,12 @@ dmctest          # command-line test of the native camera driver
 | `resources/` | icons, Windows version info, macOS `Info.plist`, Linux desktop entry |
 | `docs/` | user guide, deployment checklist, camera protocol and `.lif` format |
 
-See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for day-to-day use.
+## Documentation
+
+| Document | For |
+|---|---|
+| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | day-to-day use (also *Help → User guide*, F1, in the app) |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | installing, verifying and rolling back on the microscope PC; macOS and Linux |
+| [docs/DMC6200_PROTOCOL.md](docs/DMC6200_PROTOCOL.md) | the camera's USB protocol, as implemented by the native driver |
+| [docs/LIF_FORMAT.md](docs/LIF_FORMAT.md) | the Leica .lif file format |
+| [RELEASE_NOTES.md](RELEASE_NOTES.md) | what changed in each version |
