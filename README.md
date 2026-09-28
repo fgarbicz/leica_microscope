@@ -25,6 +25,13 @@ Details for each system are under [Install](#install); earlier versions are on t
 *A 20× 16-shot capture (3840 × 2400) from the DMC6200 in Process: a region measured
 and quantified, 59.8 % of the tissue DAB-positive (red), with the intensity classes on the right.*
 
+![DM Imaging acquiring from the Leica DMC6200: capture panel, live image with scale bar, the project's captured images, histogram and white balance](docs/screenshot-acquire.png)
+
+*Acquiring: the capture panel first, the live image with its scale bar, the project's
+captured images beside it, and the histogram and white balance on the right. (Composed
+from a real session: the live view shows a 20× DMC6200 image from the same project,
+rendered through the application's own image and histogram widgets.)*
+
 ## Features
 
 **Camera and driver**

@@ -45,11 +45,13 @@ protected:
 private:
     void updateChevron();
     void updateIcon();
+    void elideSummary();
 
     QToolButton *m_chevron;
     QLabel *m_iconLabel = nullptr;
     QLabel *m_title;
     QLabel *m_summary;
+    QString m_summaryText; // in full; the label shows as much as fits
     QWidget *m_content;
     QVBoxLayout *m_layout;
     QWidget *m_header;
