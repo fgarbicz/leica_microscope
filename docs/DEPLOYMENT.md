@@ -3,7 +3,9 @@
 The main part of this document is the **Windows** rollout (the microscope PC).
 macOS and Linux are covered at the end.
 
-Installer: `dist\DMImaging-Setup-<version>.exe` (about 40 MB), made with
+Installer: `DMImaging-Setup-<version>.exe` (about 40 MB), attached to each
+[GitHub release](https://github.com/fgarbicz/leica_microscope/releases/latest) with its
+SHA-256, or `dist\DMImaging-Setup-<version>.exe` when made locally with
 `tools\make_installer.ps1` (see the README). Below, `<version>` is its version, e.g. 1.1.2;
 *Help → About* shows the same version and the git build it came from.
 
