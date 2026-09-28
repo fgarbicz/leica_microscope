@@ -5,6 +5,7 @@
 // Everything else in the UI is identical on all three platforms.
 
 #include <QString>
+#include <QStringList>
 
 #include <functional>
 
@@ -54,6 +55,18 @@ QString trashName();
 // metadata, .annotations.json). The sidecars only go when the image did. False
 // when the image itself could not be moved.
 bool moveImageToTrash(const QString &path);
+
+// The files that belong to an image: its .json metadata and .annotations.json.
+QStringList sidecarsOf(const QString &imagePath);
+
+// Renames an image and its sidecars as one step: either all of them are
+// renamed, or none is (a failure half-way is rolled back), so an image never
+// ends up separated from its metadata or annotations. A change of case only is
+// allowed on case-insensitive file systems. The error is for the user.
+bool renameImage(const QString &from, const QString &to, QString *error);
+
+// Why `name` cannot be a file name on any of the three platforms, or empty.
+QString invalidFileName(const QString &name);
 
 // One line naming the platform and the USB backend, for the About box.
 QString platformDescription();

@@ -552,6 +552,14 @@ void ProcessPage::updateMeasurements()
     }
 }
 
+void ProcessPage::fileRenamed(const QString &from, const QString &to)
+{
+    if (m_path != from)
+        return;
+    m_path = to; // annotations are saved next to the new name from now on
+    updateInfo();
+}
+
 void ProcessPage::updateInfo()
 {
     QStringList lines;

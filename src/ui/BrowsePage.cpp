@@ -79,69 +79,8 @@ public:
 };
 
 // The files that belong to an image and travel with it.
-QStringList sidecarsOf(const QString &imagePath)
-{
-    return {imagePath + QStringLiteral(".json"), imagePath + QStringLiteral(".annotations.json")};
-}
-
-// Renames an image and its sidecars as one step: either all of them are
-// renamed, or none is (a failure half-way is rolled back), so an image never
-// ends up separated from its metadata or annotations. The error is for the user.
-bool renameImage(const QString &from, const QString &to, QString *error)
-{
-    const QStringList fromSide = sidecarsOf(from), toSide = sidecarsOf(to);
-    auto sameFile = [](const QString &a, const QString &b) {
-        // a change of case only, on a case-insensitive file system
-        return QFileInfo(a).canonicalFilePath() == QFileInfo(b).canonicalFilePath();
-    };
-    if (QFileInfo::exists(to) && !sameFile(from, to)) {
-        *error = BrowsePage::tr("%1 already exists.").arg(QFileInfo(to).fileName());
-        return false;
-    }
-    for (int i = 0; i < fromSide.size(); ++i)
-        if (QFileInfo::exists(fromSide[i]) && QFileInfo::exists(toSide[i]) && !sameFile(fromSide[i], toSide[i])) {
-            *error = BrowsePage::tr("%1 already exists.").arg(QFileInfo(toSide[i]).fileName());
-            return false;
-        }
-    if (!QFile::rename(from, to)) {
-        *error = BrowsePage::tr("%1 could not be renamed (in use, or no permission?).").arg(QFileInfo(from).fileName());
-        return false;
-    }
-    QList<int> done;
-    for (int i = 0; i < fromSide.size(); ++i) {
-        if (!QFileInfo::exists(fromSide[i]))
-            continue;
-        if (!QFile::rename(fromSide[i], toSide[i])) {
-            // put back what was already renamed
-            for (int j : done)
-                QFile::rename(toSide[j], fromSide[j]);
-            const bool restored = QFile::rename(to, from);
-            *error = restored ? BrowsePage::tr("%1 could not be renamed, so the image was left as it was.")
-                                    .arg(QFileInfo(fromSide[i]).fileName())
-                              : BrowsePage::tr("%1 could not be renamed, and the image could not be given its old "
-                                               "name back. It is now called %2.")
-                                    .arg(QFileInfo(fromSide[i]).fileName(), QFileInfo(to).fileName());
-            return false;
-        }
-        done << i;
-    }
-    return true;
-}
 
 // Why `name` cannot be a file name, or an empty string when it can.
-QString invalidFileName(const QString &name)
-{
-    static const QRegularExpression forbidden(QStringLiteral("[\\\\/:*?\"<>|]"));
-    if (name.trimmed().isEmpty())
-        return BrowsePage::tr("The name is empty.");
-    if (name == QLatin1String(".") || name == QLatin1String(".."))
-        return BrowsePage::tr("\"%1\" is not a file name.").arg(name);
-    if (name.contains(forbidden))
-        return BrowsePage::tr("A file name cannot contain any of  \\ / : * ? \" < > |");
-    if (name != name.trimmed())
-        return BrowsePage::tr("A file name should not begin or end with a space.");
-    return {};
-}
 } // namespace
 
 BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)

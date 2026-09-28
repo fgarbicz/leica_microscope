@@ -33,6 +33,8 @@ public:
     bool openFile(const QString &path);
     void openImage(const Image16 &img, const ImageMetadata &meta, const QString &path);
     QString currentPath() const { return m_path; }
+    // the open image was renamed on disk (its sidecars went with it)
+    void fileRenamed(const QString &from, const QString &to);
     bool hasImage() const { return !m_data.empty(); }
     ImageView *imageView() const { return m_view; }
     // Work that exists nowhere else: a result built here (multifocus / stitching

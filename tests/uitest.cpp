@@ -10,6 +10,7 @@
 #include "ui/GalleryWidget.h"
 #include "ui/Icons.h"
 #include "ui/ImageView.h"
+#include "ui/PlatformUi.h"
 #include "ui/Theme.h"
 #include "ui/WheelGuard.h"
 
@@ -27,6 +28,8 @@
 
 #include <QDir>
 #include <QSettings>
+#include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 
 #include <algorithm>
@@ -357,6 +360,43 @@ int main(int argc, char **argv)
             std::printf("  %dx: left centre %.3f,%.3f  right centre %.3f,%.3f\n", k, ra.x(), ra.y(), rb.x(), rb.y());
             CHECK(std::abs((ra.x() - rb.x()) * w - dx) < 2 && std::abs((ra.y() - rb.y()) * h - dy) < 2);
         }
+    }
+
+    std::printf("rename: the image and its sidecars move together, or nothing moves\n");
+    {
+        QTemporaryDir dir;
+        auto touch = [&](const QString &name) {
+            QFile f(dir.filePath(name));
+            return f.open(QIODevice::WriteOnly) && f.write("x") == 1;
+        };
+        auto exists = [&](const QString &name) { return QFileInfo::exists(dir.filePath(name)); };
+        CHECK(touch(QStringLiteral("a.tif")) && touch(QStringLiteral("a.tif.json"))
+              && touch(QStringLiteral("a.tif.annotations.json")) && touch(QStringLiteral("taken.tif")));
+        QString err;
+        const QString to = dir.filePath(QStringLiteral("Liver 40x DAB.tif"));
+        CHECK(renameImage(dir.filePath(QStringLiteral("a.tif")), to, &err));
+        CHECK(exists(QStringLiteral("Liver 40x DAB.tif")) && exists(QStringLiteral("Liver 40x DAB.tif.json"))
+              && exists(QStringLiteral("Liver 40x DAB.tif.annotations.json")));
+        CHECK(!exists(QStringLiteral("a.tif")) && !exists(QStringLiteral("a.tif.json"))
+              && !exists(QStringLiteral("a.tif.annotations.json")));
+        // a name that is taken: refused, nothing moves
+        err.clear();
+        CHECK(!renameImage(to, dir.filePath(QStringLiteral("taken.tif")), &err) && !err.isEmpty());
+        CHECK(exists(QStringLiteral("Liver 40x DAB.tif")) && exists(QStringLiteral("taken.tif"))
+              && exists(QStringLiteral("Liver 40x DAB.tif.json")));
+        // names a file system does not accept
+        CHECK(!invalidFileName(QStringLiteral("a/b")).isEmpty() && !invalidFileName(QStringLiteral("a:b")).isEmpty());
+        CHECK(!invalidFileName(QStringLiteral("   ")).isEmpty() && !invalidFileName(QStringLiteral("..")).isEmpty());
+        CHECK(invalidFileName(QStringLiteral("Liver 40x DAB")).isEmpty());
+        // only the case changes (the same file on Windows and macOS)
+        const QString upper = dir.filePath(QStringLiteral("LIVER 40x DAB.tif"));
+        const bool caseOk = renameImage(to, upper, &err);
+        if (!caseOk)
+            std::printf("  case-only rename: %s\n", qPrintable(err));
+        CHECK(caseOk);
+        const QStringList names = QDir(dir.path()).entryList(QDir::Files);
+        CHECK(names.contains(QStringLiteral("LIVER 40x DAB.tif")) && names.contains(QStringLiteral("LIVER 40x DAB.tif.json"))
+              && !names.contains(QStringLiteral("Liver 40x DAB.tif")));
     }
 
     std::printf(g_failed ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", g_failed);

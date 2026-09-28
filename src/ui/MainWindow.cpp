@@ -278,6 +278,12 @@ MainWindow::MainWindow()
             m_tabs->setCurrentIndex(2);
     });
     connect(m_gallery, &GalleryWidget::referenceRequested, this, &MainWindow::showReference);
+    connect(m_gallery, &GalleryWidget::renamed, this, [this](const QString &from, const QString &to) {
+        m_process->fileRenamed(from, to);
+        if (m_referencePath == from)
+            m_referencePath = to;
+        showMessage(tr("Renamed to %1").arg(QFileInfo(to).fileName()), 5000);
+    });
 
     const QSettings qs;
     restoreGeometry(qs.value(QStringLiteral("ui/geometry")).toByteArray());

@@ -13,6 +13,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFutureWatcher>
+#include <QInputDialog>
 #include <QKeyEvent>
 #include <QKeySequence>
 #include <QMenu>
@@ -160,6 +161,10 @@ void GalleryWidget::keyPressEvent(QKeyEvent *e)
         openInImageViewer(currentItem()->data(Qt::UserRole).toString(), this);
         return;
     }
+    if (e->key() == Qt::Key_F2 && currentItem()) {
+        renameItem(currentItem());
+        return;
+    }
     QListWidget::keyPressEvent(e);
 }
 
@@ -231,6 +236,8 @@ void GalleryWidget::contextMenuEvent(QContextMenuEvent *e)
     auto *open = m.addAction(tr("Open in Process"));
     auto *reveal = m.addAction(revealActionText());
     auto *copy = m.addAction(tr("Copy path"));
+    auto *rename = m.addAction(tr("Rename…"));
+    rename->setShortcut(QKeySequence(Qt::Key_F2)); // shown in the menu; handled in keyPressEvent
     m.addSeparator();
     auto *del = m.addAction(tr("Delete file…"));
     QAction *a = m.exec(e->globalPos());
@@ -244,6 +251,8 @@ void GalleryWidget::contextMenuEvent(QContextMenuEvent *e)
         revealInFileManager(path);
     else if (a == copy)
         QApplication::clipboard()->setText(QDir::toNativeSeparators(path));
+    else if (a == rename)
+        renameItem(it);
     else if (a == del) {
         if (QMessageBox::question(this, tr("Delete"), tr("Move %1 to the %2?").arg(QFileInfo(path).fileName(), trashName()))
             == QMessageBox::Yes) {
@@ -255,6 +264,37 @@ void GalleryWidget::contextMenuEvent(QContextMenuEvent *e)
                                          .arg(QDir::toNativeSeparators(path), trashName()));
         }
     }
+}
+
+void GalleryWidget::renameItem(QListWidgetItem *it)
+{
+    const QString path = it->data(Qt::UserRole).toString();
+    const QFileInfo fi(path);
+    QInputDialog dlg(this);
+    dlg.setWindowTitle(tr("Rename image"));
+    dlg.setLabelText(tr("New name for %1 (the file in %2 is renamed too):")
+                         .arg(fi.fileName(), QDir::toNativeSeparators(fi.absolutePath())));
+    dlg.setTextValue(fi.completeBaseName());
+    dlg.resize(px(460), dlg.sizeHint().height());
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+    const QString name = dlg.textValue().trimmed();
+    if (name == fi.completeBaseName())
+        return;
+    if (const QString why = invalidFileName(name); !why.isEmpty()) {
+        QMessageBox::warning(this, tr("Rename image"), why);
+        return;
+    }
+    const QString to = fi.dir().filePath(fi.suffix().isEmpty() ? name : name + QLatin1Char('.') + fi.suffix());
+    QString err;
+    if (!renameImage(path, to, &err)) {
+        QMessageBox::warning(this, tr("Rename image"), err);
+        return;
+    }
+    it->setData(Qt::UserRole, to);
+    it->setText(QFileInfo(to).fileName());
+    it->setToolTip(itemToolTip(to));
+    emit renamed(path, to);
 }
 
 } // namespace lm

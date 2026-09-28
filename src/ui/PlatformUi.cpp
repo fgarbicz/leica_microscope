@@ -358,10 +358,89 @@ bool moveImageToTrash(const QString &path)
     // an image that is still there would lose its metadata and annotations
     if (!QFile::moveToTrash(path))
         return false;
-    for (const QString &sidecar : {path + QStringLiteral(".json"), path + QStringLiteral(".annotations.json")})
+    for (const QString &sidecar : sidecarsOf(path))
         if (QFileInfo::exists(sidecar) && !QFile::moveToTrash(sidecar))
             qWarning("could not move %s to the trash", qPrintable(sidecar));
     return true;
+}
+
+QStringList sidecarsOf(const QString &imagePath)
+{
+    return {imagePath + QStringLiteral(".json"), imagePath + QStringLiteral(".annotations.json")};
+}
+
+bool renameImage(const QString &from, const QString &to, QString *error)
+{
+    const QStringList fromSide = sidecarsOf(from), toSide = sidecarsOf(to);
+    auto sameFile = [](const QString &a, const QString &b) {
+        // a change of case only, on a case-insensitive file system (Windows, macOS):
+        // b "exists" but the folder has no entry spelled exactly like it.
+        // (canonicalFilePath() keeps the case it is given on Windows, so it cannot tell.)
+        const QFileInfo fb(b);
+        return a.compare(b, Qt::CaseInsensitive) == 0
+               && !fb.dir().entryList(QDir::Files | QDir::Hidden).contains(fb.fileName(), Qt::CaseSensitive);
+    };
+    // QFile::rename refuses a target that exists, which a change of case only is on
+    // Windows and macOS: that goes through a temporary name
+    auto move = [&](const QString &a, const QString &b) {
+        if (QFile::rename(a, b))
+            return true;
+        if (a == b || !QFileInfo::exists(b) || !sameFile(a, b))
+            return false;
+        const QString tmp = a + QStringLiteral(".renaming");
+        if (!QFile::rename(a, tmp))
+            return false;
+        if (QFile::rename(tmp, b))
+            return true;
+        QFile::rename(tmp, a);
+        return false;
+    };
+    if (QFileInfo::exists(to) && !sameFile(from, to)) {
+        *error = QObject::tr("%1 already exists.").arg(QFileInfo(to).fileName());
+        return false;
+    }
+    for (int i = 0; i < fromSide.size(); ++i)
+        if (QFileInfo::exists(fromSide[i]) && QFileInfo::exists(toSide[i]) && !sameFile(fromSide[i], toSide[i])) {
+            *error = QObject::tr("%1 already exists.").arg(QFileInfo(toSide[i]).fileName());
+            return false;
+        }
+    if (!move(from, to)) {
+        *error = QObject::tr("%1 could not be renamed (in use, or no permission?).").arg(QFileInfo(from).fileName());
+        return false;
+    }
+    QList<int> done;
+    for (int i = 0; i < fromSide.size(); ++i) {
+        if (!QFileInfo::exists(fromSide[i]))
+            continue;
+        if (!move(fromSide[i], toSide[i])) {
+            // put back what was already renamed
+            for (int j : done)
+                move(toSide[j], fromSide[j]);
+            const bool restored = move(to, from);
+            *error = restored ? QObject::tr("%1 could not be renamed, so the image was left as it was.")
+                                    .arg(QFileInfo(fromSide[i]).fileName())
+                              : QObject::tr("%1 could not be renamed, and the image could not be given its old "
+                                               "name back. It is now called %2.")
+                                    .arg(QFileInfo(fromSide[i]).fileName(), QFileInfo(to).fileName());
+            return false;
+        }
+        done << i;
+    }
+    return true;
+}
+
+QString invalidFileName(const QString &name)
+{
+    static const QRegularExpression forbidden(QStringLiteral("[\\\\/:*?\"<>|]"));
+    if (name.trimmed().isEmpty())
+        return QObject::tr("The name is empty.");
+    if (name == QLatin1String(".") || name == QLatin1String(".."))
+        return QObject::tr("\"%1\" is not a file name.").arg(name);
+    if (name.contains(forbidden))
+        return QObject::tr("A file name cannot contain any of  \\ / : * ? \" < > |");
+    if (name != name.trimmed())
+        return QObject::tr("A file name should not begin or end with a space.");
+    return {};
 }
 
 QString trashName()

@@ -31,6 +31,7 @@ signals:
     void openRequested(const QString &path);
     void revealRequested(const QString &path);
     void referenceRequested(const QString &path); // blend over the live image for alignment
+    void renamed(const QString &from, const QString &to); // file (and sidecars) renamed on disk
 
 protected:
     void contextMenuEvent(QContextMenuEvent *e) override;
@@ -43,6 +44,7 @@ protected:
 
 private:
     void applyLayout();
+    void renameItem(QListWidgetItem *it); // asks for the new name (F2 / context menu)
     // the icon size thumbnails are made for (the larger of the two layouts)
     QSize thumbnailSize() const;
 
