@@ -2,7 +2,7 @@
  * dijharness: drives Jenoptik's DijSDK.dll (from Leica LAS) through a scripted
  * sequence of API calls so the USB traffic can be captured by usbspy.
  *
- * usage: dijharness <cmd> [<cmd> ...]
+ * usage: dijharness <cmd> [<cmd> ...]   (with DIJSDK_KEY set, see main)
  *   enum                 list all parameters with values
  *   seti:<id>:<val>      DijSDK_SetIntParameter
  *   setd:<id>:<val>      DijSDK_SetDoubleParameter
@@ -109,7 +109,15 @@ int main(int argc, char **argv)
     if (spy)
         g_mark = (Mark_t)GetProcAddress(spy, "usbspy_mark");
 
-    static const char keys[1][33] = {"REMOVED-SET-DIJSDK_KEY-AT-RUNTIME"};
+    /* The SDK's licence key is not part of this repository: it belongs to the
+       vendor. Set it in the environment (DIJSDK_KEY, 32 hex digits) before running. */
+    static char keys[1][33];
+    const char *key = getenv("DIJSDK_KEY");
+    if (!key || strlen(key) != 32) {
+        printf("set DIJSDK_KEY to the DijSDK licence key (32 hex digits)\n");
+        return 1;
+    }
+    memcpy(keys[0], key, 33);
     mark("DijSDK_Init");
     int r = F(Init_t, "DijSDK_Init")(keys, 1, NULL, NULL);
     printf("Init -> %d\n", r);
