@@ -207,9 +207,15 @@ if(APPLE)
         MACOSX_BUNDLE ON
         OUTPUT_NAME "DM Imaging"
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/resources/macos/Info.plist.in)
-    # the user guide ships inside the bundle (there is no driver to install on macOS)
-    target_sources(DMImaging PRIVATE ${CMAKE_SOURCE_DIR}/docs/USER_GUIDE.md)
-    set_source_files_properties(${CMAKE_SOURCE_DIR}/docs/USER_GUIDE.md PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    # the user guide ships inside the bundle (there is no driver to install on macOS),
+    # with the GPL of DM Imaging and the licenses of Qt and libusb bundled with it
+    set(DMI_BUNDLE_DOCS ${CMAKE_SOURCE_DIR}/docs/USER_GUIDE.md ${CMAKE_SOURCE_DIR}/LICENSE
+                        ${CMAKE_SOURCE_DIR}/THIRD_PARTY_NOTICES.md)
+    target_sources(DMImaging PRIVATE ${DMI_BUNDLE_DOCS})
+    set_source_files_properties(${DMI_BUNDLE_DOCS} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    file(GLOB DMI_BUNDLE_LICENSES ${CMAKE_SOURCE_DIR}/licenses/*.txt)
+    target_sources(DMImaging PRIVATE ${DMI_BUNDLE_LICENSES})
+    set_source_files_properties(${DMI_BUNDLE_LICENSES} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/licenses)
 endif()
 
 # commit of this build (About box, image metadata), refreshed on every configure
@@ -278,6 +284,7 @@ else()
             RENAME dmimaging.png)
     install(FILES driver/99-leica-dmc6200.rules DESTINATION ${CMAKE_INSTALL_DATADIR}/dmimaging/driver)
     install(PROGRAMS driver/install_udev_rule.sh DESTINATION ${CMAKE_INSTALL_DATADIR}/dmimaging/driver)
-    install(FILES docs/USER_GUIDE.md DESTINATION ${CMAKE_INSTALL_DOCDIR})
+    install(FILES docs/USER_GUIDE.md LICENSE THIRD_PARTY_NOTICES.md DESTINATION ${CMAKE_INSTALL_DOCDIR})
+    install(DIRECTORY licenses/ DESTINATION ${CMAKE_INSTALL_DOCDIR}/licenses FILES_MATCHING PATTERN "*.txt")
 endif()
 endif()

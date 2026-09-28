@@ -200,6 +200,9 @@ AboutDialog::AboutDialog(const QString &cameraInfo, QWidget *parent) : QDialog(p
                                "<p>Native driver for the Leica DMC6200 camera (Jenoptik GRYPHAX platform, "
                                "Sony IMX174 sensor): live imaging, pixel-shift capture, extended depth of field, "
                                "live stitching, calibrated measurements and annotation.</p>"
+                               "<p>Copyright &copy; 2026 Filip Garbicz. Free software under the GNU General Public "
+                               "License v3 or later, with no warranty. Uses Qt (LGPL v3) and libusb (LGPL 2.1); the "
+                               "license files are in the installation folder.</p>"
                                "<p><b>Camera:</b> %1<br>"
                                "<b>System:</b> %2<br>"
                                "<b>Qt:</b> %3</p>")

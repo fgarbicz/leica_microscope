@@ -261,6 +261,21 @@ dmctest          # command-line test of the native camera driver
 | `resources/` | icons, Windows version info, macOS `Info.plist`, Linux desktop entry |
 | `docs/` | user guide, deployment checklist, camera protocol and `.lif` format |
 
+## License
+
+Copyright (c) 2026 Filip Garbicz.
+
+DM Imaging is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later version.
+It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+PURPOSE. See [LICENSE](LICENSE) for the full text.
+
+It uses Qt (LGPL v3) and, on macOS and Linux, libusb (LGPL 2.1); see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The license files are installed
+with the application on every platform.
+
 ## Documentation
 
 | Document | For |

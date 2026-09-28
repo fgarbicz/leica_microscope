@@ -62,6 +62,12 @@ foreach ($c in @("$env:USERPROFILE\devtools\python\python.exe", (Get-Command pyt
         if ($LASTEXITCODE -eq 0) { $python = $c; break }
     }
 }
+# GPL text of DM Imaging, and the licenses of the libraries shipped with it (LGPL for Qt)
+Copy-Item (Join-Path $root 'LICENSE') (Join-Path $stage 'LICENSE.txt')
+Copy-Item (Join-Path $root 'THIRD_PARTY_NOTICES.md') $stage
+New-Item -ItemType Directory -Force (Join-Path $stage 'licenses') | Out-Null
+Copy-Item (Join-Path $root 'licenses\*.txt') (Join-Path $stage 'licenses')
+
 $guideHtml = Join-Path $stage 'docs\USER_GUIDE.html'
 if ($python) { & $python (Join-Path $root 'tools\make_guide.py') (Join-Path $root 'docs\USER_GUIDE.md') $guideHtml }
 if (-not (Test-Path $guideHtml)) {
