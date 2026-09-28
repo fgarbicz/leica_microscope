@@ -117,7 +117,8 @@ if [[ $deploy -eq 1 && "$build_app" == "ON" ]]; then
 fi
 
 if [[ $run_tests -eq 1 ]]; then
-    ctest --test-dir "$build" --output-on-failure
+    # the interface tests need no screen, so they also run over ssh and in containers
+    QT_QPA_PLATFORM=offscreen ctest --test-dir "$build" --output-on-failure
 fi
 
 echo "Build output: $bin"

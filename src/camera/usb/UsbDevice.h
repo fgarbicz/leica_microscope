@@ -98,6 +98,9 @@ private:
     std::vector<EndpointInfo> m_endpoints;
     unsigned long m_lastError = 0;
     int m_claimedInterface = -1; // libusb
+    // libusb: the transfers in flight, so abortPipe() can cancel them from
+    // another thread (UsbDeviceLibusb.cpp). Windows: unused.
+    void *m_inFlight = nullptr;
 };
 
 // Human readable text for a platform error code (Win32 error / libusb error).

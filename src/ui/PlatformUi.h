@@ -6,6 +6,8 @@
 
 #include <QString>
 
+#include <functional>
+
 class QWidget;
 
 namespace lm {
@@ -13,6 +15,16 @@ namespace lm {
 // Opens the system file manager with `path` selected. Falls back to opening the
 // containing folder where selecting is not supported.
 void revealInFileManager(const QString &path);
+
+// QFileDialog::getSaveFileName() that always returns a name with an extension.
+// Windows and macOS add the selected filter's extension to a name typed
+// without one; the Qt and GTK dialogs on Linux do not, and a file without an
+// extension is then written in the default format and opened by nothing. A
+// name that already ends in an extension of one of the filters is kept as it
+// is; otherwise the selected filter's first extension is appended (and a file
+// of that name is only replaced after asking). Empty when cancelled.
+QString getSaveFileName(QWidget *parent, const QString &caption, const QString &dir, const QString &filter,
+                        QString *selectedFilter = nullptr);
 
 // Opens an image in the desktop's default image viewer (Photos on Windows,
 // Preview on macOS, the desktop's viewer on Linux) in a window of its own, e.g.
@@ -26,15 +38,22 @@ bool cameraAccessSetupAvailable();
 // Menu/button text for that step, e.g. "Install / repair camera driver…".
 QString cameraAccessSetupLabel();
 
-// Runs it (elevated where needed) and returns a short status message for the
-// status bar, or an empty string when the user cancelled.
-QString setUpCameraAccess(QWidget *parent);
+// Runs it (elevated where needed). The installer runs in the background behind
+// a busy dialog, so this returns before it has finished; `done` is called at the
+// end with a short status message for the status bar, or an empty string when
+// the user cancelled.
+void setUpCameraAccess(QWidget *parent, std::function<void(const QString &)> done = {});
 
 // Menu wording that must match what the user's desktop calls things:
 // "Show in Explorer" / "Show in Finder" / "Show in file manager", and the
 // recycle bin / Trash.
 QString revealActionText();
 QString trashName();
+
+// Moves an image to the Trash / recycle bin together with its sidecars (.json
+// metadata, .annotations.json). The sidecars only go when the image did. False
+// when the image itself could not be moved.
+bool moveImageToTrash(const QString &path);
 
 // One line naming the platform and the USB backend, for the About box.
 QString platformDescription();

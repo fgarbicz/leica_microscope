@@ -37,6 +37,30 @@ int regFactor(int w) { return std::max(1, w / 512); }
 
 } // namespace
 
+void FocusStacker::setMode(Mode m)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_mode = m;
+}
+
+FocusStacker::Mode FocusStacker::mode() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_mode;
+}
+
+void FocusStacker::setAlign(bool on)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_align = on;
+}
+
+void FocusStacker::setWindow(int radius)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_window = radius;
+}
+
 void FocusStacker::reset()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -61,7 +85,8 @@ double FocusStacker::add(const Image16 &frameIn)
     const int f = regFactor(frameIn.width);
     if (m_align) {
         ImageF g = toGray(frameIn, f);
-        if (m_count == 0) {
+        // alignment switched on mid-stack: this frame becomes the reference
+        if (m_count == 0 || m_refGray.px.empty()) {
             m_refGray = std::move(g);
         } else {
             Shift s = phaseCorrelate(m_refGray, g);
@@ -83,13 +108,15 @@ double FocusStacker::add(const Image16 &frameIn)
         m_composite = frame;
         m_best = sharp;
         m_depth = ImageF(w, h, 0.f);
-        if (m_mode == Mode::Weighted) {
+        m_stackMode = m_mode;
+        if (m_stackMode == Mode::Weighted) {
             m_accum.assign(n * 3, 0.f);
             m_weights.assign(n, 0.f);
         }
     }
 
     std::vector<uint32_t> improvedPerRow(h, 0);
+    const Mode mode = m_stackMode;
     parallelRows(h, [&](int y0, int y1) {
         for (int y = y0; y < y1; ++y) {
             const uint16_t *src = frame.row(y);
@@ -103,13 +130,13 @@ double FocusStacker::add(const Image16 &frameIn)
                         ++improved;
                     m_best.px[i] = s;
                     m_depth.px[i] = float(index);
-                    if (m_mode == Mode::MaxContrast) {
+                    if (mode == Mode::MaxContrast) {
                         dst[x * 3] = src[x * 3];
                         dst[x * 3 + 1] = src[x * 3 + 1];
                         dst[x * 3 + 2] = src[x * 3 + 2];
                     }
                 }
-                if (m_mode == Mode::Weighted) {
+                if (mode == Mode::Weighted) {
                     const float wgt = s * s + 1e-3f;
                     m_accum[i * 3] += wgt * src[x * 3];
                     m_accum[i * 3 + 1] += wgt * src[x * 3 + 1];
@@ -136,7 +163,7 @@ int FocusStacker::frameCount() const
 Image16 FocusStacker::result() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    if (m_mode == Mode::MaxContrast || m_weights.empty())
+    if (m_stackMode == Mode::MaxContrast || m_weights.empty())
         return m_composite;
     Image16 out(m_composite.width, m_composite.height);
     const size_t n = size_t(out.width) * out.height;

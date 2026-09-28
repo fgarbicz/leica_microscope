@@ -303,8 +303,10 @@ void applyTheme(QApplication &app, const QString &name, int scalePercent)
     app.setPalette(pal);
 
     // Style sheet. Colours come from the palette above via %TOKEN%
-    // substitution, so there is one place to change them.
-    QString css = QStringLiteral(R"(
+    // substitution, so there is one place to change them. A narrow literal
+    // converted at run time, not QStringLiteral: that would make it a UTF-16
+    // literal of twice the size, past MSVC's 16 KB limit for one literal (C2026).
+    QString css = QString::fromUtf8(R"(
 /* ---------- frame ---------- */
 QMainWindow::separator { background: %BORDER%; width: 3px; height: 3px; }
 QMainWindow::separator:hover { background: %ACCENT%; }

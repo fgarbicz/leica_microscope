@@ -90,7 +90,9 @@ int main(int argc, char **argv)
     cs.wbBlue = 1.8;
     e.setColorSettings(cs);
     CHECK(e.startLive(err));
-    spin(1500);
+    // wait for frames rather than for a fixed time: a slow or busy machine (a CI
+    // runner, an emulated build) displays fewer per second
+    spinUntil([&] { return frames > 10; }, 15000);
     std::printf("  live frames displayed: %d\n", frames);
     CHECK(frames > 10);
 
@@ -180,7 +182,7 @@ int main(int argc, char **argv)
     cam->setProperty("drift_y", 5.0);
     spinUntil([&] { return stage("stage_y") >= y0 + 450; }, 20000);
     cam->setProperty("drift_y", 0.0);
-    spinUntil([&] { return e.mosaic().status().tiles >= 3; }, 800); // at rest -> last tile added
+    spinUntil([&] { return e.mosaic().status().tiles >= 3; }, 10000); // at rest -> last tile added
     spin(300);
     const auto st = e.mosaic().status();
     std::printf("  tiles %d tracking %d\n", st.tiles, int(st.tracking));

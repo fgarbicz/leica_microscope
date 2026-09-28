@@ -77,6 +77,10 @@ enum class Icon {
     Grid,
     Crosshair,
     ScaleBar,
+    // where the captured images go
+    LayoutReel,    // a row under the image
+    LayoutList,    // a list beside the image
+    LayoutCompact, // a dense list beside the image
 };
 
 // Themed icon (uses ThemeColors::subText, dimmed for the disabled state).

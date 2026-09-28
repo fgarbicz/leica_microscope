@@ -33,7 +33,8 @@ void HistogramWidget::setLevels(double black, double white)
 
 QRectF HistogramWidget::plotRect() const
 {
-    return QRectF(6, 6, width() - 12, height() - 26);
+    // room below the plot for the level handles and the statistics line
+    return QRectF(px(6), px(6), width() - px(12), height() - px(26));
 }
 
 void HistogramWidget::paintEvent(QPaintEvent *)
@@ -92,12 +93,12 @@ void HistogramWidget::paintEvent(QPaintEvent *)
     if (m_hist.clippedHigh > 0.001) {
         p.setPen(Qt::NoPen);
         p.setBrush(QColor(255, 60, 60));
-        p.drawEllipse(QPointF(r.right() - 6, r.top() + 6), 4, 4);
+        p.drawEllipse(QPointF(r.right() - px(6), r.top() + px(6)), px(4), px(4));
     }
     if (m_hist.clippedLow > 0.001) {
         p.setPen(Qt::NoPen);
         p.setBrush(QColor(60, 120, 255));
-        p.drawEllipse(QPointF(r.left() + 6, r.top() + 6), 4, 4);
+        p.drawEllipse(QPointF(r.left() + px(6), r.top() + px(6)), px(4), px(4));
     }
 
     // level handles
@@ -105,7 +106,8 @@ void HistogramWidget::paintEvent(QPaintEvent *)
         for (int k = 0; k < 2; ++k) {
             const double v = k == 0 ? m_black : m_white;
             const double x = r.left() + r.width() * v;
-            QPolygonF tri({QPointF(x, r.bottom() + 2), QPointF(x - 6, r.bottom() + 12), QPointF(x + 6, r.bottom() + 12)});
+            QPolygonF tri({QPointF(x, r.bottom() + px(2)), QPointF(x - px(6), r.bottom() + px(12)),
+                           QPointF(x + px(6), r.bottom() + px(12))});
             p.setPen(palette().color(QPalette::Text));
             p.setBrush(k == 0 ? QColor(20, 20, 20) : QColor(245, 245, 245));
             p.drawPolygon(tri);
@@ -116,14 +118,14 @@ void HistogramWidget::paintEvent(QPaintEvent *)
     // statistics
     p.setPen(palette().color(QPalette::PlaceholderText));
     QFont f = font();
-    f.setPixelSize(10);
+    f.setPixelSize(px(10));
     p.setFont(f);
     const QString s = tr("mean R %1  G %2  B %3   clip %4%")
                           .arg(m_hist.mean[0], 0, 'f', 0)
                           .arg(m_hist.mean[1], 0, 'f', 0)
                           .arg(m_hist.mean[2], 0, 'f', 0)
                           .arg(m_hist.clippedHigh * 100, 0, 'f', 2);
-    p.drawText(QRectF(r.left(), r.bottom() + 6, r.width(), 14), Qt::AlignRight | Qt::AlignVCenter, s);
+    p.drawText(QRectF(r.left(), r.bottom() + px(6), r.width(), px(14)), Qt::AlignRight | Qt::AlignVCenter, s);
 }
 
 void HistogramWidget::mousePressEvent(QMouseEvent *e)
@@ -142,7 +144,8 @@ void HistogramWidget::mouseMoveEvent(QMouseEvent *e)
     const QRectF r = plotRect();
     if (!m_drag) {
         const double x = e->position().x();
-        const bool near = std::abs(x - (r.left() + r.width() * m_black)) < 8 || std::abs(x - (r.left() + r.width() * m_white)) < 8;
+        const bool near = std::abs(x - (r.left() + r.width() * m_black)) < px(8)
+                          || std::abs(x - (r.left() + r.width() * m_white)) < px(8);
         setCursor(near && m_editable ? Qt::SizeHorCursor : Qt::ArrowCursor);
         return;
     }

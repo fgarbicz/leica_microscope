@@ -30,3 +30,6 @@ __pycache__/
 
 # installer output
 dist/
+
+# a tool log from setting up Qt on Windows
+aqtinstall.log

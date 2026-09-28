@@ -20,6 +20,8 @@ QJsonObject ImageMetadata::toJson() const
     o["numericalAperture"] = numericalAperture;
     o["adapterFactor"] = adapterFactor;
     o["umPerPixel"] = umPerPixel;
+    if (!pixelSizeSource.isEmpty())
+        o["pixelSizeSource"] = pixelSizeSource;
     o["exposureMs"] = exposureMs;
     o["gain"] = gain;
     o["bitDepth"] = bitDepth;
@@ -63,6 +65,7 @@ ImageMetadata ImageMetadata::fromJson(const QJsonObject &o)
     m.numericalAperture = o["numericalAperture"].toDouble();
     m.adapterFactor = o["adapterFactor"].toDouble(1.0);
     m.umPerPixel = o["umPerPixel"].toDouble();
+    m.pixelSizeSource = o["pixelSizeSource"].toString();
     m.exposureMs = o["exposureMs"].toDouble();
     m.gain = o["gain"].toDouble(1.0);
     m.bitDepth = o["bitDepth"].toInt(8);
@@ -113,7 +116,12 @@ QList<QPair<QString, QString>> ImageMetadata::describe() const
     add(QObject::tr("Acquired"), acquired.isValid() ? QLocale().toString(acquired, QLocale::LongFormat) : QString());
     add(QObject::tr("Image size"), width > 0 ? QStringLiteral("%1 × %2 px, %3-bit").arg(width).arg(height).arg(bitDepth) : QString());
     add(QObject::tr("Capture mode"), captureMode);
-    add(QObject::tr("Microscope"), microscope);
+    // An image from elsewhere (a LAS X .lif, a file from another program) has
+    // only this struct's defaults for how it was taken: showing them would
+    // state as facts a microscope, gain and white balance nobody recorded.
+    const bool ours = software.startsWith(QLatin1String("DM Imaging"));
+    if (ours)
+        add(QObject::tr("Microscope"), microscope);
     add(QObject::tr("Objective"), objective);
     add(QObject::tr("Pixel size"), umPerPixel > 0 ? QStringLiteral("%1 µm/px").arg(umPerPixel, 0, 'g', 5) : QString());
     add(QObject::tr("Field of view"),
@@ -129,13 +137,19 @@ QList<QPair<QString, QString>> ImageMetadata::describe() const
             parts << QString::number(e, 'g', 4);
         add(QObject::tr("HDR exposures"), parts.join(QStringLiteral(" + ")) + QStringLiteral(" ms"));
     }
-    add(QObject::tr("Gain"), QStringLiteral("%1×").arg(gain, 0, 'f', 2));
+    if (ours)
+        add(QObject::tr("Gain"), QStringLiteral("%1×").arg(gain, 0, 'f', 2));
     add(QObject::tr("Frames averaged"), averagedFrames > 1 ? QString::number(averagedFrames) : QString());
-    add(QObject::tr("White balance"), QStringLiteral("R %1  G %2  B %3").arg(wbRed, 0, 'f', 3).arg(wbGreen, 0, 'f', 3).arg(wbBlue, 0, 'f', 3));
-    add(QObject::tr("Shading correction"), shadingCorrected ? QObject::tr("applied") : QObject::tr("off"));
+    if (ours) {
+        add(QObject::tr("White balance"),
+            QStringLiteral("R %1  G %2  B %3").arg(wbRed, 0, 'f', 3).arg(wbGreen, 0, 'f', 3).arg(wbBlue, 0, 'f', 3));
+        add(QObject::tr("Shading correction"), shadingCorrected ? QObject::tr("applied") : QObject::tr("off"));
+    }
     if (!lightFilter.isEmpty())
         add(QObject::tr("Light filter"), lightFilter);
-    add(QObject::tr("Colour correction"), colorCorrection.isEmpty() ? QObject::tr("not recorded (older version)") : colorCorrection);
+    if (ours || !colorCorrection.isEmpty())
+        add(QObject::tr("Colour correction"),
+            colorCorrection.isEmpty() ? QObject::tr("not recorded (older version)") : colorCorrection);
     add(QObject::tr("Sample"), sample);
     add(QObject::tr("Operator"), operatorName);
     add(QObject::tr("Notes"), notes);

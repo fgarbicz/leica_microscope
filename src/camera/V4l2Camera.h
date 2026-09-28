@@ -76,12 +76,18 @@ private:
     int m_resIndex = 0;
     int m_outW = 0, m_outH = 0, m_outStride = 0;
     uint32_t m_fourcc = 0;
+    // m_streaming: frames are flowing (cleared by the capture thread when the
+    // stream dies). m_stop: asks the capture thread to finish. The thread, the
+    // buffers and STREAMON outlive a dead stream until stopStreaming() (or the
+    // next startStreaming()) joins and releases them.
     std::atomic<bool> m_streaming{false};
+    std::atomic<bool> m_stop{false};
     std::thread m_thread;
     Range m_expRange{1, 1000};
     Range m_gainRange{1, 1};
-    double m_exposure = 33;
-    double m_gain = 1;
+    // read on the capture thread for every frame
+    std::atomic<double> m_exposure{33};
+    std::atomic<double> m_gain{1};
     bool m_hasExposure = false, m_hasGain = false;
     double m_gainMinRaw = 0, m_gainMaxRaw = 0;
     std::string m_driver, m_card;

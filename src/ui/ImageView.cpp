@@ -8,6 +8,7 @@
 #include <QContextMenuEvent>
 #include <QElapsedTimer>
 #include <QKeyEvent>
+#include <QTimer>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QWheelEvent>
@@ -217,7 +218,12 @@ void ImageView::paintEvent(QPaintEvent *)
         QFont f = font();
         f.setPointSizeF(f.pointSizeF() * 1.3);
         p.setFont(f);
-        p.drawText(rect(), Qt::AlignCenter, m_placeholder.isEmpty() ? tr("No image") : m_placeholder);
+        // wrapped: a long message ("Waiting for the Leica camera…") must fit a
+        // narrow view, e.g. beside the captured images at a large interface size
+        const int m = px(16);
+        p.drawText(rect().adjusted(m, m, -m, -m), Qt::AlignCenter | Qt::TextWordWrap,
+                   m_placeholder.isEmpty() ? tr("No image") : m_placeholder);
+        drawBusy(p);
         return;
     }
     const QTransform T = imageToWidget();
@@ -325,16 +331,67 @@ void ImageView::paintEvent(QPaintEvent *)
         drawFocusBar(p);
     if (!m_fit && (ir.width() > width() + 2 || ir.height() > height() + 2))
         drawMinimap(p);
+    drawBusy(p);
+}
+
+void ImageView::setBusy(const QString &text)
+{
+    if (text == m_busyText)
+        return;
+    m_busyText = text;
+    if (!m_busyTimer) {
+        m_busyTimer = new QTimer(this);
+        m_busyTimer->setInterval(33);
+        connect(m_busyTimer, &QTimer::timeout, this, [this] {
+            m_busyAngle = (m_busyAngle + 12) % 360;
+            update();
+        });
+    }
+    if (m_busyText.isEmpty())
+        m_busyTimer->stop();
+    else if (!m_busyTimer->isActive())
+        m_busyTimer->start();
+    update();
+}
+
+void ImageView::drawBusy(QPainter &p)
+{
+    if (m_busyText.isEmpty())
+        return;
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing);
+    QFont f = font();
+    f.setBold(true);
+    p.setFont(f);
+    const QFontMetrics fm(f);
+    const int d = px(44);
+    const int w = std::max(px(150), fm.horizontalAdvance(m_busyText) + px(40));
+    const int h = d + fm.height() + px(44);
+    const QRect box(width() / 2 - w / 2, height() / 2 - h / 2, w, h);
+    p.setPen(Qt::NoPen);
+    p.setBrush(QColor(0, 0, 0, 190));
+    p.drawRoundedRect(box, px(12), px(12));
+    const QRectF ring(box.center().x() - d / 2.0, box.top() + px(16), d, d);
+    p.setBrush(Qt::NoBrush);
+    p.setPen(QPen(QColor(255, 255, 255, 60), px(5)));
+    p.drawEllipse(ring);
+    QPen arc(theme().accent, px(5));
+    arc.setCapStyle(Qt::RoundCap);
+    p.setPen(arc);
+    p.drawArc(ring, -m_busyAngle * 16, 100 * 16); // a quarter turn and a bit, turning clockwise
+    p.setPen(Qt::white);
+    p.drawText(QRect(box.left(), int(ring.bottom()) + px(8), w, fm.height() + px(8)), Qt::AlignCenter, m_busyText);
+    p.restore();
 }
 
 void ImageView::drawFocusBar(QPainter &p)
 {
-    const QRect r(width() - 230, 12, 210, 34);
+    const QRect r(width() - px(230), px(12), px(210), px(34));
     p.setPen(Qt::NoPen);
     p.setBrush(QColor(0, 0, 0, 170));
-    p.drawRoundedRect(r, 6, 6);
+    p.drawRoundedRect(r, px(6), px(6));
     const double frac = m_focusPeak > 0 ? std::clamp(m_focus / m_focusPeak, 0.0, 1.0) : 0.0;
-    const QRect bar(r.left() + 10, r.top() + 20, r.width() - 20, 7);
+    const QRect bar(r.left() + px(10), r.top() + px(20), r.width() - px(20), px(7));
     p.setBrush(QColor(60, 60, 60));
     p.drawRect(bar);
     const QColor c = frac > 0.95 ? QColor(80, 220, 120) : frac > 0.8 ? QColor(240, 200, 60) : QColor(230, 90, 60);
@@ -342,9 +399,9 @@ void ImageView::drawFocusBar(QPainter &p)
     p.drawRect(QRect(bar.left(), bar.top(), int(bar.width() * frac), bar.height()));
     p.setPen(Qt::white);
     QFont f = font();
-    f.setPixelSize(11);
+    f.setPixelSize(px(11));
     p.setFont(f);
-    p.drawText(QRect(r.left() + 10, r.top() + 3, r.width() - 20, 16), Qt::AlignLeft | Qt::AlignVCenter,
+    p.drawText(QRect(r.left() + px(10), r.top() + px(3), r.width() - px(20), px(16)), Qt::AlignLeft | Qt::AlignVCenter,
                tr("Focus %1  (peak %2)").arg(m_focus, 0, 'f', 1).arg(m_focusPeak, 0, 'f', 1));
 }
 

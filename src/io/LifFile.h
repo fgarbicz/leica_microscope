@@ -49,9 +49,15 @@ struct LifEntry {
     QString blockId;
     qint64 dataOffset = 0;
     qint64 dataBytes = 0;
-    // Byte offset of each channel within a pixel, from the XML. Leica writes
-    // BGR, so this is {2,1,0} for red, green, blue.
-    int redOffset = 2, greenOffset = 1, blueOffset = 0;
+    // Byte offset of each channel's first sample from the start of the image
+    // (the XML's BytesInc). A camera image interleaves them: Leica writes BGR,
+    // so {2,1,0} for red, green, blue at 8 bits, {4,2,0} at 16. A fluorescence
+    // image stores each channel as a plane of its own, so the offsets are whole
+    // planes apart. Sample (x, y) of a channel is at
+    // offset + y * rowStride + x * bytesPerPixel either way.
+    qint64 redOffset = 2, greenOffset = 1, blueOffset = 0;
+    qint64 firstOffset = 0; // the first channel listed: what a mono image shows
+    bool colour = false;    // red, green and blue channels are all present
     int bytesPerPixel = 3;
     qint64 rowStride = 0;
 };

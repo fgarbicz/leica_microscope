@@ -21,14 +21,20 @@
 #include <QProcess>
 #include <QtConcurrent/QtConcurrentRun>
 
+#include <algorithm>
+
 namespace lm {
 
-QImage makeThumbnail(const QImage &src, int size)
+QImage makeThumbnail(const QImage &src, QSize logical, qreal devicePixelRatio)
 {
-    if (src.isNull())
+    if (src.isNull() || logical.isEmpty())
         return {};
-    QImage t = src.scaled(size, size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    return t.convertToFormat(QImage::Format_RGB888);
+    const qreal dpr = std::max<qreal>(1.0, devicePixelRatio);
+    // never enlarged: a small image stays at its own size
+    const QSize target = (QSizeF(logical) * dpr).toSize().boundedTo(src.size());
+    QImage t = src.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation).convertToFormat(QImage::Format_RGB888);
+    t.setDevicePixelRatio(dpr);
+    return t;
 }
 
 QKeySequence referenceOverlayShortcut()
@@ -71,7 +77,20 @@ GalleryWidget::GalleryWidget(QWidget *parent) : QListWidget(parent)
 
 void GalleryWidget::applyLayout()
 {
-    if (m_vertical) {
+    if (m_vertical && m_compact) {
+        // many images at once: a small thumbnail and the name on one line
+        setViewMode(QListView::ListMode);
+        setFlow(QListView::TopToBottom);
+        setWrapping(false);
+        setIconSize(QSize(px(40), px(27)));
+        setGridSize(QSize());
+        setUniformItemSizes(true);
+        setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+        setWordWrap(false);
+        setMinimumHeight(0);
+        setMinimumWidth(px(160));
+        setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+    } else if (m_vertical) {
         // one image per row: thumbnail on the left, file name beside it
         setViewMode(QListView::ListMode);
         setFlow(QListView::TopToBottom);
@@ -107,6 +126,14 @@ void GalleryWidget::setVertical(bool on)
     applyLayout();
 }
 
+void GalleryWidget::setCompact(bool on)
+{
+    if (on == m_compact)
+        return;
+    m_compact = on;
+    applyLayout();
+}
+
 void GalleryWidget::changeEvent(QEvent *e)
 {
     QListWidget::changeEvent(e);
@@ -136,13 +163,22 @@ void GalleryWidget::keyPressEvent(QKeyEvent *e)
     QListWidget::keyPressEvent(e);
 }
 
+QSize GalleryWidget::thumbnailSize() const
+{
+    // large enough for either layout, so switching between them stays sharp
+    return QSize(px(150), px(100)).expandedTo(QSize(px(112), px(76)));
+}
+
 void GalleryWidget::addImage(const QString &path, const QImage &src)
 {
-    auto *it = new QListWidgetItem(thumbnailIcon(makeThumbnail(src)), QFileInfo(path).fileName());
+    auto *it = new QListWidgetItem(thumbnailIcon(makeThumbnail(src, thumbnailSize(), devicePixelRatioF())),
+                                   QFileInfo(path).fileName());
     it->setData(Qt::UserRole, path);
     it->setToolTip(itemToolTip(path));
     insertItem(0, it);
-    setCurrentItem(it);
+    // the new image alone: without the explicit command an extended selection
+    // kept every earlier capture selected too
+    setCurrentItem(it, QItemSelectionModel::ClearAndSelect);
     scrollToItem(it);
 }
 
@@ -160,11 +196,13 @@ void GalleryWidget::addFile(const QString &path)
                 item(i)->setIcon(thumbnailIcon(img));
         watcher->deleteLater();
     });
-    watcher->setFuture(QtConcurrent::run([path] {
+    const QSize thumb = thumbnailSize();
+    const qreal dpr = devicePixelRatioF();
+    watcher->setFuture(QtConcurrent::run([path, thumb, dpr] {
         LoadedImage li;
         if (!loadImage(path, li))
             return QImage();
-        return makeThumbnail(toQImage8(li.data));
+        return makeThumbnail(toQImage8(li.data), thumb, dpr);
     }));
 }
 
@@ -209,11 +247,12 @@ void GalleryWidget::contextMenuEvent(QContextMenuEvent *e)
     else if (a == del) {
         if (QMessageBox::question(this, tr("Delete"), tr("Move %1 to the %2?").arg(QFileInfo(path).fileName(), trashName()))
             == QMessageBox::Yes) {
-            if (QFile::moveToTrash(path)) {
-                QFile::moveToTrash(path + QStringLiteral(".json"));
-                QFile::moveToTrash(path + QStringLiteral(".annotations.json"));
+            if (moveImageToTrash(path))
                 delete it;
-            }
+            else
+                QMessageBox::warning(this, tr("Delete"),
+                                     tr("%1 could not be moved to the %2 (in use, or no permission?).")
+                                         .arg(QDir::toNativeSeparators(path), trashName()));
         }
     }
 }

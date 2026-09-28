@@ -37,9 +37,18 @@ bool saveImage(const QString &path, const Image16 &img, const ImageMetadata &met
                QString *error = nullptr);
 bool saveImage(const QString &path, const QImage &img, const ImageMetadata &meta, const SaveOptions &opt,
                QString *error = nullptr);
+// Where a file has both, the .json sidecar's pixel size (umPerPixel,
+// adapterFactor, pixelSizeSource) wins over the metadata embedded in the file:
+// the sidecar is what can be corrected without re-encoding (JPEG). loadImage and
+// loadMetadata follow the same rule.
 bool loadImage(const QString &path, LoadedImage &out, QString *error = nullptr);
-// Reads only the metadata (fast; used by the browser).
+// Reads only the metadata (fast; used by the browser): the sidecar when there is
+// one, otherwise the metadata embedded in the file.
 bool loadMetadata(const QString &path, ImageMetadata &out);
+// The two sources on their own (false when the file has no such metadata).
+bool loadSidecarMetadata(const QString &path, ImageMetadata &out);
+bool loadEmbeddedMetadata(const QString &path, ImageMetadata &out);
+QString sidecarPath(const QString &imagePath);
 
 // Conversions
 QImage toQImage8(const Image16 &img);

@@ -11,6 +11,10 @@ namespace {
 
 // Piezo positions (x, y) per shot, as used by the vendor software for this
 // camera. Row-major, x varies fastest. Nominal step: 1, 1/2, 1/3 pixel.
+// Every grid starts at the rest position (46, 46), which is also where live
+// view and single captures are taken: the piezo calibration is relative to it,
+// so it is not adjustable (a different rest position would shift the live image
+// against the first shot of every pixel shift capture).
 const std::vector<std::pair<int, int>> kShots1 = {{46, 46}};
 const std::vector<std::pair<int, int>> kShots4 = {{46, 46}, {87, 46}, {39, 86}, {87, 85}};
 const std::vector<std::pair<int, int>> kShots16 = {
@@ -63,6 +67,13 @@ bool Dmc6200Camera::open(std::string &error)
     std::vector<uint8_t> r;
     m_proto.command(dmc::Cmd::MaxPacket, {}, 4, &r);
     m_serial = m_proto.serial();
+    // The serial the camera reports is the same on every platform, unlike the one
+    // taken from the USB device path (on Windows possibly an instance ID made up
+    // by the system), so it is what info() - and image metadata - carry.
+    if (!m_serial.empty() && m_serial != m_info.serial) {
+        m_info.serial = m_serial;
+        m_info.name = "Leica DMC6200 (" + m_serial + ")";
+    }
     m_sensor = m_proto.sensorName();
     // After a USB-only reset (the camera kept its power) the sensor board is not
     // initialised: the firmware then reports a synthetic placeholder sensor and
@@ -126,10 +137,11 @@ void Dmc6200Camera::stopAndFlush()
     m_proto.resetStreamPipes();
 }
 
-bool Dmc6200Camera::configure(std::string &error)
+bool Dmc6200Camera::configure(std::string &error, bool fullFrame)
 {
     stopAndFlush();
-    const Roi &roi = m_rois[size_t(std::clamp(m_resIndex, 0, int(m_rois.size()) - 1))];
+    const int roiIndex = fullFrame ? 0 : m_resIndex.load();
+    const Roi &roi = m_rois[size_t(std::clamp(roiIndex, 0, int(m_rois.size()) - 1))];
     const uint32_t expUs = uint32_t(std::clamp(m_exposureMs.load() * 1000.0, 26.0, 60e6));
     const uint32_t gainFx = uint32_t(std::lround(std::clamp(m_gain.load(), 1.0, 16.0) * 65536.0));
     if (!m_proto.writeRegisters({{dmc::Reg::RoiX, uint32_t(roi.x)},
@@ -137,7 +149,8 @@ bool Dmc6200Camera::configure(std::string &error)
                                  {dmc::Reg::RoiWidth, uint32_t(roi.w)},
                                  {dmc::Reg::RoiHeight, uint32_t(roi.h)}})) {
         // fall back to full frame if the ROI is rejected
-        m_resIndex = 0;
+        if (!fullFrame)
+            m_resIndex = 0;
         m_proto.writeRegisters({{dmc::Reg::RoiX, 0}, {dmc::Reg::RoiY, 0},
                                 {dmc::Reg::RoiWidth, uint32_t(m_sensorW)}, {dmc::Reg::RoiHeight, uint32_t(m_sensorH)}});
     }
@@ -293,14 +306,19 @@ bool Dmc6200Camera::setResolutionIndex(int index)
 {
     if (index < 0 || index >= int(m_rois.size()))
         return false;
-    std::lock_guard<std::mutex> lock(m_ctrlMutex);
-    const bool was = m_streaming;
-    stopLiveLocked();
-    m_resIndex = index;
+    bool was, ok;
     std::string err;
-    bool ok = configure(err);
-    if (was && ok)
-        ok = startLiveLocked(err);
+    {
+        std::lock_guard<std::mutex> lock(m_ctrlMutex);
+        was = m_streaming;
+        stopLiveLocked();
+        m_resIndex = index;
+        ok = configure(err);
+        if (was && ok)
+            ok = startLiveLocked(err);
+    }
+    if (was && !ok) // the live image stopped and did not come back: say so (not under the lock)
+        emitError("Live view could not be restarted after the format change (" + err + ").");
     return ok;
 }
 
@@ -321,26 +339,6 @@ bool Dmc6200Camera::setGain(double g)
     if (!m_proto.isOpen())
         return true;
     return m_proto.writeRegister(dmc::Reg::Reg1013, uint32_t(std::lround(g * 65536.0)));
-}
-
-std::vector<CameraProperty> Dmc6200Camera::properties() const
-{
-    using T = CameraProperty::Type;
-    return {
-        {"piezo_x", "Sensor shift rest X", T::Number, 0, 255, 1, double(m_piezoRestX)},
-        {"piezo_y", "Sensor shift rest Y", T::Number, 0, 255, 1, double(m_piezoRestY)},
-    };
-}
-
-bool Dmc6200Camera::setProperty(const std::string &key, double value)
-{
-    if (key == "piezo_x")
-        m_piezoRestX = std::clamp(int(value), 0, 255);
-    else if (key == "piezo_y")
-        m_piezoRestY = std::clamp(int(value), 0, 255);
-    else
-        return false;
-    return true;
 }
 
 std::array<double, 9> Dmc6200Camera::colorMatrix() const
@@ -391,9 +389,7 @@ bool Dmc6200Camera::captureShots(int modeIndex, std::vector<RawFramePtr> &shots,
     const bool was = m_streaming;
     stopLiveLocked();
     // pixel shift always uses the full sensor
-    const int oldRes = m_resIndex;
-    m_resIndex = 0;
-    bool ok = configure(error) && m_proto.uploadSequence(sequenceFor(*table));
+    bool ok = configure(error, true) && m_proto.uploadSequence(sequenceFor(*table));
     if (!ok && error.empty())
         error = m_proto.lastError();
     if (ok && !m_proto.acquisition(dmc::Acq::Sequence)) {
@@ -415,7 +411,6 @@ bool Dmc6200Camera::captureShots(int modeIndex, std::vector<RawFramePtr> &shots,
                 progress(int(i + 1), int(table->size()));
         }
     }
-    m_resIndex = oldRes;
     std::string err2;
     if (!configure(err2)) { // restores the single-shot sequence
         emitError("Camera could not be reconfigured after the capture (" + err2
@@ -432,7 +427,8 @@ std::vector<std::pair<std::string, std::string>> Dmc6200Camera::details() const
             {"Serial", m_serial},
             {"Sensor", m_sensor + " " + std::to_string(m_sensorW) + " x " + std::to_string(m_sensorH) + ", "
                            + std::to_string(m_adcBits) + "-bit, 5.86 um pixels"},
-            {"Interface", "USB 3.0 (native WinUSB driver)"}};
+            // the driver really in use: WinUSB on Windows, libusb on macOS and Linux
+            {"Interface", "USB 3.0 (native driver, " + usb::Device::backendDescription() + ")"}};
 }
 
 } // namespace lm

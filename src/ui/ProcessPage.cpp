@@ -15,6 +15,7 @@
 #include "ui/CollapsibleSection.h"
 #include "ui/ImageView.h"
 #include "ui/Overlays.h"
+#include "ui/PlatformUi.h"
 #include "ui/SliderSpin.h"
 
 #include <QActionGroup>
@@ -131,15 +132,12 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     tb->addSeparator();
     m_colorBtn = new QToolButton(this);
     m_colorBtn->setToolTip(tr("Annotation colour"));
-    auto setBtn = [this](const QColor &c) {
-        m_colorBtn->setStyleSheet(QStringLiteral("QToolButton{background:%1; min-width:22px; border-radius:3px;}").arg(c.name()));
-    };
-    setBtn(m_layer->color());
-    connect(m_colorBtn, &QToolButton::clicked, this, [this, setBtn] {
+    updateColorButton();
+    connect(m_colorBtn, &QToolButton::clicked, this, [this] {
         const QColor c = QColorDialog::getColor(m_layer->color(), this, tr("Annotation colour"));
         if (c.isValid()) {
             m_layer->setColor(c);
-            setBtn(c);
+            updateColorButton();
         }
     });
     tb->addWidget(m_colorBtn);
@@ -366,7 +364,8 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     split->setStretchFactor(1, 1);
     root->addWidget(split, 1);
 
-    connect(resetAdj, &QPushButton::clicked, this, [=] {
+    // the two arrays are copied into the lambda: they are locals of this constructor
+    connect(resetAdj, &QPushButton::clicked, this, [this, sliders, defs] {
         for (int i = 0; i < 5; ++i)
             sliders[i]->setValue(defs[i]);
         m_adjust = ColorSettings();
@@ -375,14 +374,16 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
     });
     connect(cal, &QPushButton::clicked, this, &ProcessPage::setCalibration);
     connect(csv, &QPushButton::clicked, this, [this] {
-        const QString f = QFileDialog::getSaveFileName(this, tr("Export measurements"),
-                                                       QFileInfo(m_path).dir().filePath(QFileInfo(m_path).completeBaseName() + QStringLiteral("_measurements.csv")),
-                                                       tr("CSV (*.csv)"));
+        const QString f = lm::getSaveFileName(this, tr("Export measurements"),
+                                              QFileInfo(m_path).dir().filePath(QFileInfo(m_path).completeBaseName() + QStringLiteral("_measurements.csv")),
+                                              tr("CSV (*.csv)"));
         if (f.isEmpty())
             return;
         QSaveFile out(f);
-        if (!out.open(QIODevice::WriteOnly))
+        if (!out.open(QIODevice::WriteOnly)) {
+            QMessageBox::warning(this, tr("Export measurements"), tr("Cannot write %1:\n%2").arg(f, out.errorString()));
             return;
+        }
         QTextStream ts(&out);
         ts << "image,index,type,length_um,area_um2,angle_deg,count,width_um,height_um,summary\n";
         int i = 1;
@@ -399,10 +400,24 @@ ProcessPage::ProcessPage(QWidget *parent) : QWidget(parent)
         if (row >= 0 && row < m_layer->annotations().size())
             m_layer->select(m_layer->annotations()[row].id);
     });
+    // The layer reports every mouse move while a shape is drawn or dragged;
+    // writing the sidecar each time would hit the disk (often a network share)
+    // dozens of times a second. Save shortly after the changes stop instead,
+    // and at once when the image is replaced or the application closes.
+    m_annotationSave.setSingleShot(true);
+    m_annotationSave.setInterval(300);
+    connect(&m_annotationSave, &QTimer::timeout, this, [this] {
+        if (m_layer->isInteracting())
+            m_annotationSave.start(); // still drawing or dragging: wait for the release
+        else
+            saveAnnotations();
+    });
     connect(m_layer, &AnnotationLayer::changed, this, [this] {
         updateMeasurements();
         m_dirtyAnnotations = true;
-        saveAnnotations();
+        if (m_path.isEmpty())
+            m_unsavedEdits = true; // no sidecar to keep them in
+        m_annotationSave.start();
     });
     connect(m_layer, &AnnotationLayer::textRequested, this, [this](const QPointF &pos) {
         bool ok = false;
@@ -444,11 +459,14 @@ bool ProcessPage::maybeDiscardUnsaved()
         return true;
     const auto answer = QMessageBox::question(
         this, tr("Unsaved image"),
-        tr("The image in Process (a multifocus or stitched result) has not been saved. Save it first?"),
+        m_unsavedResult
+            ? tr("The image in Process (a multifocus or stitched result) has not been saved. Save it first?")
+            : tr("The annotations or pixel size added to the image in Process have not been saved. "
+                 "The image has no file of its own, so they are only kept by saving it. Save it first?"),
         QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
     if (answer == QMessageBox::Save) {
         saveAs();
-        return !m_path.isEmpty(); // saved (Save as sets the path) or cancelled
+        return !hasUnsavedResult(); // saved, or the save dialog was cancelled
     }
     return answer == QMessageBox::Discard;
 }
@@ -478,9 +496,18 @@ bool ProcessPage::openFile(const QString &path)
     return true;
 }
 
+void ProcessPage::flushAnnotations()
+{
+    m_annotationSave.stop();
+    saveAnnotations();
+}
+
 void ProcessPage::openImage(const Image16 &img, const ImageMetadata &meta, const QString &path)
 {
+    flushAnnotations(); // they belong to the image being replaced
     m_data = img;
+    m_unsavedResult = false;
+    m_unsavedEdits = false;
     m_meta = meta;
     m_path = path;
     m_ihcMask = QImage();
@@ -541,6 +568,7 @@ void ProcessPage::updateInfo()
 
 void ProcessPage::saveAnnotations()
 {
+    m_annotationSave.stop();
     if (!m_path.isEmpty() && m_dirtyAnnotations) {
         // on failure (read-only or network folder) keep them marked unsaved and say so
         if (m_layer->saveSidecar(m_path))
@@ -740,6 +768,9 @@ void ProcessPage::setCalibration()
     if (!ok)
         return;
     m_meta.umPerPixel = v;
+    m_meta.pixelSizeSource = QString::fromLatin1(kPixelSizeManual);
+    if (m_path.isEmpty())
+        m_unsavedEdits = true;
     m_view->setUmPerPixel(v);
     updateMeasurements();
     updateInfo();
@@ -755,9 +786,10 @@ void ProcessPage::saveAs()
                               : QFileInfo(m_path).dir().filePath(QFileInfo(m_path).completeBaseName() + QStringLiteral("_edited.")
                                                                   + QFileInfo(m_path).suffix());
     QString selected;
-    const QString f = QFileDialog::getSaveFileName(this, tr("Save image"), start,
-                                                   tr("TIFF 16-bit (*.tif);;TIFF 8-bit (*.tif);;PNG (*.png);;JPEG (*.jpg);;BMP (*.bmp)"),
-                                                   &selected);
+    const QString f = lm::getSaveFileName(this, tr("Save image"), start,
+                                          tr("TIFF 16-bit (*.tif *.tiff);;TIFF 8-bit (*.tif *.tiff);;PNG (*.png);;"
+                                             "JPEG (*.jpg *.jpeg);;BMP (*.bmp)"),
+                                          &selected);
     if (f.isEmpty())
         return;
     SaveOptions opt;
@@ -772,6 +804,8 @@ void ProcessPage::saveAs()
         return;
     }
     m_path = f;
+    m_unsavedResult = false;
+    m_unsavedEdits = false;
     m_dirtyAnnotations = true;
     saveAnnotations();
     updateInfo();
@@ -785,8 +819,8 @@ void ProcessPage::exportWithOverlays()
         return;
     const QString base = m_path.isEmpty() ? AppSettings::instance().capture.folder + QStringLiteral("/export")
                                           : QFileInfo(m_path).dir().filePath(QFileInfo(m_path).completeBaseName() + QStringLiteral("_annotated"));
-    const QString f = QFileDialog::getSaveFileName(this, tr("Export with annotations and scale bar"), base + QStringLiteral(".png"),
-                                                   tr("PNG (*.png);;TIFF (*.tif);;JPEG (*.jpg)"));
+    const QString f = lm::getSaveFileName(this, tr("Export with annotations and scale bar"), base + QStringLiteral(".png"),
+                                          tr("PNG (*.png);;TIFF (*.tif *.tiff);;JPEG (*.jpg *.jpeg)"));
     if (f.isEmpty())
         return;
     const QImage img = m_view->renderWithOverlays(AppSettings::instance().overlays.scaleBar, true);
@@ -866,6 +900,7 @@ void ProcessPage::multifocusFromFiles()
     meta.captureMode = tr("multifocus (%1 images)").arg(files.size());
     meta.acquired = QDateTime::currentDateTime();
     openImage(st.result(), meta, QString());
+    m_unsavedResult = true; // built here, exists nowhere else yet
 }
 
 void ProcessPage::stitchFromFiles()
@@ -904,12 +939,32 @@ void ProcessPage::stitchFromFiles()
     meta.captureMode = tr("stitched (%1 images)").arg(files.size());
     meta.acquired = QDateTime::currentDateTime();
     openImage(mb.result(), meta, QString());
+    m_unsavedResult = true;
 }
 
 void ProcessPage::resizeEvent(QResizeEvent *e)
 {
     QWidget::resizeEvent(e);
     fitToolBar(m_toolbar, width());
+}
+
+void ProcessPage::changeEvent(QEvent *e)
+{
+    QWidget::changeEvent(e);
+    // a widget style sheet is not scaled with the application's: redo it in
+    // the new interface size
+    if (e->type() == QEvent::StyleChange && m_colorBtn && m_layer)
+        updateColorButton();
+}
+
+void ProcessPage::updateColorButton()
+{
+    const QString css = QStringLiteral("QToolButton{background:%1; min-width:%2px; border-radius:%3px;}")
+                            .arg(m_layer->color().name())
+                            .arg(px(22))
+                            .arg(px(3));
+    if (m_colorBtn->styleSheet() != css) // setting it triggers another StyleChange
+        m_colorBtn->setStyleSheet(css);
 }
 
 } // namespace lm

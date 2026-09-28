@@ -183,6 +183,14 @@ const char *iconBody(Icon which)
         return R"(<circle cx="12" cy="12" r="7.5"/><path d="M12 2.5v5M12 16.5v5M2.5 12h5M16.5 12h5"/>)";
     case Icon::ScaleBar:
         return R"(<path d="M3.5 13.5h17"/><path d="M3.5 10.5v6M20.5 10.5v6"/><path d="M8 17.5h8"/>)";
+    case Icon::LayoutReel:
+        return R"(<rect x="3.5" y="3.5" width="17" height="10.5" rx="1.4"/><rect x="3.5" y="16.5" width="4.6" height="4" rx="0.8"/>
+                  <rect x="9.7" y="16.5" width="4.6" height="4" rx="0.8"/><rect x="15.9" y="16.5" width="4.6" height="4" rx="0.8"/>)";
+    case Icon::LayoutList:
+        return R"(<rect x="3.5" y="3.5" width="11" height="17" rx="1.4"/><path d="M17.5 5.5h3M17.5 10h3M17.5 14.5h3M17.5 19h3"/>)";
+    case Icon::LayoutCompact:
+        return R"(<rect x="3.5" y="3.5" width="11" height="17" rx="1.4"/>
+                  <path d="M17.5 4.5h3M17.5 7.5h3M17.5 10.5h3M17.5 13.5h3M17.5 16.5h3M17.5 19.5h3"/>)";
     }
     return "";
 }

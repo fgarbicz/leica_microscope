@@ -16,6 +16,7 @@
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QLocale>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QStyle>
@@ -23,7 +24,39 @@
 #include <QUuid>
 #include <QVBoxLayout>
 
+#include <cmath>
+
 namespace lm {
+
+namespace {
+// Numbers in the objectives table may be typed with a decimal comma ("0,293" on a
+// Polish or German PC); QString::toDouble() only reads "0.293" and returned 0 for
+// the rest, which silently wiped a calibration. A locale-aware reader is no better:
+// it takes "0.293" as 293 in German (a thousands group). Nobody types a thousands
+// separator into a pixel size or a magnification, so a single '.' or ',' is the
+// decimal mark whatever the locale, and anything else is refused.
+bool parseNumber(const QString &text, double &out)
+{
+    QString t = text.trimmed();
+    if (t.count(QLatin1Char('.')) + t.count(QLatin1Char(',')) > 1)
+        return false;
+    t.replace(QLatin1Char(','), QLatin1Char('.'));
+    QLocale c = QLocale::c();
+    c.setNumberOptions(QLocale::RejectGroupSeparator);
+    bool ok = false;
+    const double v = c.toDouble(t, &ok);
+    if (ok && std::isfinite(v))
+        out = v;
+    return ok && std::isfinite(v);
+}
+
+QString formatNumber(double v)
+{
+    QLocale loc;
+    loc.setNumberOptions(QLocale::OmitGroupSeparator);
+    return loc.toString(v, 'g', 6);
+}
+} // namespace
 
 MicroscopePanel::MicroscopePanel(MicroscopeConfig *config, QWidget *parent) : QWidget(parent), m_cfg(config)
 {
@@ -177,10 +210,10 @@ void MicroscopePanel::editObjectives()
         auto *nameItem = new QTableWidgetItem(o.name);
         nameItem->setData(Qt::UserRole, original); // index into the original list (-1 = new)
         table->setItem(r, 0, nameItem);
-        table->setItem(r, 1, new QTableWidgetItem(QString::number(o.magnification)));
-        table->setItem(r, 2, new QTableWidgetItem(QString::number(o.na)));
+        table->setItem(r, 1, new QTableWidgetItem(formatNumber(o.magnification)));
+        table->setItem(r, 2, new QTableWidgetItem(formatNumber(o.na)));
         table->setItem(r, 3, new QTableWidgetItem(o.immersion));
-        table->setItem(r, 4, new QTableWidgetItem(QString::number(o.calibratedUmPerPixel, 'g', 6)));
+        table->setItem(r, 4, new QTableWidgetItem(formatNumber(o.calibratedUmPerPixel)));
     };
     for (int r = 0; r < m_cfg->objectives.size(); ++r)
         fill(r, m_cfg->objectives[r], r);
@@ -225,29 +258,68 @@ void MicroscopePanel::editObjectives()
         for (int r = 0; r < d.size(); ++r)
             fill(r, d[r], -1);
     });
-    connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    auto cellText = [&](int r, int c) { return table->item(r, c) ? table->item(r, c)->text() : QString(); };
+    // OK only closes the dialog when every number can be read: an unreadable
+    // calibration must stay what it was, not become 0 (= nominal) unnoticed.
+    connect(bb, &QDialogButtonBox::accepted, &dlg, [&] {
+        for (int r = 0; r < table->rowCount(); ++r) {
+            for (int c : {1, 2, 4}) {
+                double v = 0;
+                const bool ok = parseNumber(cellText(r, c), v);
+                const bool inRange = ok && (c == 1 ? v > 0 : v >= 0);
+                if (!inRange) {
+                    table->setCurrentCell(r, c);
+                    QMessageBox::warning(&dlg, tr("Objectives"),
+                                         tr("\"%1\" in row %2 is not a valid %3. Enter a number such as %4.")
+                                             .arg(cellText(r, c))
+                                             .arg(r + 1)
+                                             .arg(table->horizontalHeaderItem(c)->text())
+                                             .arg(formatNumber(c == 4 ? 0.293 : 0.25)));
+                    return;
+                }
+            }
+        }
+        dlg.accept();
+    });
     connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
     if (dlg.exec() != QDialog::Accepted)
         return;
     QList<Objective> list;
+    int current = -1;
     for (int r = 0; r < table->rowCount(); ++r) {
-        auto txt = [&](int c) { return table->item(r, c) ? table->item(r, c)->text() : QString(); };
         const int original = table->item(r, 0) ? table->item(r, 0)->data(Qt::UserRole).toInt() : -1;
+        const bool known = original >= 0 && original < m_cfg->objectives.size();
         // start from the original objective so shading, id and stored camera settings survive
-        Objective o = original >= 0 && original < m_cfg->objectives.size() ? m_cfg->objectives[original] : Objective();
-        o.name = txt(0);
-        o.magnification = std::max(0.1, txt(1).toDouble());
-        o.na = txt(2).toDouble();
-        o.immersion = txt(3);
-        o.calibratedUmPerPixel = std::max(0.0, txt(4).toDouble());
+        Objective o = known ? m_cfg->objectives[original] : Objective();
+        o.name = cellText(r, 0);
+        // validated on OK; an unreadable value keeps what the objective had
+        parseNumber(cellText(r, 1), o.magnification);
+        o.magnification = std::max(0.1, o.magnification);
+        parseNumber(cellText(r, 2), o.na);
+        o.immersion = cellText(r, 3);
+        parseNumber(cellText(r, 4), o.calibratedUmPerPixel);
+        o.calibratedUmPerPixel = std::max(0.0, o.calibratedUmPerPixel);
         if (o.id.isEmpty())
             o.id = QUuid::createUuid().toString(QUuid::Id128).left(12);
+        // the objective in use stays in use, wherever its row now is; keeping
+        // the index instead would silently switch to its neighbour after a
+        // row above it was removed
+        if (known && original == m_cfg->current)
+            current = int(list.size());
         list.append(o);
     }
     if (list.isEmpty())
         list = MicroscopeConfig::defaultObjectives();
+    if (current < 0) {
+        // the objective in use was removed or the defaults restored: take the
+        // one with the same magnification if there is one
+        const double mag = m_cfg->currentObjective().magnification;
+        for (int i = 0; i < list.size() && current < 0; ++i)
+            if (std::abs(list[i].magnification - mag) < 1e-6)
+                current = i;
+    }
     m_cfg->objectives = list;
-    m_cfg->current = std::clamp(m_cfg->current, 0, int(list.size()) - 1);
+    m_cfg->current = std::clamp(current, 0, int(list.size()) - 1);
     m_cfg->save();
     refresh();
     emit calibrationChanged();

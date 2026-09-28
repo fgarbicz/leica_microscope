@@ -82,6 +82,8 @@ public:
     bool mouseDoubleClick(const QPointF &p, double scale);
     bool keyPress(QKeyEvent *e);
     bool isDrawing() const { return m_drawing; }
+    // a shape is being drawn or dragged: the mouse button is still down
+    bool isInteracting() const { return m_drawing || m_dragId != 0; }
 
     // Paint with `toScreen` mapping image -> device coordinates.
     void paint(QPainter &p, const QTransform &toScreen, double scale, bool forExport = false) const;

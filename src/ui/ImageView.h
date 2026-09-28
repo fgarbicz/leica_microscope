@@ -9,6 +9,8 @@
 #include <QPointer>
 #include <QWidget>
 
+class QTimer;
+
 namespace lm {
 
 
@@ -45,6 +47,9 @@ public:
     void setFocusValue(double v, double peak) { m_focus = v; m_focusPeak = peak; update(); }
     void setShowOverlays(bool on) { m_showOverlays = on; update(); }
     void setPlaceholder(const QString &t) { m_placeholder = t; update(); }
+    // A turning wheel with a caption in the middle of the view ("Saving…"),
+    // over the image; an empty text removes it.
+    void setBusy(const QString &text);
     // semi-transparent analysis overlay (ARGB32, same size as the image); null = none
     void setOverlayImage(const QImage &img) { m_overlayImage = img; update(); }
     // earlier image blended over the whole field (stretched to the current image),
@@ -102,6 +107,7 @@ private:
     void clampCenter();
     void drawMinimap(QPainter &p);
     void drawFocusBar(QPainter &p);
+    void drawBusy(QPainter &p);
 
     QImage m_image;
     double m_umPerPixel = 0.0;
@@ -122,6 +128,9 @@ private:
     QColor m_highlightColor;
     QVector<QRectF> m_tiles;
     QString m_statusText, m_placeholder;
+    QString m_busyText;
+    QTimer *m_busyTimer = nullptr;
+    int m_busyAngle = 0;
     QImage m_overlayImage;
     QImage m_reference; // drawn scaled onto the image, like the image itself
     double m_referenceOpacity = 0.5;

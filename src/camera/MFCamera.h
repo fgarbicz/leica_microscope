@@ -5,6 +5,7 @@
 #include "camera/Camera.h"
 
 #include <atomic>
+#include <mutex>
 #include <thread>
 
 struct IMFSourceReader;
@@ -54,6 +55,9 @@ public:
 private:
     void run();
     bool configureType(int index, std::string &error);
+    // reads size and row pitch of the reader's current output type (m_mutex held)
+    bool readOutputFormat();
+    void releaseReader(); // m_mutex held
     void queryControls();
 
     CameraInfo m_info;
@@ -63,12 +67,14 @@ private:
     std::vector<int> m_typeIndex; // native media type index per resolution
     int m_resIndex = 0;
     int m_outW = 0, m_outH = 0;
+    int m_outStride = 0; // bytes per row of the output buffers; negative = bottom-up
     std::atomic<bool> m_streaming{false};
     std::thread m_thread;
     Range m_expRange{1, 1000};
     Range m_gainRange{1, 1};
-    double m_exposure = 33;
-    double m_gain = 1;
+    // read on the capture thread for every frame
+    std::atomic<double> m_exposure{33};
+    std::atomic<double> m_gain{1};
     bool m_hasExposure = false, m_hasGain = false;
     long m_gainMinRaw = 0, m_gainMaxRaw = 0;
     mutable std::mutex m_mutex;

@@ -285,13 +285,17 @@ bool V4l2Camera::setResolutionIndex(int index)
     if (index == m_resIndex)
         return true;
     const bool wasStreaming = m_streaming;
-    if (wasStreaming)
-        stopStreaming();
+    // also when the stream died by itself: VIDIOC_S_FMT fails while buffers are allocated
+    stopStreaming();
     std::string error;
     const bool ok = configure(index, error);
     if (wasStreaming) {
-        std::string err2;
-        startStreaming(err2);
+        // a refused format leaves the previous one set; either way live must resume
+        std::string startError;
+        if (!startStreaming(startError)) {
+            emitError("The live image did not restart after the format change: " + startError);
+            return false;
+        }
     }
     return ok;
 }
@@ -359,6 +363,8 @@ bool V4l2Camera::startStreaming(std::string &error)
         error = "camera not open";
         return false;
     }
+    // a stream that died on its own still holds its thread and buffers
+    stopStreaming();
     if (!mapBuffers(error))
         return false;
     v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
@@ -367,11 +373,13 @@ bool V4l2Camera::startStreaming(std::string &error)
         unmapBuffers();
         return false;
     }
+    m_stop = false;
     m_streaming = true;
     m_thread = std::thread([this] {
         try {
             run();
         } catch (...) {
+            m_streaming = false;
             emitCurrentException("video capture failed: ");
         }
     });
@@ -380,11 +388,14 @@ bool V4l2Camera::startStreaming(std::string &error)
 
 void V4l2Camera::stopStreaming()
 {
-    if (!m_streaming)
-        return;
-    m_streaming = false;
+    // Always join and release, also when the capture thread already gave up (a
+    // joinable std::thread must never be assigned to or destroyed).
+    m_stop = true;
     if (m_thread.joinable())
         m_thread.join();
+    m_streaming = false;
+    if (m_buffers.empty())
+        return;
     if (m_fd >= 0) {
         v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         xioctl(m_fd, VIDIOC_STREAMOFF, &type);
@@ -399,7 +410,13 @@ void V4l2Camera::run()
     int errors = 0;
     bool supported = false;
     const PixelFormat format = mapFourcc(m_fourcc, supported);
-    while (m_streaming) {
+    // the stream is dead: tell the application (it closes the camera and
+    // reconnects) and stop; stopStreaming() releases the rest
+    auto fail = [this](const std::string &message) {
+        m_streaming = false;
+        emitError(message);
+    };
+    while (!m_stop) {
         fd_set fds;
         FD_ZERO(&fds);
         FD_SET(m_fd, &fds);
@@ -411,9 +428,8 @@ void V4l2Camera::run()
             if (errno == EINTR)
                 continue;
             if (++errors > 20) {
-                emitError("Video stream error: " + errnoText());
-                m_streaming = false;
-                break;
+                fail("Video stream error: " + errnoText());
+                return;
             }
             continue;
         }
@@ -423,10 +439,10 @@ void V4l2Camera::run()
         if (xioctl(m_fd, VIDIOC_DQBUF, &b) != 0) {
             if (errno == EAGAIN)
                 continue;
-            if (++errors > 20) {
-                emitError("Video capture stopped: " + errnoText() + " (device disconnected?)");
-                m_streaming = false;
-                break;
+            // ENODEV: unplugged, retrying cannot help
+            if (errno == ENODEV || ++errors > 20) {
+                fail("Video capture stopped: " + errnoText() + " (device disconnected?)");
+                return;
             }
             continue;
         }

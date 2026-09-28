@@ -94,7 +94,7 @@ CameraPanel::CameraPanel(AcquisitionEngine *engine, QWidget *parent) : QWidget(p
     acq->contentLayout()->addLayout(aeRow);
     m_aeTarget = new SliderSpin(tr("Auto exposure brightness"), 30, 98, 0, this, false, tr(" %"));
     m_aeTarget->setValue(S.aeTarget * 100);
-    m_aeTarget->setDefault(85);
+    m_aeTarget->setDefault(80);
     m_aeTarget->setToolTip(tr("Brightness of the brightest 1% of the image (bright field background)"));
     acq->contentLayout()->addWidget(m_aeTarget);
     m_gain = new SliderSpin(tr("Gain"), 1.0, 16.0, 2, this, true, tr(" ×"));
@@ -135,9 +135,15 @@ CameraPanel::CameraPanel(AcquisitionEngine *engine, QWidget *parent) : QWidget(p
     connect(m_live, &QPushButton::toggled, this, &CameraPanel::onLiveToggled);
     connect(m_freeze, &QPushButton::toggled, this, [this](bool on) { m_engine->setFrozen(on); });
     connect(m_resolution, &QComboBox::activated, this, [this](int i) {
-        if (m_engine->camera() && m_engine->camera()->setResolutionIndex(i)) {
+        Camera *cam = m_engine->camera();
+        if (!cam)
+            return;
+        if (cam->setResolutionIndex(i)) {
             AppSettings::instance().resolutionIndex = i;
             emit message(tr("Image format: %1").arg(m_resolution->currentText()), 3000);
+        } else {
+            // refused (the camera reports why): show the format that is really in use
+            m_resolution->setCurrentIndex(cam->resolutionIndex());
         }
     });
     connect(m_exposure, &SliderSpin::valueChanged, this, [this](double v) {
@@ -155,8 +161,7 @@ CameraPanel::CameraPanel(AcquisitionEngine *engine, QWidget *parent) : QWidget(p
         auto &S2 = AppSettings::instance();
         S2.autoExposure = ae.enabled;
         S2.aeTarget = ae.target;
-        m_exposure->setEnabledControls(m_canSetExposure && !ae.enabled);
-        m_gain->setEnabledControls(m_canSetGain && !(ae.enabled && ae.allowGain));
+        updateEnabled();
         updateSummaries();
     };
     connect(m_autoExposure, &QCheckBox::toggled, this, updateAe);
@@ -255,17 +260,36 @@ void CameraPanel::refreshCameras()
         m_cameraCombo->addItem(QString::fromStdString(c.name), QString::fromStdString(c.id));
     int idx = m_cameraCombo->findData(current);
     if (idx < 0)
-        idx = m_cameraCombo->findData(AppSettings::instance().lastCameraId);
+        idx = savedCameraIndex();
     if (idx >= 0)
         m_cameraCombo->setCurrentIndex(idx);
     updateEnabled();
+}
+
+int CameraPanel::savedCameraIndex() const
+{
+    const QString saved = AppSettings::instance().lastCameraId;
+    const int idx = m_cameraCombo->findData(saved);
+    if (idx >= 0 || saved.isEmpty())
+        return idx;
+    // The id format can change between versions (1.1.1 on macOS and Linux used
+    // the bus address, which also changes on a replug); the serial after '#'
+    // still names the same camera.
+    const int hash = saved.lastIndexOf(QLatin1Char('#'));
+    if (hash < 0)
+        return -1;
+    const std::string serial = saved.mid(hash + 1).toStdString();
+    for (size_t i = 0; i < m_cameras.size(); ++i)
+        if (!serial.empty() && m_cameras[i].serial == serial)
+            return int(i);
+    return -1;
 }
 
 void CameraPanel::autoConnect()
 {
     refreshCameras();
     // prefer the last used camera, otherwise the first real (non simulator) camera
-    int idx = m_cameraCombo->findData(AppSettings::instance().lastCameraId);
+    int idx = savedCameraIndex();
     if (idx < 0)
         for (int i = 0; i < int(m_cameras.size()); ++i)
             if (m_cameras[size_t(i)].backend == "Leica USB") {
@@ -351,10 +375,6 @@ void CameraPanel::syncFromCamera()
     m_gain->setToolTip(m_canSetGain ? tr("Amplifies the signal but also the noise. Prefer a longer exposure; keep the "
                                          "gain at 1×.")
                                     : noManual);
-    m_autoExposure->setEnabled(m_canSetExposure);
-    m_aeOnce->setEnabled(m_canSetExposure);
-    m_aeTarget->setEnabledControls(m_canSetExposure && m_autoExposure->isChecked());
-    m_aeGain->setEnabled(m_canSetExposure && m_canSetGain);
     QStringList lines;
     for (const auto &[k, v] : cam->details())
         lines << QStringLiteral("%1: %2").arg(QString::fromStdString(k), QString::fromStdString(v));
@@ -454,9 +474,19 @@ void CameraPanel::setBusy(bool busy)
 void CameraPanel::updateEnabled()
 {
     const bool open = m_engine->camera() != nullptr;
-    // exposure / gain must not change while a capture collects its frames or shots
-    for (QWidget *w : std::initializer_list<QWidget *>{m_exposure, m_gain, m_autoExposure, m_aeTarget, m_aeOnce, m_aeGain})
+    // Exposure / gain must not change while a capture collects its frames or
+    // shots, and a control the camera cannot act on is never offered (the
+    // capabilities are read in syncFromCamera()). This is the one place that
+    // decides, so a busy -> idle change cannot re-enable what the camera lacks.
+    const bool autoOn = m_autoExposure->isChecked();
+    for (SliderSpin *w : {m_exposure, m_gain, m_aeTarget})
         w->setEnabled(!m_busy);
+    m_exposure->setEnabledControls(m_canSetExposure && !autoOn);
+    m_gain->setEnabledControls(m_canSetGain && !(autoOn && m_aeGain->isChecked()));
+    m_aeTarget->setEnabledControls(m_canSetExposure && autoOn);
+    m_autoExposure->setEnabled(!m_busy && m_canSetExposure);
+    m_aeOnce->setEnabled(!m_busy && m_canSetExposure);
+    m_aeGain->setEnabled(!m_busy && m_canSetExposure && m_canSetGain);
     if (m_busy) {
         m_connect->setEnabled(false);
         m_live->setEnabled(false);

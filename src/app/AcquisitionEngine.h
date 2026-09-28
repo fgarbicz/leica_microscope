@@ -46,7 +46,7 @@ enum class LiveMode { Normal, Multifocus, Mosaic };
 
 struct AutoExposureSettings {
     bool enabled = false;
-    double target = 0.85;      // target 99th percentile level (linear 0..1): bright field background just below white
+    double target = 0.80;      // target 99th percentile level (linear 0..1): bright field background just below white
     double maxExposureMs = 500;
     bool allowGain = false;
 };
@@ -194,6 +194,7 @@ private:
     std::atomic<bool> m_shadingEnabled{false};
     AutoExposureSettings m_ae;
     std::atomic<bool> m_aeOnce{false};
+    int m_aePendingUp = 0; // processing thread: frames in a row that asked for a large increase
     std::atomic<bool> m_showClipping{false};
     std::atomic<bool> m_liveDab{false};
     StainOptions m_liveDabOptions;        // guarded by m_mutex
@@ -227,8 +228,14 @@ private:
     std::atomic<bool> m_uiBusy{false};
     std::chrono::steady_clock::time_point m_uiBusySince{};
     std::atomic<uint64_t> m_received{0}, m_dropped{0};
-    double m_fps = 0, m_displayFps = 0;
-    std::chrono::steady_clock::time_point m_lastFrameTime{}, m_lastDisplayTime{};
+    // written on the camera thread, read by the processing thread (m_lastFrameTime
+    // is also reset by startLive on the GUI thread)
+    std::atomic<double> m_fps{0};
+    double m_frameInterval = 0; // camera thread only: averaged seconds between frames
+    std::atomic<std::chrono::steady_clock::time_point> m_lastFrameTime{};
+    double m_displayFps = 0;      // processing thread only
+    double m_displayInterval = 0; // processing thread only
+    std::chrono::steady_clock::time_point m_lastDisplayTime{};
     std::chrono::steady_clock::time_point m_lastAeChange{};
 };
 

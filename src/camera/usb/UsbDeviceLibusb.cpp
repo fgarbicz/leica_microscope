@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <condition_variable>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -81,19 +80,47 @@ uint8_t endpointType(uint8_t attributes)
     }
 }
 
-// A device address is not stable across a replug, so the path carries the
-// serial number as well and open() prefers a serial match.
-std::string makePath(libusb_device *dev, const std::string &serial)
+// "usb:VVVV:PPPP#serial", or "usb:VVVV:PPPP@bus.address" for a device whose
+// serial could not be read. A device address is not stable across a replug, so
+// the serial is used whenever there is one: the path then names the same camera
+// after it was replugged. VID/PID let open() skip every other device without
+// opening it.
+std::string makePath(libusb_device *dev, uint16_t vid, uint16_t pid, const std::string &serial)
 {
     char buf[64];
-    std::snprintf(buf, sizeof(buf), "usb:%03d.%03d", libusb_get_bus_number(dev), libusb_get_device_address(dev));
-    return serial.empty() ? std::string(buf) : std::string(buf) + "#" + serial;
+    if (!serial.empty()) {
+        std::snprintf(buf, sizeof(buf), "usb:%04x:%04x#", vid, pid);
+        return buf + serial;
+    }
+    std::snprintf(buf, sizeof(buf), "usb:%04x:%04x@%03d.%03d", vid, pid, libusb_get_bus_number(dev),
+                  libusb_get_device_address(dev));
+    return buf;
 }
 
-std::string serialFromPath(const std::string &path)
+struct ParsedPath {
+    bool hasIds = false;
+    unsigned vid = 0, pid = 0;
+    int bus = -1, address = -1;
+    std::string serial;
+};
+
+ParsedPath parsePath(const std::string &path)
 {
+    ParsedPath p;
     const auto h = path.find('#');
-    return h == std::string::npos ? std::string() : path.substr(h + 1);
+    if (h != std::string::npos)
+        p.serial = path.substr(h + 1);
+    int consumed = 0;
+    if (std::sscanf(path.c_str(), "usb:%4x:%4x%n", &p.vid, &p.pid, &consumed) == 2 && consumed == 13) {
+        p.hasIds = true;
+        const auto at = path.find('@');
+        if (at != std::string::npos && h == std::string::npos)
+            std::sscanf(path.c_str() + at, "@%d.%d", &p.bus, &p.address);
+    } else {
+        // the earlier format, "usb:bus.address[#serial]"
+        std::sscanf(path.c_str(), "usb:%d.%d", &p.bus, &p.address);
+    }
+    return p;
 }
 
 std::string readStringDescriptor(libusb_device_handle *h, uint8_t index)
@@ -105,33 +132,45 @@ std::string readStringDescriptor(libusb_device_handle *h, uint8_t index)
     return n > 0 ? std::string(reinterpret_cast<char *>(buf), size_t(n)) : std::string();
 }
 
-// One completed asynchronous transfer.
+// One asynchronous transfer and its completion.
 struct TransferState {
     std::mutex mutex;
-    std::condition_variable cv;
     bool done = false;
     int status = LIBUSB_TRANSFER_ERROR;
     int actual = 0;
+    // set and read under InFlight::mutex
+    libusb_transfer *transfer = nullptr;
+    uint8_t address = 0;
+    bool aborted = false;
+};
+
+// The transfers of one device between submission and completion. The mutex is
+// held across libusb_submit_transfer / libusb_cancel_transfer, so a transfer is
+// never cancelled before it was submitted or after it was freed, and an abort
+// cannot fall between the two. libusb never calls back into this code while
+// holding its own locks, so there is no lock-order problem.
+struct InFlight {
+    std::mutex mutex;
+    std::vector<TransferState *> list;
 };
 
 void LIBUSB_CALL transferCallback(libusb_transfer *t)
 {
     auto *st = static_cast<TransferState *>(t->user_data);
-    {
-        std::lock_guard<std::mutex> l(st->mutex);
-        st->status = t->status;
-        st->actual = t->actual_length;
-        st->done = true;
-    }
-    st->cv.notify_all();
+    // Nothing of *st may be touched once the mutex is released: the waiter
+    // (polling `done` on another thread) then returns and destroys it.
+    std::lock_guard<std::mutex> l(st->mutex);
+    st->status = t->status;
+    st->actual = t->actual_length;
+    st->done = true;
 }
 
 // Submits one bulk/interrupt transfer and waits up to timeoutMs for it.
 // Returns the byte count, or -1 with `err` set to a libusb error code.
-long long syncTransfer(libusb_device_handle *h, uint8_t ep, void *data, size_t len, unsigned timeoutMs, bool isRead,
-                       unsigned long &err, uint8_t epType)
+long long syncTransfer(libusb_device_handle *h, InFlight *inFlight, uint8_t ep, void *data, size_t len,
+                       unsigned timeoutMs, bool isRead, unsigned long &err, uint8_t epType)
 {
-    if (!h) {
+    if (!h || !inFlight) {
         err = static_cast<unsigned long>(-LIBUSB_ERROR_NO_DEVICE);
         return -1;
     }
@@ -150,11 +189,17 @@ long long syncTransfer(libusb_device_handle *h, uint8_t ep, void *data, size_t l
     else
         libusb_fill_bulk_transfer(t, h, address, static_cast<unsigned char *>(data), int(len), transferCallback, &st, 0);
 
-    const int rc = libusb_submit_transfer(t);
-    if (rc != LIBUSB_SUCCESS) {
-        libusb_free_transfer(t);
-        err = static_cast<unsigned long>(-rc);
-        return -1;
+    st.transfer = t;
+    st.address = address;
+    {
+        std::lock_guard<std::mutex> l(inFlight->mutex);
+        const int rc = libusb_submit_transfer(t);
+        if (rc != LIBUSB_SUCCESS) {
+            libusb_free_transfer(t);
+            err = static_cast<unsigned long>(-rc);
+            return -1;
+        }
+        inFlight->list.push_back(&st);
     }
 
     libusb_context *ctx = context();
@@ -196,9 +241,20 @@ long long syncTransfer(libusb_device_handle *h, uint8_t ep, void *data, size_t l
         }
     }
 
+    bool aborted;
+    {
+        std::lock_guard<std::mutex> l(inFlight->mutex);
+        inFlight->list.erase(std::remove(inFlight->list.begin(), inFlight->list.end(), &st), inFlight->list.end());
+        aborted = st.aborted;
+    }
     const int status = st.status;
     const int actual = st.actual;
     libusb_free_transfer(t);
+    if (status == LIBUSB_TRANSFER_CANCELLED && aborted) {
+        // abortPipe(): a failure, as WinUsb_AbortPipe makes the pending transfer fail
+        err = static_cast<unsigned long>(-LIBUSB_ERROR_INTERRUPTED);
+        return -1;
+    }
     if (status == LIBUSB_TRANSFER_COMPLETED)
         return actual;
     if (status == LIBUSB_TRANSFER_CANCELLED || status == LIBUSB_TRANSFER_TIMED_OUT) {
@@ -272,7 +328,7 @@ std::vector<DeviceId> Device::find(uint16_t vid, uint16_t pid)
             serial = readStringDescriptor(h, dd.iSerialNumber);
             libusb_close(h);
         }
-        out.push_back({makePath(list[i], serial), serial});
+        out.push_back({makePath(list[i], dd.idVendor, dd.idProduct, serial), serial});
     }
     libusb_free_device_list(list, 1);
     return out;
@@ -285,9 +341,7 @@ std::unique_ptr<Device> Device::open(const std::string &path, std::string &error
         error = "libusb could not be initialised";
         return nullptr;
     }
-    int bus = -1, addr = -1;
-    std::sscanf(path.c_str(), "usb:%d.%d", &bus, &addr);
-    const std::string wantSerial = serialFromPath(path);
+    const ParsedPath want = parsePath(path);
 
     libusb_device **list = nullptr;
     const ssize_t n = libusb_get_device_list(ctx, &list);
@@ -302,12 +356,15 @@ std::unique_ptr<Device> Device::open(const std::string &path, std::string &error
         libusb_device_descriptor dd{};
         if (libusb_get_device_descriptor(list[i], &dd) != LIBUSB_SUCCESS)
             continue;
-        if (libusb_get_bus_number(list[i]) == bus && libusb_get_device_address(list[i]) == addr)
+        // the cached descriptor rules out every other device without opening it
+        if (want.hasIds && (dd.idVendor != want.vid || dd.idProduct != want.pid))
+            continue;
+        if (libusb_get_bus_number(list[i]) == want.bus && libusb_get_device_address(list[i]) == want.address)
             byAddress = list[i];
-        if (!wantSerial.empty()) {
+        if (!want.serial.empty() && dd.iSerialNumber) {
             libusb_device_handle *h = nullptr;
             if (libusb_open(list[i], &h) == LIBUSB_SUCCESS && h) {
-                const bool match = readStringDescriptor(h, dd.iSerialNumber) == wantSerial;
+                const bool match = readStringDescriptor(h, dd.iSerialNumber) == want.serial;
                 libusb_close(h);
                 if (match)
                     chosen = list[i];
@@ -340,6 +397,7 @@ std::unique_ptr<Device> Device::open(const std::string &path, std::string &error
         return nullptr;
     }
     d->m_winusb = h;
+    d->m_inFlight = new InFlight;
 
     libusb_device_descriptor dd{};
     if (libusb_get_device_descriptor(chosen, &dd) == LIBUSB_SUCCESS) {
@@ -388,6 +446,9 @@ Device::~Device()
             libusb_release_interface(h, m_claimedInterface);
         libusb_close(h);
     }
+    // every transfer has completed: they are synchronous for their callers,
+    // and nobody may use a Device while it is destroyed
+    delete static_cast<InFlight *>(m_inFlight);
 }
 
 std::string Device::lastErrorText() const
@@ -414,14 +475,15 @@ int Device::control(uint8_t requestType, uint8_t request, uint16_t value, uint16
 
 int Device::write(uint8_t ep, const void *data, size_t len, unsigned timeoutMs)
 {
-    return int(syncTransfer(static_cast<libusb_device_handle *>(m_winusb), ep, const_cast<void *>(data), len, timeoutMs,
-                            false, m_lastError, typeOfEndpoint(m_endpoints, ep)));
+    return int(syncTransfer(static_cast<libusb_device_handle *>(m_winusb), static_cast<InFlight *>(m_inFlight), ep,
+                            const_cast<void *>(data), len, timeoutMs, false, m_lastError,
+                            typeOfEndpoint(m_endpoints, ep)));
 }
 
 int Device::read(uint8_t ep, void *data, size_t len, unsigned timeoutMs)
 {
-    return int(syncTransfer(static_cast<libusb_device_handle *>(m_winusb), ep, data, len, timeoutMs, true, m_lastError,
-                            typeOfEndpoint(m_endpoints, ep)));
+    return int(syncTransfer(static_cast<libusb_device_handle *>(m_winusb), static_cast<InFlight *>(m_inFlight), ep, data,
+                            len, timeoutMs, true, m_lastError, typeOfEndpoint(m_endpoints, ep)));
 }
 
 bool Device::setPipeTimeout(uint8_t, unsigned)
@@ -449,10 +511,23 @@ bool Device::resetPipe(uint8_t ep)
 
 bool Device::abortPipe(uint8_t ep)
 {
-    // libusb cancels per transfer, and syncTransfer() already does that on its
-    // own timeout, so there is nothing queued to abort here. Clearing a halt is
-    // the useful part of what WinUsb_AbortPipe leaves behind.
-    return resetPipe(ep);
+    // Cancels the transfers pending on this endpoint, as WinUsb_AbortPipe does:
+    // the thread waiting in read()/write() returns at once with an error instead
+    // of running into its timeout (exposure + 1.5 s for an image read). Safe
+    // from any thread. Like WinUsb_AbortPipe it does not clear a halt; that is
+    // resetPipe().
+    auto *inFlight = static_cast<InFlight *>(m_inFlight);
+    if (!inFlight)
+        return false;
+    std::lock_guard<std::mutex> l(inFlight->mutex);
+    for (TransferState *st : inFlight->list) {
+        if (st->address != ep)
+            continue;
+        st->aborted = true;
+        // NOT_FOUND: it completed a moment ago and its waiter is about to see that
+        libusb_cancel_transfer(st->transfer);
+    }
+    return true;
 }
 
 bool Device::flushPipe(uint8_t)

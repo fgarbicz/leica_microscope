@@ -36,7 +36,11 @@ std::string usbErrorText(unsigned long code)
 }
 
 namespace {
-// \\?\usb#vid_1711&pid_30e0#<serial>#{guid}
+// \\?\usb#vid_1711&pid_30e0#<instance>#{guid}. The instance ID is the
+// device's USB serial number when it has a usable one; otherwise Windows makes
+// one up from the port ("6&1a2b3c4d&0&2"), which is no serial at all and is
+// not reported as one. The camera's own serial is read once it is open
+// (Dmc6200Camera::open), identically on every platform.
 std::string serialFromPath(const std::string &path)
 {
     const auto a = path.find('#');
@@ -46,7 +50,8 @@ std::string serialFromPath(const std::string &path)
     const auto c = b == std::string::npos ? std::string::npos : path.find('#', b + 1);
     if (b == std::string::npos || c == std::string::npos)
         return {};
-    return path.substr(b + 1, c - b - 1);
+    const std::string instance = path.substr(b + 1, c - b - 1);
+    return instance.find('&') == std::string::npos ? instance : std::string();
 }
 } // namespace
 
@@ -209,7 +214,14 @@ long long syncTransfer(void *h, uint8_t ep, void *data, size_t len, unsigned tim
     }
     if (WaitForSingleObject(ov.hEvent, timeoutMs) != WAIT_OBJECT_0) {
         WinUsb_AbortPipe(h, ep);
+        // wait for the abort to complete the request (the buffer is in use until then)
+        done = 0;
         WinUsb_GetOverlappedResult(h, &ov, &done, TRUE);
+        // As in the libusb backend: data that arrived before the timeout (or the
+        // whole transfer, if it completed just as the wait expired) is a
+        // successful short transfer, not an error that loses it.
+        if (done > 0)
+            return done;
         lastError = ERROR_SEM_TIMEOUT;
         return -1;
     }

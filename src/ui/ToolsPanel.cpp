@@ -53,7 +53,8 @@ ToolsPanel::ToolsPanel(QWidget *parent) : QWidget(parent)
     region->setIcon(icon(Icon::Focus, theme().text, 15));
     auto *resetPeak = new QPushButton(tr("Reset peak"), this);
     resetPeak->setIcon(icon(Icon::Reset, theme().text, 15));
-    resetPeak->setToolTip(tr("Start a new search for the best focus (after moving to another field)"));
+    resetPeak->setToolTip(tr("Start a new search for the best focus. The peak also fades by itself, and starts "
+                             "again when you move to another field or change the objective."));
     fRow->addWidget(region);
     fRow->addWidget(resetPeak);
     fs->contentLayout()->addLayout(fRow);
@@ -145,14 +146,15 @@ ToolsPanel::ToolsPanel(QWidget *parent) : QWidget(parent)
     });
     connect(m_hist, &HistogramWidget::levelsChanged, this, &ToolsPanel::levelsChanged);
     connect(region, &QPushButton::clicked, this, &ToolsPanel::focusRegionRequested);
-    connect(resetPeak, &QPushButton::clicked, this, [this] { m_focusPeak = 0; });
+    connect(resetPeak, &QPushButton::clicked, this, [this] { resetFocusPeak(); });
 }
 
 void ToolsPanel::setStats(const LiveStats &s, double umPerPixel)
 {
     m_hist->setHistogram(s.histogram);
-    m_focusPeak = std::max(m_focusPeak, s.focus);
-    m_focus->setText(tr("%1   (peak %2)").arg(s.focus, 0, 'f', 1).arg(m_focusPeak, 0, 'f', 1));
+    const double dt = m_focusClock.isValid() ? m_focusClock.restart() / 1000.0 : (m_focusClock.start(), 0.0);
+    const double peak = m_focusPeak.update(s.focus, dt);
+    m_focus->setText(tr("%1   (peak %2)").arg(s.focus, 0, 'f', 1).arg(peak, 0, 'f', 1));
     QString info = tr("Image %1 × %2 px\nCamera %3 fps, display %4 fps\nExposure level %5%, saturated %6%")
                        .arg(s.width)
                        .arg(s.height)

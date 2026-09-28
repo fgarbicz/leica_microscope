@@ -11,6 +11,8 @@
 #include <QTimer>
 
 class QTabBar;
+class QPushButton;
+class QToolButton;
 class QStackedWidget;
 class QLabel;
 class QSplitter;
@@ -36,6 +38,10 @@ public:
     ~MainWindow() override;
 
     void startup();
+    // Files given on the command line, by the desktop (a .desktop file's %F,
+    // "Open with" in Explorer) or by the Finder (QFileOpenEvent): the first
+    // image opens in Process; a folder opens in Browse.
+    void openPaths(const QStringList &paths);
 
 protected:
     void closeEvent(QCloseEvent *e) override;
@@ -48,6 +54,9 @@ private slots:
     void onFrame(const QImage &img, const lm::LiveStats &stats);
     void onCaptureFinished(std::shared_ptr<lm::CaptureResult> r);
     void capture();
+    // "Capturing…" / "Saving…" in the middle of the live image while either runs;
+    // called whenever either changes
+    void updateCaptureState();
     void onCameraChanged();
     void onCalibrationChanged();
     void onTimelapseTick();
@@ -66,7 +75,11 @@ private:
     // a session.
     void exportSessionToLif();
     void applyGalleryLayout(bool vertical);
-    void setGalleryVertical(bool vertical);
+    // how the captured images are shown: the reel under the image, the list
+    // beside it, or the compact list (small thumbnails, one line each)
+    enum GalleryMode { GalleryReel = 0, GalleryList = 1, GalleryCompact = 2 };
+    void setGalleryMode(int mode);
+    void syncGalleryControls(int mode); // menu items and header buttons
     void loadShadingForObjective();
     void startCalibration();
     ImageMetadata currentMetadata(const CaptureResult &r) const;
@@ -106,7 +119,10 @@ private:
     QScrollArea *m_rightPanel = nullptr;  // width can follow the interface size
     QSplitter *m_acquireSplitter = nullptr;
     QSplitter *m_centreSplitter = nullptr; // live image + captured images
-    QAction *m_galleryVerticalAct = nullptr;
+    // the two layouts of the captured images, as View menu items and as the
+    // two buttons on the strip's own header; setGalleryVertical() keeps all in step
+    QAction *m_galleryModeAct[3] = {};
+    QToolButton *m_galleryModeBtn[3] = {};
     QTimer m_timelapse;
     QTimer m_reconnect;   // polls for a lost camera
     VideoRecorder m_recorder;
@@ -116,7 +132,10 @@ private:
     bool m_multifocus = false, m_mosaic = false;
     bool m_capturing = false;
     int m_captureSerial = 0; // identifies the capture a watchdog timer belongs to
-    QList<QPoint> m_calibPoints;
+    QList<QPointF> m_calibPoints; // in sensor pixels
+    bool m_resetSettingsOnClose = false; // Settings → Reset all settings is closing the application
+    // the image of the workspace on screen, for the View menu's zoom commands
+    ImageView *currentImageView() const;
     QSet<QString> m_pendingSaves; // images being written in the background
     LiveStats m_lastStats;
     QSize m_liveFrameSize; // size actually delivered, to spot a mis-reporting camera

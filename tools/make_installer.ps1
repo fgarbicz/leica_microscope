@@ -2,8 +2,10 @@
 # dist\DMImaging-Setup-<version>.exe (Inno Setup 6).
 #   .\tools\make_installer.ps1
 #   .\tools\make_installer.ps1 -SkipBuild      package the existing build
+#   .\tools\make_installer.ps1 -Arch arm64     installer for Windows on ARM
 #   .\tools\make_installer.ps1 -Iscc <path>    location of ISCC.exe
 param(
+    [ValidateSet('x64', 'arm64')][string]$Arch = 'x64',
     [switch]$SkipBuild,
     [string]$Iscc = ''
 )
@@ -19,33 +21,31 @@ $version = $Matches[1]
 Write-Host "DM Imaging $version"
 
 if (-not $SkipBuild) {
-    & (Join-Path $root 'build.ps1') -Config Release -Deploy -Test
+    # -Test runs all four test programs through ctest
+    & (Join-Path $root 'build.ps1') -Config Release -Arch $Arch -Deploy -Test
     if (-not $? -or ($LASTEXITCODE -and $LASTEXITCODE -ne 0)) { throw 'build or tests failed' }
-    foreach ($t in 'enginetest.exe', 'iotest.exe') {
-        & (Join-Path $root "build\release\bin\$t")
-        if ($LASTEXITCODE -ne 0) { throw "$t failed" }
-    }
 }
-$bin = Join-Path $root 'build\release\bin'
+$bin = Join-Path $root $(if ($Arch -eq 'x64') { 'build\release\bin' } else { "build\release-$Arch\bin" })
 if (-not (Test-Path (Join-Path $bin 'DMImaging.exe'))) { throw 'DMImaging.exe not found - build first' }
 
 # stage the files that go into the installer
 $stage = Join-Path $root 'build\package\app'
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force $stage | Out-Null
-robocopy $bin $stage /E /NFL /NDL /NJH /NJS /XF lmtests.exe enginetest.exe iotest.exe dmctest.exe *.ilk *.pdb *.exp *.lib | Out-Null
+robocopy $bin $stage /E /NFL /NDL /NJH /NJS /XF lmtests.exe enginetest.exe iotest.exe uitest.exe dmctest.exe vc_redist.*.exe *.ilk *.pdb *.exp *.lib | Out-Null
 if ($LASTEXITCODE -ge 8) { throw 'copying the build failed' }
 $global:LASTEXITCODE = 0
 
 # Visual C++ runtime: Microsoft's redistributable installer (placed next to the
 # executable by windeployqt), run silently by Setup; it does nothing if a current
 # runtime is already installed
-$vcredist = Join-Path $bin 'vc_redist.x64.exe'
-if (-not (Test-Path $vcredist)) { throw 'vc_redist.x64.exe not found in the build (windeployqt should place it there)' }
+$redistName = "vc_redist.$Arch.exe"
+$vcredist = Join-Path $bin $redistName
+if (-not (Test-Path $vcredist)) { throw "$redistName not found in the build (windeployqt should place it there)" }
 $redistStage = Join-Path $root 'build\package\redist'
+if (Test-Path $redistStage) { Remove-Item $redistStage -Recurse -Force }
 New-Item -ItemType Directory -Force $redistStage | Out-Null
 Copy-Item $vcredist $redistStage -Force
-Remove-Item (Join-Path $stage 'vc_redist.x64.exe') -ErrorAction SilentlyContinue
 
 # driver (the catalog is generated and signed on each PC by install_driver.ps1), documentation
 New-Item -ItemType Directory -Force (Join-Path $stage 'driver') | Out-Null
@@ -84,7 +84,7 @@ if (-not $Iscc) {
 if (-not $Iscc) { throw 'Inno Setup 6 (ISCC.exe) not found - install it or pass -Iscc' }
 $dist = Join-Path $root 'dist'
 New-Item -ItemType Directory -Force $dist | Out-Null
-& $Iscc "/DAppVersion=$version" "/DStageDir=$stage" "/DRedistDir=$redistStage" "/DOutDir=$dist" (Join-Path $root 'installer\DMImaging.iss')
+& $Iscc "/DAppVersion=$version" "/DArch=$Arch" "/DStageDir=$stage" "/DRedistDir=$redistStage" "/DOutDir=$dist" (Join-Path $root 'installer\DMImaging.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed' }
-$setup = Join-Path $dist "DMImaging-Setup-$version.exe"
+$setup = Join-Path $dist $(if ($Arch -eq 'x64') { "DMImaging-Setup-$version.exe" } else { "DMImaging-Setup-$version-$Arch.exe" })
 Write-Host ("Installer: {0} ({1:N1} MB)" -f $setup, ((Get-Item $setup).Length / 1MB))

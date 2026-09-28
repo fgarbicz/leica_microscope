@@ -76,7 +76,7 @@ public:
     IhcSettings ihc;
     ColorSettings color;
     bool autoExposure = false;
-    double aeTarget = 0.85;
+    double aeTarget = 0.80;
     double exposureMs = 20.0;
     double gain = 1.0;
     int resolutionIndex = 0;
@@ -90,6 +90,7 @@ public:
     // Captured images beside the live image as a vertical list, instead of the
     // horizontal reel underneath it.
     bool galleryVertical = false;
+    bool galleryCompact = false; // with galleryVertical: small thumbnails, one line each
     bool shadingEnabled = false;
     QMap<QString, ColorSettings> colorPresets; // user presets
 

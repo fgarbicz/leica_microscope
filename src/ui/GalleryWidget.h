@@ -23,6 +23,9 @@ public:
     // Vertical list beside the image, or horizontal reel below it.
     void setVertical(bool on);
     bool isVertical() const { return m_vertical; }
+    // In the list: a small thumbnail and the name on one line, to fit many images.
+    void setCompact(bool on);
+    bool isCompact() const { return m_compact; }
 
 signals:
     void openRequested(const QString &path);
@@ -40,11 +43,18 @@ protected:
 
 private:
     void applyLayout();
+    // the icon size thumbnails are made for (the larger of the two layouts)
+    QSize thumbnailSize() const;
 
     bool m_vertical = false;
+    bool m_compact = false;
 };
 
-QImage makeThumbnail(const QImage &src, int size = 160);
+// A thumbnail for an icon of `logical` size (device-independent pixels, i.e.
+// already through px()) on a screen with `devicePixelRatio`: made at the
+// number of physical pixels the icon covers, so it stays sharp on a high-DPI
+// screen and at a large interface size. Safe to call from a worker thread.
+QImage makeThumbnail(const QImage &src, QSize logical, qreal devicePixelRatio);
 // View -> Reference overlay; shown in the thumbnail menu as the platform spells it
 QKeySequence referenceOverlayShortcut();
 // Icon that keeps its true colours when the item is selected.

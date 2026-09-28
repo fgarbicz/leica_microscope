@@ -16,6 +16,7 @@
 #include <QClipboard>
 #include <QDesktopServices>
 #include <QDir>
+#include <QAbstractFileIconProvider>
 #include <QFileSystemModel>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -27,7 +28,9 @@
 #include <QMessageBox>
 #include <QPointer>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QSplitter>
+#include <QStyle>
 #include <QTableWidget>
 #include <QToolBar>
 #include <QTreeView>
@@ -35,17 +38,117 @@
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
 
+#include <algorithm>
+
 namespace lm {
 
 namespace {
 const QStringList kImageFilters = {QStringLiteral("*.lif"), // a Leica session, opened image by image
                                   QStringLiteral("*.tif"), QStringLiteral("*.tiff"), QStringLiteral("*.png"),
                                    QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"), QStringLiteral("*.bmp")};
+
+// Icons and type names for the folder tree from the name alone. The default
+// provider asks the system for every entry's own icon (NSWorkspace on macOS, the
+// shell on Windows), and names its type by reading the start of the file
+// (QMimeDatabase): on the interface thread, whenever the folder changes. In a
+// OneDrive or iCloud folder that read downloads the file first - a 442 MB .lif
+// froze Browse for as long as that took. The tree shows neither anyway.
+class TypeIconProvider : public QAbstractFileIconProvider {
+public:
+    QString type(const QFileInfo &info) const override
+    {
+        return info.isDir() ? QStringLiteral("Folder") : info.suffix();
+    }
+    QIcon icon(IconType type) const override
+    {
+        QStyle *st = QApplication::style();
+        switch (type) {
+        case Computer: return st->standardIcon(QStyle::SP_ComputerIcon);
+        case Drive: return st->standardIcon(QStyle::SP_DriveHDIcon);
+        case Network: return st->standardIcon(QStyle::SP_DriveNetIcon);
+        case File: return st->standardIcon(QStyle::SP_FileIcon);
+        default: return st->standardIcon(QStyle::SP_DirIcon);
+        }
+    }
+    QIcon icon(const QFileInfo &info) const override
+    {
+        if (info.isRoot())
+            return icon(Drive);
+        return icon(info.isDir() ? Folder : File);
+    }
+};
+
+// The files that belong to an image and travel with it.
+QStringList sidecarsOf(const QString &imagePath)
+{
+    return {imagePath + QStringLiteral(".json"), imagePath + QStringLiteral(".annotations.json")};
 }
+
+// Renames an image and its sidecars as one step: either all of them are
+// renamed, or none is (a failure half-way is rolled back), so an image never
+// ends up separated from its metadata or annotations. The error is for the user.
+bool renameImage(const QString &from, const QString &to, QString *error)
+{
+    const QStringList fromSide = sidecarsOf(from), toSide = sidecarsOf(to);
+    auto sameFile = [](const QString &a, const QString &b) {
+        // a change of case only, on a case-insensitive file system
+        return QFileInfo(a).canonicalFilePath() == QFileInfo(b).canonicalFilePath();
+    };
+    if (QFileInfo::exists(to) && !sameFile(from, to)) {
+        *error = BrowsePage::tr("%1 already exists.").arg(QFileInfo(to).fileName());
+        return false;
+    }
+    for (int i = 0; i < fromSide.size(); ++i)
+        if (QFileInfo::exists(fromSide[i]) && QFileInfo::exists(toSide[i]) && !sameFile(fromSide[i], toSide[i])) {
+            *error = BrowsePage::tr("%1 already exists.").arg(QFileInfo(toSide[i]).fileName());
+            return false;
+        }
+    if (!QFile::rename(from, to)) {
+        *error = BrowsePage::tr("%1 could not be renamed (in use, or no permission?).").arg(QFileInfo(from).fileName());
+        return false;
+    }
+    QList<int> done;
+    for (int i = 0; i < fromSide.size(); ++i) {
+        if (!QFileInfo::exists(fromSide[i]))
+            continue;
+        if (!QFile::rename(fromSide[i], toSide[i])) {
+            // put back what was already renamed
+            for (int j : done)
+                QFile::rename(toSide[j], fromSide[j]);
+            const bool restored = QFile::rename(to, from);
+            *error = restored ? BrowsePage::tr("%1 could not be renamed, so the image was left as it was.")
+                                    .arg(QFileInfo(fromSide[i]).fileName())
+                              : BrowsePage::tr("%1 could not be renamed, and the image could not be given its old "
+                                               "name back. It is now called %2.")
+                                    .arg(QFileInfo(fromSide[i]).fileName(), QFileInfo(to).fileName());
+            return false;
+        }
+        done << i;
+    }
+    return true;
+}
+
+// Why `name` cannot be a file name, or an empty string when it can.
+QString invalidFileName(const QString &name)
+{
+    static const QRegularExpression forbidden(QStringLiteral("[\\\\/:*?\"<>|]"));
+    if (name.trimmed().isEmpty())
+        return BrowsePage::tr("The name is empty.");
+    if (name == QLatin1String(".") || name == QLatin1String(".."))
+        return BrowsePage::tr("\"%1\" is not a file name.").arg(name);
+    if (name.contains(forbidden))
+        return BrowsePage::tr("A file name cannot contain any of  \\ / : * ? \" < > |");
+    if (name != name.trimmed())
+        return BrowsePage::tr("A file name should not begin or end with a space.");
+    return {};
+}
+} // namespace
 
 BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
 {
     m_thumbPool.setMaxThreadCount(2);
+    m_listPool.setMaxThreadCount(1);
+    m_previewPool.setMaxThreadCount(1);
     auto *root = new QVBoxLayout(this);
     root->setContentsMargins(0, 0, 0, 0);
     root->setSpacing(0);
@@ -77,7 +180,7 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
     root->addWidget(tb);
 
     m_header = new QLabel(this);
-    m_header->setContentsMargins(8, 4, 8, 4);
+    m_header->setContentsMargins(px(8), px(4), px(8), px(4));
     root->addWidget(m_header);
 
     auto *split = new QSplitter(Qt::Horizontal, this);
@@ -181,16 +284,17 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
         bool ok = false;
         const QString name = QInputDialog::getText(this, tr("Rename"), tr("New name:"), QLineEdit::Normal,
                                                    fi.completeBaseName(), &ok);
-        if (!ok || name.isEmpty())
+        if (!ok || name == fi.completeBaseName())
             return;
-        const QString np = fi.dir().filePath(name + QLatin1Char('.') + fi.suffix());
-        if (QFile::rename(fi.filePath(), np)) {
-            QFile::rename(fi.filePath() + QStringLiteral(".json"), np + QStringLiteral(".json"));
-            QFile::rename(fi.filePath() + QStringLiteral(".annotations.json"), np + QStringLiteral(".annotations.json"));
-            refresh();
-        } else {
-            QMessageBox::warning(this, tr("Rename"), tr("Could not rename the file."));
+        if (const QString why = invalidFileName(name); !why.isEmpty()) {
+            QMessageBox::warning(this, tr("Rename"), why);
+            return;
         }
+        const QString np = fi.dir().filePath(name + QLatin1Char('.') + fi.suffix());
+        QString err;
+        if (!renameImage(fi.filePath(), np, &err))
+            QMessageBox::warning(this, tr("Rename"), err);
+        refresh();
     });
     connect(del, &QAction::triggered, this, [this] {
         const auto sel = selectedPaths();
@@ -199,15 +303,19 @@ BrowsePage::BrowsePage(QWidget *parent) : QWidget(parent)
         if (QMessageBox::question(this, tr("Delete"), tr("Move %n image(s) to the %1?", nullptr, int(sel.size())).arg(trashName()))
             != QMessageBox::Yes)
             return;
-        for (const auto &p : sel) {
-            QFile::moveToTrash(p);
-            QFile::moveToTrash(p + QStringLiteral(".json"));
-            QFile::moveToTrash(p + QStringLiteral(".annotations.json"));
-        }
+        QStringList failed;
+        for (const auto &p : sel)
+            if (!moveImageToTrash(p))
+                failed << QFileInfo(p).fileName();
         refresh();
+        if (!failed.isEmpty())
+            QMessageBox::warning(this, tr("Delete"),
+                                 tr("These could not be moved to the %1 (in use, or no permission?):\n\n%2")
+                                     .arg(trashName(), failed.join(QLatin1Char('\n'))));
     });
     m_grid->setContextMenuPolicy(Qt::CustomContextMenu);
-    connect(m_grid, &QListWidget::customContextMenuRequested, this, [=](const QPoint &pt) {
+    connect(m_grid, &QListWidget::customContextMenuRequested, this,
+            [this, openProc, openExt, reveal, rename, del](const QPoint &pt) {
         if (!m_grid->itemAt(pt))
             return;
         QMenu m(this);
@@ -242,6 +350,8 @@ void BrowsePage::ensureLoaded()
         m_startFolder = start;
     }
     m_dirs = new QFileSystemModel(this);
+    static TypeIconProvider icons; // outlives every model that uses it
+    m_dirs->setIconProvider(&icons);
     m_dirs->setFilter(QDir::AllDirs | QDir::NoDotAndDotDot | QDir::Drives);
     m_dirs->setRootPath(QString());
     m_tree->setModel(m_dirs);
@@ -286,8 +396,26 @@ void BrowsePage::refresh()
     ensureLoaded();
     const int gen = ++(*m_generation);
     m_thumbPool.clear(); // thumbnails of the previous folder that have not started yet
+    m_listPool.clear();
+    // keep the image the user was looking at (switching back to Browse refreshes)
+    const QString keep = m_grid->currentItem() ? m_grid->currentItem()->data(Qt::UserRole).toString() : QString();
     m_grid->clear();
-    const QFileInfoList files = QDir(m_folder).entryInfoList(kImageFilters, QDir::Files, QDir::Time);
+    m_header->setText(tr("%1 — reading the folder…").arg(QDir::toNativeSeparators(m_folder)));
+    const QString folder = m_folder;
+    auto generation = m_generation;
+    // listing sorted by time stats every file: in the background
+    QtConcurrent::run(&m_listPool, [folder, gen, generation] {
+        if (generation->load() != gen)
+            return QFileInfoList();
+        return QDir(folder).entryInfoList(kImageFilters, QDir::Files, QDir::Time);
+    }).then(this, [this, keep, gen](const QFileInfoList &files) {
+        if (m_generation->load() == gen)
+            populate(files, keep, gen);
+    });
+}
+
+void BrowsePage::populate(const QFileInfoList &files, const QString &keepSelected, int gen)
+{
     m_header->setText(tr("%1 — %n image(s)", nullptr, int(files.size())).arg(QDir::toNativeSeparators(m_folder)));
     QPointer<QListWidget> grid = m_grid;
     // correctly sized placeholder so the layout does not change when thumbnails arrive
@@ -295,6 +423,10 @@ void BrowsePage::refresh()
     ph.fill(palette().color(QPalette::AlternateBase));
     const QIcon placeholder(ph);
     auto generation = m_generation;
+    // made at the pixels the icon really covers (interface size and screen)
+    const QSize thumbSize = m_grid->iconSize();
+    const qreal dpr = devicePixelRatioF();
+    int keepRow = -1;
     for (const QFileInfo &fi : files) {
         auto *it = new QListWidgetItem(placeholder, fi.fileName());
         it->setData(Qt::UserRole, fi.absoluteFilePath());
@@ -302,16 +434,21 @@ void BrowsePage::refresh()
             QLocale().toString(fi.lastModified(), QLocale::ShortFormat)));
         m_grid->addItem(it);
         const QString path = fi.absoluteFilePath();
+        if (path == keepSelected)
+            keepRow = m_grid->count() - 1;
         // thumbnails are generated in the background; stale results are dropped
-        QtConcurrent::run(&m_thumbPool, [path, gen, generation] {
+        QtConcurrent::run(&m_thumbPool, [path, gen, generation, thumbSize, dpr] {
             if (generation->load() != gen)
                 return QImage();
             QImageReader r(path);
             QImage img;
             if (r.canRead()) {
                 const QSize s = r.size();
-                if (s.isValid() && s.width() > 800)
-                    r.setScaledSize(s.scaled(480, 480, Qt::KeepAspectRatio));
+                // decode at reduced size, but never below what the thumbnail needs
+                const int need = int(std::max(thumbSize.width(), thumbSize.height()) * dpr);
+                const int decode = std::max(480, need);
+                if (s.isValid() && std::max(s.width(), s.height()) > decode)
+                    r.setScaledSize(s.scaled(decode, decode, Qt::KeepAspectRatio));
                 img = r.read();
             }
             if (img.isNull()) {
@@ -319,7 +456,7 @@ void BrowsePage::refresh()
                 if (loadImage(path, li))
                     img = toQImage8(li.data);
             }
-            return makeThumbnail(img, 180);
+            return makeThumbnail(img, thumbSize, dpr);
         }).then(this, [grid, path, gen, generation](const QImage &thumb) {
             if (!grid || generation->load() != gen || thumb.isNull())
                 return;
@@ -332,45 +469,81 @@ void BrowsePage::refresh()
                 }
         });
     }
-    if (m_grid->count() > 0)
-        m_grid->setCurrentRow(0);
-    else {
+    if (m_grid->count() > 0) {
+        m_grid->setCurrentRow(keepRow >= 0 ? keepRow : 0);
+    } else {
+        ++(*m_previewGeneration);
+        m_previewPath.clear();
         m_preview->clear();
+        m_preview->setPlaceholder(QString());
         m_meta->setRowCount(0);
     }
 }
 
 void BrowsePage::showPreview(const QString &path)
 {
-    LoadedImage li;
-    QString err;
-    if (!loadImage(path, li, &err)) {
-        m_preview->clear();
-        m_preview->setPlaceholder(tr("Cannot open: %1").arg(err));
-        m_meta->setRowCount(0);
+    // the same, unchanged file is already shown (a refresh reselects it)
+    const QDateTime stamp = QFileInfo(path).lastModified();
+    if (path == m_previewPath && stamp == m_previewStamp && stamp.isValid())
         return;
-    }
-    m_preview->setImage(toQImage8(li.data), true);
-    m_preview->setUmPerPixel(li.meta.umPerPixel);
-    QList<QPair<QString, QString>> rows;
-    const QFileInfo fi(path);
-    rows.append({tr("File"), fi.fileName()});
-    rows.append({tr("Size on disk"), QStringLiteral("%1 MB").arg(fi.size() / 1048576.0, 0, 'f', 2)});
-    if (li.hasMeta) {
-        rows.append(li.meta.describe());
-    } else {
-        rows.append({tr("Image size"), QStringLiteral("%1 × %2 px, %3-bit").arg(li.data.width).arg(li.data.height).arg(li.sourceBitDepth)});
-        if (li.meta.umPerPixel > 0)
-            rows.append({tr("Pixel size"), QStringLiteral("%1 µm/px").arg(li.meta.umPerPixel, 0, 'g', 5)});
-    }
-    m_meta->setRowCount(int(rows.size()));
-    for (int i = 0; i < rows.size(); ++i) {
-        auto *k = new QTableWidgetItem(rows[i].first);
-        k->setForeground(palette().color(QPalette::PlaceholderText));
-        m_meta->setItem(i, 0, k);
-        m_meta->setItem(i, 1, new QTableWidgetItem(rows[i].second));
-    }
-    m_meta->resizeColumnToContents(0);
+    m_previewPath = path;
+    m_previewStamp = stamp;
+    const int gen = ++(*m_previewGeneration);
+    m_previewPool.clear(); // a preview asked for earlier and not started yet
+    m_preview->clear();
+    m_preview->setPlaceholder(tr("Loading %1…").arg(QFileInfo(path).fileName()));
+    m_meta->setRowCount(0);
+
+    struct Preview {
+        bool ok = false;
+        QString error;
+        QImage image;
+        double umPerPixel = 0;
+        QList<QPair<QString, QString>> rows;
+    };
+    auto generation = m_previewGeneration;
+    QtConcurrent::run(&m_previewPool, [path, gen, generation] {
+        Preview pv;
+        if (generation->load() != gen)
+            return pv;
+        LoadedImage li;
+        if (!loadImage(path, li, &pv.error))
+            return pv;
+        pv.ok = true;
+        pv.image = toQImage8(li.data);
+        pv.umPerPixel = li.meta.umPerPixel;
+        const QFileInfo fi(path);
+        pv.rows.append({tr("File"), fi.fileName()});
+        pv.rows.append({tr("Size on disk"), QStringLiteral("%1 MB").arg(fi.size() / 1048576.0, 0, 'f', 2)});
+        if (li.hasMeta) {
+            pv.rows.append(li.meta.describe());
+        } else {
+            pv.rows.append({tr("Image size"),
+                            QStringLiteral("%1 × %2 px, %3-bit").arg(li.data.width).arg(li.data.height).arg(li.sourceBitDepth)});
+            if (li.meta.umPerPixel > 0)
+                pv.rows.append({tr("Pixel size"), QStringLiteral("%1 µm/px").arg(li.meta.umPerPixel, 0, 'g', 5)});
+        }
+        return pv;
+    }).then(this, [this, gen](const Preview &pv) {
+        if (m_previewGeneration->load() != gen)
+            return; // another image was selected meanwhile
+        if (!pv.ok) {
+            m_previewPath.clear(); // try again next time
+            m_preview->clear();
+            m_preview->setPlaceholder(tr("Cannot open: %1").arg(pv.error));
+            return;
+        }
+        m_preview->setImage(pv.image, true);
+        m_preview->setUmPerPixel(pv.umPerPixel);
+        m_meta->setRowCount(int(pv.rows.size()));
+        for (int i = 0; i < pv.rows.size(); ++i) {
+            auto *k = new QTableWidgetItem(pv.rows[i].first);
+            k->setForeground(palette().color(QPalette::PlaceholderText));
+            m_meta->setItem(i, 0, k);
+            m_meta->setItem(i, 1, new QTableWidgetItem(pv.rows[i].second));
+        }
+        m_meta->resizeColumnToContents(0);
+    });
 }
 
 void BrowsePage::resizeEvent(QResizeEvent *e)
