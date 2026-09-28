@@ -54,13 +54,23 @@ CollapsibleSection::CollapsibleSection(const QString &title, QWidget *parent, bo
     m_title->setObjectName(QStringLiteral("SectionTitle"));
     m_title->setAttribute(Qt::WA_TransparentForMouseEvents); // clicks reach the header
     m_title->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    hl->addWidget(m_title, 1);
+    hl->addWidget(m_title);
 
+    // The summary takes the room the title leaves and is cut short with "…" when
+    // it does not fit. A plain label asks for its whole text, and a long one (a
+    // camera's full name) widened the panel past its scroll area, cutting off
+    // the right edge of every control in it.
     m_summary = new QLabel(m_header);
     m_summary->setObjectName(QStringLiteral("SectionSummary"));
     m_summary->setAttribute(Qt::WA_TransparentForMouseEvents);
+    m_summary->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    m_summary->setMinimumWidth(0);
+    m_summary->installEventFilter(this);
     m_summary->hide();
-    hl->addWidget(m_summary);
+    hl->addWidget(m_summary, 1000);
+    // keeps the title on the left while there is no summary (a hidden widget
+    // takes no room); with one, the summary's far larger stretch takes nearly all
+    hl->addStretch(1);
     outer->addWidget(m_header);
 
     m_content = new QWidget(this);
@@ -83,6 +93,8 @@ CollapsibleSection::CollapsibleSection(const QString &title, QWidget *parent, bo
 
 bool CollapsibleSection::eventFilter(QObject *watched, QEvent *event)
 {
+    if (watched == m_summary && event->type() == QEvent::Resize)
+        elideSummary();
     if (watched == m_header && event->type() == QEvent::MouseButtonRelease) {
         auto *me = static_cast<QMouseEvent *>(event);
         if (me->button() == Qt::LeftButton && m_header->rect().contains(me->position().toPoint())) {
@@ -123,7 +135,7 @@ void CollapsibleSection::setExpanded(bool on)
     m_expanded = on;
     m_content->setVisible(on);
     updateChevron();
-    m_summary->setVisible(!on && !m_summary->text().isEmpty());
+    m_summary->setVisible(!on && !m_summaryText.isEmpty());
     QSettings().setValue(m_settingsKey, on);
 }
 
@@ -135,8 +147,15 @@ void CollapsibleSection::setHeaderWidget(QWidget *w)
 
 void CollapsibleSection::setSummary(const QString &text)
 {
-    m_summary->setText(text);
+    m_summaryText = text;
+    m_summary->setToolTip(text);
+    elideSummary();
     m_summary->setVisible(!m_expanded && !text.isEmpty());
+}
+
+void CollapsibleSection::elideSummary()
+{
+    m_summary->setText(m_summary->fontMetrics().elidedText(m_summaryText, Qt::ElideRight, m_summary->width()));
 }
 
 } // namespace lm
