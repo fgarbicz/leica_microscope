@@ -14,6 +14,16 @@
 namespace lm {
 
 namespace {
+
+// A frame rate from the time since the previous frame. The interval is averaged
+// and then inverted: averaging 1/dt instead is biased upwards whenever frames
+// arrive unevenly (USB delivers them in bursts) - two frames 1 ms apart and a
+// 65 ms gap average to ~500 fps for a camera running at 30.
+double updateRate(double &interval, double dt)
+{
+    interval = interval == 0 ? dt : 0.9 * interval + 0.1 * dt;
+    return 1.0 / interval;
+}
 using Clock = std::chrono::steady_clock;
 
 double secondsSince(Clock::time_point t)
@@ -32,21 +42,33 @@ RawFramePtr averageRawFrames(const std::deque<RawFramePtr> &frames)
     const RawFrame &f0 = *frames.front();
     const bool wide = is16Bit(f0.format);
     const int spp = bytesPerPixel(f0.format) / (wide ? 2 : 1); // samples per pixel
-    const size_t samples = size_t(f0.width) * f0.height * spp;
+    const size_t rowSamples = size_t(f0.width) * spp;
+    // NV12 carries a half-height interleaved chroma plane (width bytes per row)
+    // after the luma plane; it is averaged like the luma rows
+    const int rows = f0.format == PixelFormat::NV12 ? f0.height + (f0.height + 1) / 2 : f0.height;
+    const size_t samples = rowSamples * rows;
+    // rows are `stride` bytes apart; the last one only needs its pixels
+    const auto complete = [&](const RawFrame &f) {
+        return f.height > 0 && f.data.size() >= size_t(f.stride) * (rows - 1) + rowSamples * (wide ? 2 : 1);
+    };
+    if (!complete(f0))
+        return frames.front();
     std::vector<uint32_t> acc(samples, 0);
     int n = 0;
     for (const auto &f : frames) {
         if (!f || f->width != f0.width || f->height != f0.height || f->format != f0.format)
             continue;
-        for (int y = 0; y < f->height; ++y) {
+        if (!complete(*f))
+            continue;
+        for (int y = 0; y < rows; ++y) {
             const uint8_t *row = f->data.data() + size_t(y) * f->stride;
-            uint32_t *a = acc.data() + size_t(y) * f->width * spp;
+            uint32_t *a = acc.data() + size_t(y) * rowSamples;
             if (wide) {
                 const uint16_t *r16 = reinterpret_cast<const uint16_t *>(row);
-                for (int i = 0; i < f->width * spp; ++i)
+                for (size_t i = 0; i < rowSamples; ++i)
                     a[i] += r16[i];
             } else {
-                for (int i = 0; i < f->width * spp; ++i)
+                for (size_t i = 0; i < rowSamples; ++i)
                     a[i] += row[i];
             }
         }
@@ -57,9 +79,14 @@ RawFramePtr averageRawFrames(const std::deque<RawFramePtr> &frames)
     const PixelFormat fmt = widenedTo16(f0.format);
     if (f0.format == PixelFormat::BGR8 || f0.format == PixelFormat::BGRA8 || f0.format == PixelFormat::YUYV
         || f0.format == PixelFormat::NV12) {
-        // packed formats that we do not promote: plain average in place
-        for (size_t i = 0; i < samples; ++i)
-            out->data[i] = uint8_t((acc[i] + n / 2) / n);
+        // packed formats that we do not promote: plain average in place, keeping
+        // f0's row stride (which may exceed the packed row, e.g. V4L2 bytesperline)
+        for (int y = 0; y < rows; ++y) {
+            uint8_t *o = out->data.data() + size_t(y) * out->stride;
+            const uint32_t *a = acc.data() + size_t(y) * rowSamples;
+            for (size_t i = 0; i < rowSamples; ++i)
+                o[i] = uint8_t((a[i] + n / 2) / n);
+        }
         return out;
     }
     const int inBits = f0.bitDepth;
@@ -103,8 +130,10 @@ AcquisitionEngine::AcquisitionEngine(QObject *parent) : QObject(parent)
 
 AcquisitionEngine::~AcquisitionEngine()
 {
-    waitForJobs();
+    // camera first: once it is closed no frame can start another capture job,
+    // so the wait below really is for the last one
     closeCamera();
+    waitForJobs();
     m_running = false;
     m_frameCond.wakeAll();
     if (m_worker.joinable())
@@ -136,7 +165,13 @@ bool AcquisitionEngine::openCamera(const CameraInfo &info, QString &error)
             return false;
         }
         cam->setFrameCallback([this](RawFramePtr f) { onRawFrame(std::move(f)); });
-        cam->setErrorCallback([this](const std::string &e) { emit cameraError(QString::fromStdString(e)); });
+        // Always queued, also when the camera reports from the GUI thread (a failed
+        // format change): the handler closes the camera, which must not happen
+        // inside the camera call that is reporting.
+        cam->setErrorCallback([this](const std::string &e) {
+            const QString message = QString::fromStdString(e);
+            QMetaObject::invokeMethod(this, [this, message] { emit cameraError(message); }, Qt::QueuedConnection);
+        });
         {
             QMutexLocker l(&m_mutex);
             m_cameraMatrix = cam->colorMatrix();
@@ -210,7 +245,7 @@ bool AcquisitionEngine::startLive(QString &error)
         error = QString::fromStdString(err);
         return false;
     }
-    m_lastFrameTime = {};
+    m_lastFrameTime = Clock::time_point{};
     emit liveStateChanged(true);
     return true;
 }
@@ -350,12 +385,15 @@ void AcquisitionEngine::onRawFrame(RawFramePtr f)
     if (!f || f->empty())
         return;
     const auto now = Clock::now();
-    if (m_lastFrameTime.time_since_epoch().count() != 0) {
-        const double dt = std::chrono::duration<double>(now - m_lastFrameTime).count();
+    const auto last = m_lastFrameTime.exchange(now);
+    if (last.time_since_epoch().count() != 0) {
+        // only this thread writes the interval; m_fps is read elsewhere
+        const double dt = std::chrono::duration<double>(now - last).count();
         if (dt > 0)
-            m_fps = m_fps == 0 ? 1.0 / dt : 0.9 * m_fps + 0.1 / dt;
+            m_fps = updateRate(m_frameInterval, dt);
+    } else {
+        m_frameInterval = 0; // the first frame since live started: average afresh
     }
-    m_lastFrameTime = now;
     ++m_received;
 
     std::deque<RawFramePtr> captureFrames;
@@ -438,13 +476,30 @@ void AcquisitionEngine::runAutoExposure(const RawFrame &raw, Camera *cam)
     const ExposureStats st = exposureStats(raw);
     const double level = std::max(st.percentile99, 1e-3);
     double factor = ae.target / level;
+    // Clipped pixels hide how far over the image is: the more of it is white,
+    // the further down, instead of halving step after step.
     if (st.saturatedFraction > 0.02)
-        factor = std::min(factor, 0.5);
-    factor = std::clamp(factor, 0.2, 5.0);
+        factor = std::min(factor, st.saturatedFraction > 0.6 ? 0.2 : st.saturatedFraction > 0.2 ? 0.33 : 0.5);
     if (std::abs(factor - 1.0) < 0.04) {
+        m_aePendingUp = 0;
         m_aeOnce = false;
         return;
     }
+    // A large increase waits for a second frame that agrees: while the turret
+    // turns to another objective the image goes dark for a moment, and chasing
+    // that sent the exposure to its maximum before coming all the way back.
+    // Up is at most 3x a step; the exposure an objective remembers (restored
+    // when it is chosen) is normally within that.
+    if (factor > 1.5) {
+        if (++m_aePendingUp < 2) {
+            m_lastAeChange = Clock::now(); // look again at the next settled frame
+            return;
+        }
+        factor = std::min(factor, 3.0);
+    } else {
+        m_aePendingUp = 0;
+    }
+    factor = std::clamp(factor, 0.2, 3.0);
     const Range r = cam->exposureRange();
     double target = std::clamp(current * factor, r.min, std::min(r.max, ae.maxExposureMs));
     double gain = cam->gain();
@@ -463,6 +518,7 @@ void AcquisitionEngine::runAutoExposure(const RawFrame &raw, Camera *cam)
     }
     if (std::abs(target - current) > 1e-6)
         cam->setExposure(target);
+    m_aePendingUp = 0;
     m_lastAeChange = Clock::now();
     emit exposureChanged(cam->exposure(), cam->gain());
 }
@@ -624,7 +680,7 @@ void AcquisitionEngine::processingLoop()
                 if (m_lastDisplayTime.time_since_epoch().count() != 0) {
                     const double dt = std::chrono::duration<double>(now - m_lastDisplayTime).count();
                     if (dt > 0)
-                        m_displayFps = m_displayFps == 0 ? 1.0 / dt : 0.9 * m_displayFps + 0.1 / dt;
+                        m_displayFps = updateRate(m_displayInterval, dt);
                 }
                 m_lastDisplayTime = now;
                 st.displayFps = m_displayFps;
@@ -770,7 +826,7 @@ void AcquisitionEngine::processingLoop()
             if (m_lastDisplayTime.time_since_epoch().count() != 0) {
                 const double dt = std::chrono::duration<double>(now - m_lastDisplayTime).count();
                 if (dt > 0)
-                    m_displayFps = m_displayFps == 0 ? 1.0 / dt : 0.9 * m_displayFps + 0.1 / dt;
+                    m_displayFps = updateRate(m_displayInterval, dt);
             }
             m_lastDisplayTime = now;
             st.displayFps = m_displayFps;

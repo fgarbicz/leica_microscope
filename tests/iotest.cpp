@@ -1,5 +1,6 @@
 // Image I/O tests: TIFF round trip (8/16 bit, compression, calibration and
-// metadata) and robustness against corrupted files (fuzzing).
+// metadata), robustness against corrupted files (fuzzing), the calibration
+// repair in every format, and .lif read/write.
 #include "io/ImageIO.h"
 #include "io/CalibrationRepair.h"
 #include "io/LifFile.h"
@@ -180,7 +181,7 @@ int main(int argc, char **argv)
         }
         const QString p = dir.filePath(QStringLiteral("bad.tif"));
         QFile o(p);
-        o.open(QIODevice::WriteOnly);
+        CHECK(o.open(QIODevice::WriteOnly));
         o.write(bad);
         o.close();
         LoadedImage li;
@@ -256,6 +257,169 @@ int main(int argc, char **argv)
         }
     }
 
+    std::printf("calibration repair: only the nominal scale is corrected, in every format, once\n");
+    {
+        QTemporaryDir rdir;
+        Image16 small(24, 16);
+        for (int y = 0; y < small.height; ++y)
+            for (int x = 0; x < small.width * 3; ++x)
+                small.row(y)[x] = uint16_t((x * 811 + y * 313) & 0xFFFF);
+        const double nominalWrong = 5.86 / (40 * 0.7), nominalRight = 5.86 / 40.0;
+        ImageMetadata wrong;
+        wrong.magnification = 40;
+        wrong.adapterFactor = 0.7;
+        wrong.umPerPixel = nominalWrong;
+        QString err;
+        auto save = [&](const QString &name, FileFormat fmt, const ImageMetadata &m, bool sidecar = true) {
+            SaveOptions so;
+            so.format = fmt;
+            so.sixteenBit = fmt != FileFormat::Jpeg;
+            so.writeSidecar = sidecar;
+            const QString p = rdir.filePath(name);
+            CHECK(saveImage(p, small, m, so, &err));
+            return p;
+        };
+        const QString png = save(QStringLiteral("wrong.png"), FileFormat::Png, wrong);
+        const QString pngNoSc = save(QStringLiteral("wrong-nosidecar.png"), FileFormat::Png, wrong, false);
+        const QString jpg = save(QStringLiteral("wrong.jpg"), FileFormat::Jpeg, wrong);
+        const QString jpgNoSc = save(QStringLiteral("wrong-nosidecar.jpg"), FileFormat::Jpeg, wrong, false);
+        // 16-shot pixel shift: half the nominal size
+        ImageMetadata shifted = wrong;
+        shifted.umPerPixel = nominalWrong / 2;
+        shifted.captureMode = QStringLiteral("pixelshift-16");
+        const QString shiftTif = save(QStringLiteral("shifted.tif"), FileFormat::Tiff, shifted);
+        // a resized export of a nominal image: labelled nominal, at no whole upscale
+        // of it, so corrected by the adapter ratio. Without the label (older files)
+        // it cannot be told from a calibrated one and is left alone.
+        ImageMetadata resized = wrong;
+        resized.umPerPixel = nominalWrong * 2.5;
+        resized.pixelSizeSource = QString::fromLatin1(kPixelSizeNominal);
+        const QString resizedTif = save(QStringLiteral("resized.tif"), FileFormat::Tiff, resized);
+        ImageMetadata resizedOld = resized;
+        resizedOld.pixelSizeSource.clear();
+        const QString resizedOldTif = save(QStringLiteral("resized-old.tif"), FileFormat::Tiff, resizedOld);
+        auto expectedFor = [&](const QString &p) {
+            return p == shiftTif ? nominalRight / 2 : p == resizedTif ? nominalWrong * 2.5 * 0.7 : nominalRight;
+        };
+
+        // images whose scale was measured or set by hand record the 0.7 adapter too
+        ImageMetadata micro = wrong;
+        micro.umPerPixel = 0.1471;
+        micro.pixelSizeSource = QString::fromLatin1(kPixelSizeCalibrated);
+        const QString microTif = save(QStringLiteral("micrometer.tif"), FileFormat::Tiff, micro);
+        ImageMetadata microOld = micro; // an older file: source not recorded, measured value
+        microOld.pixelSizeSource.clear();
+        const QString microOldPng = save(QStringLiteral("micrometer-old.png"), FileFormat::Png, microOld);
+        ImageMetadata manual = wrong; // hand-entered, and happens to equal the nominal value
+        manual.pixelSizeSource = QString::fromLatin1(kPixelSizeManual);
+        const QString manualTif = save(QStringLiteral("manual.tif"), FileFormat::Tiff, manual);
+
+        QList<CalibrationFix> leftAlone;
+        auto fixes = findCalibrationFixes(rdir.path(), false, 0.7, 1.0, &leftAlone);
+        CHECK(fixes.size() == 6);
+        CHECK(leftAlone.size() == 4);
+        for (const CalibrationFix &f : leftAlone) {
+            CHECK(!f.note.isEmpty());
+            CHECK(f.path == microTif || f.path == microOldPng || f.path == manualTif || f.path == resizedOldTif);
+            CHECK(!applyCalibrationFix(f, 1.0, &err)); // never applied
+        }
+        for (const CalibrationFix &f : fixes) {
+            CHECK(f.path != microTif && f.path != microOldPng && f.path != manualTif && f.path != resizedOldTif);
+            const double expect = expectedFor(f.path);
+            CHECK(std::abs(f.newUmPerPixel - expect) < 1e-9);
+            CHECK(f.rewritesFile == !f.path.endsWith(QLatin1String(".jpg")));
+            CHECK(f.createsSidecar == (f.path == jpgNoSc));
+            const bool applied = applyCalibrationFix(f, 1.0, &err);
+            if (!applied)
+                std::printf("  %s: %s\n", qPrintable(f.path), qPrintable(err));
+            CHECK(applied);
+            // applying the same fix twice changes nothing more
+            CHECK(applyCalibrationFix(f, 1.0, &err));
+        }
+
+        for (const QString &p : {png, pngNoSc, jpg, jpgNoSc, shiftTif, resizedTif}) {
+            const double expect = expectedFor(p);
+            LoadedImage li;
+            CHECK(loadImage(p, li, &err));
+            CHECK(std::abs(li.meta.umPerPixel - expect) < 1e-9);
+            CHECK(std::abs(li.meta.adapterFactor - 1.0) < 1e-9);
+            CHECK(li.meta.pixelSizeSource == QLatin1String(kPixelSizeNominal));
+            ImageMetadata m;
+            CHECK(loadMetadata(p, m));
+            CHECK(std::abs(m.umPerPixel - expect) < 1e-9);
+        }
+        // a PNG's own metadata and density are corrected, not just its sidecar
+        for (const QString &p : {png, pngNoSc}) {
+            ImageMetadata em;
+            CHECK(loadEmbeddedMetadata(p, em));
+            CHECK(std::abs(em.umPerPixel - nominalRight) < 1e-9);
+            QImageReader r(p);
+            const QImage q = r.read();
+            CHECK(q.dotsPerMeterX() == int(std::lround(1e6 / nominalRight)));
+        }
+        CHECK(!QFile::exists(sidecarPath(pngNoSc)));
+        // the JPEG without a sidecar has one now, and it is what the program reads
+        CHECK(QFile::exists(sidecarPath(jpgNoSc)));
+
+        // the files left alone are untouched
+        LoadedImage li;
+        CHECK(loadImage(microTif, li, &err) && std::abs(li.meta.umPerPixel - 0.1471) < 1e-12);
+        CHECK(std::abs(li.meta.adapterFactor - 0.7) < 1e-12);
+        CHECK(loadImage(microOldPng, li, &err) && std::abs(li.meta.umPerPixel - 0.1471) < 1e-12);
+
+        // a second scan finds nothing to correct (only the ones left alone)
+        leftAlone.clear();
+        CHECK(findCalibrationFixes(rdir.path(), false, 0.7, 1.0, &leftAlone).isEmpty());
+        CHECK(leftAlone.size() == 4);
+
+        // a repair interrupted after the file but before its sidecar is finished
+        // by the next scan, without correcting the file a second time
+        const QString half = save(QStringLiteral("half.png"), FileFormat::Png, wrong);
+        fixes = findCalibrationFixes(rdir.path(), false, 0.7, 1.0);
+        CHECK(fixes.size() == 1);
+        if (fixes.size() == 1) {
+            QFile scFile(sidecarPath(half));
+            CHECK(scFile.open(QIODevice::ReadOnly));
+            const QByteArray staleSidecar = scFile.readAll();
+            scFile.close();
+            CHECK(applyCalibrationFix(fixes[0], 1.0, &err));
+            CHECK(scFile.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            scFile.write(staleSidecar);
+            scFile.close();
+            fixes = findCalibrationFixes(rdir.path(), false, 0.7, 1.0);
+            CHECK(fixes.size() == 1 && std::abs(fixes[0].newUmPerPixel - nominalRight) < 1e-9);
+            if (fixes.size() == 1)
+                CHECK(applyCalibrationFix(fixes[0], 1.0, &err));
+            ImageMetadata em;
+            CHECK(loadEmbeddedMetadata(half, em) && std::abs(em.umPerPixel - nominalRight) < 1e-9);
+            CHECK(loadMetadata(half, em) && std::abs(em.umPerPixel - nominalRight) < 1e-9);
+            CHECK(findCalibrationFixes(rdir.path(), false, 0.7, 1.0).isEmpty());
+        }
+    }
+
+    std::printf("sidecar pixel size wins in loadImage as in loadMetadata\n");
+    {
+        ImageMetadata m = meta;
+        m.umPerPixel = 0.3;
+        SaveOptions so;
+        so.format = FileFormat::Png;
+        const QString p = dir.filePath(QStringLiteral("precedence.png"));
+        QString err;
+        CHECK(saveImage(p, img, m, so, &err));
+        ImageMetadata sc;
+        CHECK(loadSidecarMetadata(p, sc));
+        sc.umPerPixel = 0.2;
+        QFile scf(sidecarPath(p));
+        CHECK(scf.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        scf.write(sc.toJsonString().toUtf8());
+        scf.close();
+        LoadedImage li;
+        CHECK(loadImage(p, li, &err) && std::abs(li.meta.umPerPixel - 0.2) < 1e-12);
+        CHECK(li.meta.notes == meta.notes); // the rest still comes from the file
+        ImageMetadata lm2;
+        CHECK(loadMetadata(p, lm2) && std::abs(lm2.umPerPixel - 0.2) < 1e-12);
+    }
+
     // ---- Leica .lif container
     std::printf("lif: write, read back, and keep the pixels and the scale\n");
     {
@@ -297,16 +461,95 @@ int main(int argc, char **argv)
             CHECK(readLifImage(lifPath, index[0], li, &err));
             CHECK(li.data.width == 37 && li.data.height == 19);
             CHECK(std::abs(li.meta.umPerPixel - 0.2929) < 1e-4);
-            // the pixels survive the round trip (8-bit: compare the high byte)
+            // the pixels survive the round trip (8-bit: rounded as the TIFF writer does)
             int worst = 0;
             for (int y = 0; y < a.height; ++y)
                 for (int x = 0; x < a.width * 3; ++x)
-                    worst = std::max(worst, std::abs(int(li.data.row(y)[x] >> 8) - int(a.row(y)[x] >> 8)));
+                    worst = std::max(worst, std::abs(int(li.data.row(y)[x]) - int((a.row(y)[x] + 128) / 257) * 257));
             CHECK(worst == 0);
 
             LoadedImage li2;
             CHECK(readLifImage(lifPath, index[1], li2, &err));
             CHECK(li2.data.width == 64 && li2.data.height == 40);
+        }
+    }
+
+    std::printf("lif: 16-bit colour round trip, over an existing file\n");
+    {
+        const QString lifPath = dir.filePath(QStringLiteral("session.lif")); // replaces the one above
+        Image16 c(41, 23);
+        for (int y = 0; y < c.height; ++y)
+            for (int x = 0; x < c.width; ++x) {
+                c.row(y)[3 * x] = uint16_t(x * 1543 + y * 7);      // distinct values per channel,
+                c.row(y)[3 * x + 1] = uint16_t(y * 2311 + x * 3);  // low bytes included
+                c.row(y)[3 * x + 2] = uint16_t((x + y) * 907 + 1);
+            }
+        QList<LifImageOut> outs;
+        outs.push_back({QStringLiteral("deep"), c, 0.1465, false});
+        QString err;
+        CHECK(writeLif(lifPath, outs, QString(), &err));
+        QList<LifEntry> index;
+        CHECK(readLifIndex(lifPath, index, &err));
+        CHECK(index.size() == 1);
+        if (index.size() == 1) {
+            CHECK(index[0].bitsPerSample == 16 && index[0].bytesPerPixel == 6);
+            CHECK(index[0].redOffset == 4 && index[0].greenOffset == 2 && index[0].blueOffset == 0);
+            LoadedImage li;
+            CHECK(readLifImage(lifPath, index[0], li, &err));
+            CHECK(li.data.width == c.width && li.data.height == c.height && li.data.px == c.px);
+
+            // offsets outside the pixel or a row wider than its stride are refused
+            LifEntry bad = index[0];
+            bad.redOffset = 5; // + 2 bytes > 6
+            CHECK(!readLifImage(lifPath, bad, li, &err) && !err.isEmpty());
+            bad = index[0];
+            bad.rowStride = bad.width * bad.bytesPerPixel - 1;
+            CHECK(!readLifImage(lifPath, bad, li, &err));
+            bad = index[0];
+            bad.width = bad.height = 1 << 28; // claims far more than the file holds
+            bad.rowStride = qint64(bad.width) * bad.bytesPerPixel;
+            CHECK(!readLifImage(lifPath, bad, li, &err));
+            LoadedImage viaLoad;
+            CHECK(loadImage(lifPath, viaLoad, &err) && viaLoad.data.px == c.px);
+
+            // Planar channels (a fluorescence image stores each as a plane of its
+            // own): the same data block read as three planes of w*h samples, as
+            // LAS X describes such a file - channel offsets a plane apart.
+            QFile raw(lifPath);
+            CHECK(raw.open(QIODevice::ReadOnly) && raw.seek(index[0].dataOffset));
+            const QByteArray block = raw.read(index[0].dataBytes);
+            raw.close();
+            const qint64 plane = qint64(c.width) * c.height * 2;
+            CHECK(block.size() == 3 * plane);
+            auto rawSample = [&](qint64 byteOffset) {
+                const auto *b = reinterpret_cast<const uchar *>(block.constData()) + byteOffset;
+                return uint16_t(b[0] | b[1] << 8);
+            };
+            LifEntry planar = index[0];
+            planar.bytesPerPixel = 2;
+            planar.rowStride = qint64(c.width) * 2;
+            planar.redOffset = 0;
+            planar.greenOffset = plane;
+            planar.blueOffset = 2 * plane;
+            LoadedImage pl;
+            CHECK(readLifImage(lifPath, planar, pl, &err));
+            bool planesMatch = pl.data.width == c.width && pl.data.height == c.height;
+            for (int y = 0; planesMatch && y < c.height; ++y)
+                for (int x = 0; x < c.width; ++x)
+                    for (int ch = 0; ch < 3; ++ch)
+                        if (pl.data.row(y)[3 * x + ch] != rawSample(ch * plane + (qint64(y) * c.width + x) * 2))
+                            planesMatch = false;
+            CHECK(planesMatch);
+            // a mono image shows its first channel, wherever that is
+            LifEntry mono = planar;
+            mono.colour = false;
+            mono.firstOffset = plane; // the second plane
+            CHECK(readLifImage(lifPath, mono, pl, &err));
+            CHECK(pl.data.row(3)[3 * 5] == rawSample(plane + (3 * qint64(c.width) + 5) * 2)
+                  && pl.data.row(3)[3 * 5 + 1] == pl.data.row(3)[3 * 5]);
+            // a plane that would run past the data block is refused
+            planar.blueOffset = 2 * plane + 2;
+            CHECK(!readLifImage(lifPath, planar, pl, &err) && !err.isEmpty());
         }
     }
 

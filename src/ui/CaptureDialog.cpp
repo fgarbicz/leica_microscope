@@ -1,10 +1,15 @@
 #include "ui/Theme.h"
 #include "CaptureDialog.h"
 
+#include "ui/Icons.h"
+
 #include "app/Calibration.h"
 
+#include <QApplication>
 #include <QButtonGroup>
 #include <QDialogButtonBox>
+#include <QDir>
+#include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QKeyEvent>
@@ -13,22 +18,31 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QRegularExpressionValidator>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 namespace lm {
 
 CaptureDialog::CaptureDialog(const QImage &preview, const MicroscopeConfig &scope, int objective,
-                             std::function<QString(int)> nameForObjective, const QString &info, QWidget *parent)
-    : QDialog(parent), m_nameFor(std::move(nameForObjective))
+                             std::function<QString(int)> nameForObjective, const QString &info,
+                             const QString &folder, QWidget *parent)
+    : QDialog(parent), m_nameFor(std::move(nameForObjective)), m_folder(folder)
 {
     setWindowTitle(tr("Save image"));
     setModal(true);
     auto *lay = new QVBoxLayout(this);
-    lay->setSpacing(10);
+    lay->setSpacing(px(10));
 
     auto *pic = new QLabel(this);
     pic->setAlignment(Qt::AlignCenter);
-    pic->setPixmap(QPixmap::fromImage(preview.scaled(560, 360, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+    {
+        // at the interface size, and in physical pixels on a high-DPI screen
+        const qreal dpr = devicePixelRatioF();
+        QPixmap pm = QPixmap::fromImage(
+            preview.scaled(QSize(px(560), px(360)) * dpr, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        pm.setDevicePixelRatio(dpr);
+        pic->setPixmap(pm);
+    }
     lay->addWidget(pic);
     if (!info.isEmpty()) {
         auto *inf = new QLabel(info, this);
@@ -41,7 +55,7 @@ CaptureDialog::CaptureDialog(const QImage &preview, const MicroscopeConfig &scop
     magLabel->setStyleSheet(QStringLiteral("font-weight:600;"));
     lay->addWidget(magLabel);
     auto *row = new QHBoxLayout;
-    row->setSpacing(6);
+    row->setSpacing(px(6));
     m_group = new QButtonGroup(this);
     m_group->setExclusive(true);
     for (int i = 0; i < scope.objectives.size(); ++i) {
@@ -50,7 +64,9 @@ CaptureDialog::CaptureDialog(const QImage &preview, const MicroscopeConfig &scop
         b->setCheckable(true);
         b->setMinimumSize(px(72), px(44));
         b->setToolTip(QStringLiteral("%1   (key %2)").arg(scope.objectiveLabel(o)).arg(i + 1));
-        b->setStyleSheet(QStringLiteral("QPushButton{font-size:12pt;font-weight:700;}"));
+        // a third larger than the interface text, so it follows the interface size
+        b->setStyleSheet(QStringLiteral("QPushButton{font-size:%1pt;font-weight:700;}")
+                             .arg(QApplication::font().pointSizeF() * 4 / 3, 0, 'f', 1));
         m_group->addButton(b, i);
         row->addWidget(b);
     }
@@ -65,7 +81,29 @@ CaptureDialog::CaptureDialog(const QImage &preview, const MicroscopeConfig &scop
     m_notes = new QLineEdit(this);
     m_notes->setPlaceholderText(tr("optional (stored in the image metadata)"));
     form->addRow(tr("Notes"), m_notes);
+    // where the image goes, changeable here; the choice becomes the image folder
+    auto *folderRow = new QHBoxLayout;
+    folderRow->setSpacing(px(6));
+    m_folderLabel = new QLabel(this);
+    m_folderLabel->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    folderRow->addWidget(m_folderLabel, 1);
+    auto *choose = new QToolButton(this);
+    choose->setIcon(icon(Icon::Folder));
+    choose->setText(tr("Change…"));
+    choose->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    choose->setToolTip(tr("Choose the folder this image (and the next ones) are saved in"));
+    connect(choose, &QToolButton::clicked, this, [this] {
+        const QString d = QFileDialog::getExistingDirectory(this, tr("Save images in"), m_folder);
+        if (!d.isEmpty()) {
+            m_folder = d;
+            showFolder();
+        }
+        m_name->setFocus();
+    });
+    folderRow->addWidget(choose);
+    form->addRow(tr("Save in"), folderRow);
     lay->addLayout(form);
+    showFolder();
 
     auto *bb = new QDialogButtonBox(this);
     auto *save = bb->addButton(tr("Save"), QDialogButtonBox::AcceptRole);
@@ -143,6 +181,14 @@ int CaptureDialog::objectiveIndex() const
 QString CaptureDialog::imageName() const
 {
     return m_name->text().trimmed();
+}
+
+void CaptureDialog::showFolder()
+{
+    const QString native = QDir::toNativeSeparators(m_folder);
+    // long paths keep their end (the folder's own name) visible
+    m_folderLabel->setText(m_folderLabel->fontMetrics().elidedText(native, Qt::ElideLeft, px(380)));
+    m_folderLabel->setToolTip(native);
 }
 
 QString CaptureDialog::notes() const

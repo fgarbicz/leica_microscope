@@ -47,9 +47,6 @@ public:
     double blackLevel() const override { return 8.0 / 4095.0; } // ~8 DN, see docs/DMC6200_PROTOCOL.md
     bool supportsHdr() const override { return true; } // raw Bayer, exposure from each frame header
 
-    std::vector<CameraProperty> properties() const override;
-    bool setProperty(const std::string &key, double value) override;
-
     std::vector<ShotMode> shotModes() const override;
     std::array<double, 9> colorMatrix() const override;
     std::string colorMatrixName() const override { return "IMX174, 3200 K halogen, Jenoptik calibration"; }
@@ -61,7 +58,8 @@ public:
 private:
     struct Roi { int x, y, w, h; };
     void stopAndFlush();                        // stop + flush acquisition, reset stream pipes
-    bool configure(std::string &error);         // stop + registers + sequence
+    // stop + registers + sequence; fullFrame overrides the ROI of m_resIndex (pixel shift)
+    bool configure(std::string &error, bool fullFrame = false);
     bool startLiveLocked(std::string &error);
     void stopLiveLocked();
     void streamLoop();
@@ -77,10 +75,9 @@ private:
     std::atomic<bool> m_threadDone{true};
     std::atomic<double> m_exposureMs{20.0};
     std::atomic<double> m_gain{1.0};
-    int m_resIndex = 0;
+    std::atomic<int> m_resIndex{0}; // read by the UI while a capture job reconfigures
     std::vector<Roi> m_rois;
     int m_sensorW = 1920, m_sensorH = 1200, m_adcBits = 12;
-    int m_piezoRestX = 46, m_piezoRestY = 46;
     std::string m_serial, m_sensor, m_board;
     uint64_t m_seq = 0;
     std::shared_ptr<FramePool> m_pool = FramePool::create(12);

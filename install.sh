@@ -68,6 +68,6 @@ else
     echo "Installed DM Imaging into $prefix"
     echo
     echo "One more step so the camera can be opened without root:"
-    echo "    sudo sh $root/driver/install_udev_rule.sh"
+    echo "    sudo bash $root/driver/install_udev_rule.sh"
     echo "then unplug the camera and plug it back in."
 fi

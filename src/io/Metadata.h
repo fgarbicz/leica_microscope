@@ -9,6 +9,11 @@
 
 namespace lm {
 
+// Where ImageMetadata::pixelSizeSource says the pixel size came from.
+inline constexpr char kPixelSizeNominal[] = "nominal";       // sensor pitch / (objective x adapter)
+inline constexpr char kPixelSizeCalibrated[] = "calibrated"; // the objective's calibrated value (stage micrometer)
+inline constexpr char kPixelSizeManual[] = "manual";         // entered by hand
+
 struct ImageMetadata {
     QString software = QStringLiteral("DM Imaging");
     QString softwareVersion;
@@ -22,6 +27,7 @@ struct ImageMetadata {
     double numericalAperture = 0.0;
     double adapterFactor = 1.0;  // C-mount / camera adapter magnification
     double umPerPixel = 0.0;     // calibrated pixel size in the specimen plane
+    QString pixelSizeSource;     // kPixelSizeNominal / Calibrated / Manual; empty = not recorded (older files)
     double exposureMs = 0.0;
     QVector<double> exposureSeriesMs; // HDR: every exposure merged (exposureMs = the reference)
     double gain = 1.0;

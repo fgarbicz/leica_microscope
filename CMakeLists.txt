@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(DMImaging VERSION 1.1.1 LANGUAGES C CXX)
+project(DMImaging VERSION 1.1.2 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -17,9 +17,9 @@ if(APPLE)
 endif()
 
 if(MSVC)
-    add_compile_options(/W4 /permissive- /utf-8 /MP /wd4127 /wd4251)
+    add_compile_options(/W4 /permissive- /utf-8 /wd4127 /wd4251)
     add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN _CRT_SECURE_NO_WARNINGS)
-    # optimise the imaging code even in debug builds
+    # whole-program optimisation for release builds
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /Oi /GL")
     set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /LTCG")
 else()
@@ -32,6 +32,7 @@ else()
 endif()
 
 option(BUILD_APP "Build the Qt application" ON)
+enable_testing()
 
 # ------------------------------------------------------------------ libusb
 # The native Leica camera driver speaks USB directly. Windows uses WinUSB from
@@ -117,7 +118,7 @@ set(QT_COMPONENTS Core Gui Widgets Concurrent Svg PrintSupport)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     list(APPEND QT_COMPONENTS DBus)   # "show in file manager" via org.freedesktop.FileManager1
 endif()
-find_package(Qt6 6.5 REQUIRED COMPONENTS ${QT_COMPONENTS})
+find_package(Qt6 6.4 REQUIRED COMPONENTS ${QT_COMPONENTS})
 
 set(APP_SOURCES
     src/app/main.cpp
@@ -257,7 +258,6 @@ endif()
 add_executable(dmctest tools/dmctest/dmctest.cpp)
 target_link_libraries(dmctest PRIVATE lmcore)
 
-enable_testing()
 add_executable(lmtests tests/tests.cpp)
 target_link_libraries(lmtests PRIVATE lmcore)
 add_test(NAME lmtests COMMAND lmtests)

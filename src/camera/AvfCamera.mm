@@ -246,11 +246,21 @@ bool AvfCamera::open(std::string &error)
 void AvfCamera::close()
 {
     stopStreaming();
-    std::lock_guard<std::mutex> lock(m_mutex);
+    // m_impl is only created and destroyed on the thread that owns the camera,
+    // so it can be read here without the lock
     if (!m_impl)
         return;
     @autoreleasepool {
+        // No new callbacks after this, but one may already be running on the
+        // capture queue (stopRunning does not wait for the delegate). Drain the
+        // serial queue before the delegate and `this` go away. Not under m_mutex:
+        // deliverFrame() takes it, and would deadlock against the dispatch_sync.
         [m_impl->output setSampleBufferDelegate:nil queue:nil];
+        if (m_impl->queue)
+            dispatch_sync(m_impl->queue, ^{});
+    }
+    std::lock_guard<std::mutex> lock(m_mutex);
+    @autoreleasepool {
         if (m_impl->delegate)
             m_impl->delegate.owner = nullptr;
         m_impl->delegate = nil;
@@ -263,6 +273,18 @@ void AvfCamera::close()
     delete m_impl;
     m_impl = nullptr;
     m_resolutions.clear();
+}
+
+std::vector<Resolution> AvfCamera::resolutions() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_resolutions;
+}
+
+int AvfCamera::resolutionIndex() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_resIndex;
 }
 
 bool AvfCamera::startStreaming(std::string &error)

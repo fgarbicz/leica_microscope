@@ -7,6 +7,14 @@
 param([switch]$Uninstall)
 
 $ErrorActionPreference = 'Stop'
+# Everything is written with Write-Host so that a caller redirecting this script's
+# output (Setup's log, the application's "Install / repair camera driver") gets all
+# of it: Out-Host bypasses redirection, and an uncaught error would end the script
+# without its message reaching the log.
+trap {
+    Write-Host "ERROR: $_"
+    exit 1
+}
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
@@ -91,7 +99,7 @@ if (-not $makecat) {
     Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
     New-Item -ItemType Directory $stage | Out-Null
     Copy-Item $inf $stage
-    New-FileCatalog -Path $stage -CatalogFilePath $cat -CatalogVersion 2 | Out-Host
+    New-FileCatalog -Path $stage -CatalogFilePath $cat -CatalogVersion 2 | Out-String | Write-Host
     $sig = Set-AuthenticodeSignature -FilePath $cat -Certificate $cert -HashAlgorithm SHA256
     Write-Host "Catalog signature: $($sig.Status)"
 } else {
@@ -109,9 +117,9 @@ CATATTR1=0x10010001:OSAttr:2:6.1,2:6.2,2:6.3,2:10.0
 <hash>LeicaUsb3Cam.infATTR1=0x10010001:OSAttr:2:6.1,2:6.2,2:6.3,2:10.0
 "@ | Set-Content -Path $cdf -Encoding ASCII
 if (Test-Path $cat) { Remove-Item $cat -Force }
-& $makecat -v $cdf | Out-Host
+& $makecat -v $cdf | Out-String | Write-Host
 if (-not (Test-Path $cat)) { throw 'makecat failed' }
-& $signtool sign /v /fd SHA256 /sm /s My /sha1 $cert.Thumbprint $cat | Out-Host
+& $signtool sign /v /fd SHA256 /sm /s My /sha1 $cert.Thumbprint $cat | Out-String | Write-Host
 if ($LASTEXITCODE -ne 0) { throw 'signtool failed' }
 }
 
@@ -119,7 +127,7 @@ if ($LASTEXITCODE -ne 0) { throw 'signtool failed' }
 # pnputil /install also binds the driver to a connected camera, so the camera's USB
 # device is not restarted here (restarting it can leave the camera without its sensor)
 Write-Host 'Installing driver package'
-pnputil /add-driver $inf /install | Out-Host
+pnputil /add-driver $inf /install | Out-String | Write-Host
 $rc = $LASTEXITCODE
 # 0 = ok, 259 = already up to date / no matching device, 3010 = ok, restart needed
 if ($rc -eq 3010) {
@@ -127,6 +135,6 @@ if ($rc -eq 3010) {
 } elseif ($rc -ne 0 -and $rc -ne 259) {
     throw "pnputil failed with exit code $rc"
 }
-Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -like 'USB\VID_1711&PID_30E0*' } | Format-Table Status, Class, FriendlyName -AutoSize | Out-Host
+Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -like 'USB\VID_1711&PID_30E0*' } | Format-Table Status, Class, FriendlyName -AutoSize | Out-String | Write-Host
 Write-Host 'Camera driver ready.'
 exit 0

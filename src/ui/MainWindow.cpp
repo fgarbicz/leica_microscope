@@ -40,6 +40,11 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMenu>
+#include <QPushButton>
+#include <QTimer>
+#include <QToolButton>
+#include <QButtonGroup>
+#include <QActionGroup>
 #include <QMenuBar>
 #include <QPainter>
 #include <QMessageBox>
@@ -113,7 +118,7 @@ MainWindow::MainWindow()
     auto *top = new QWidget(central);
     top->setObjectName(QStringLiteral("TopBar"));
     auto *tl = new QHBoxLayout(top);
-    tl->setContentsMargins(0, 0, 8, 0);
+    tl->setContentsMargins(0, 0, px(8), 0);
     auto *logo = new QLabel(top);
     logo->setPixmap(QIcon(QStringLiteral(":/icons/app.png")).pixmap(lm::iconSize(20)));
     logo->setContentsMargins(px(12), 0, 0, 0);
@@ -178,6 +183,7 @@ MainWindow::MainWindow()
         m_capturing = false;
         m_capturePanel->setBusy(false);
         m_cameraPanel->setBusy(false);
+        updateCaptureState();
         if (m_timelapse.isActive()) { // do not interrupt a time lapse with dialogs
             showMessage(tr("Capture failed: %1").arg(m), 8000);
             return;
@@ -253,6 +259,8 @@ MainWindow::MainWindow()
     connect(m_engine, &AcquisitionEngine::liveStateChanged, this, [this](bool live) {
         if (m_engine->camera())
             setCameraLed(live ? CameraState::Live : CameraState::Ready);
+        if (!live)
+            m_statusFps->clear(); // no frames: the last rate no longer applies
         if (!live && m_timelapse.isActive()) {
             m_timelapse.stop();
             const auto &c = AppSettings::instance().capture;
@@ -298,11 +306,11 @@ QWidget *MainWindow::buildAcquirePage()
     m_cameraPanel = new CameraPanel(m_engine, left);
     m_scopePanel = new MicroscopePanel(&m_scope, left);
     m_capturePanel = new CapturePanel(left);
-    // workflow order: connect the camera, set the exposure, pick the objective,
-    // then capture
+    // Capturing is what the page is for, so it comes first, where the eye starts;
+    // then the camera and the microscope, which are set up once per session
+    ll->addWidget(m_capturePanel);
     ll->addWidget(m_cameraPanel);
     ll->addWidget(m_scopePanel);
-    ll->addWidget(m_capturePanel);
     ll->addStretch();
     m_leftPanel = panelScroll(left, panelWidth());
     split->addWidget(m_leftPanel);
@@ -314,13 +322,56 @@ QWidget *MainWindow::buildAcquirePage()
     m_view = new ImageView(centre);
     m_view->setPlaceholder(tr("No camera connected\n\nConnect the camera in the Camera panel (or use the simulator)."));
     m_view->installEventFilter(this);
-    m_gallery = new GalleryWidget(centre);
+    // the strip with a header that names it and switches its layout
+    auto *galleryBox = new QWidget(centre);
+    auto *gbl = new QVBoxLayout(galleryBox);
+    gbl->setContentsMargins(0, 0, 0, 0);
+    gbl->setSpacing(0);
+    auto *gh = new QWidget(galleryBox);
+    auto *ghl = new QHBoxLayout(gh);
+    ghl->setContentsMargins(px(8), px(3), px(4), px(3));
+    ghl->setSpacing(px(2));
+    auto *ghTitle = new QLabel(tr("Captured images"), gh);
+    ghTitle->setObjectName(QStringLiteral("ControlLabel"));
+    ghl->addWidget(ghTitle);
+    ghl->addStretch();
+    auto *layoutGroup = new QButtonGroup(gh); // exactly one layout is on
+    layoutGroup->setExclusive(true);
+    auto layoutButton = [&](Icon ic, const QString &text, const QString &tip, int mode) {
+        auto *b = new QToolButton(gh);
+        b->setIcon(icon(ic));
+        b->setText(text);
+        b->setToolTip(tip);
+        b->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        b->setCheckable(true);
+        b->setFocusPolicy(Qt::NoFocus);
+        // on being checked, not on clicked: keyboard and accessibility "press"
+        // toggle a checkable button without a click
+        connect(b, &QToolButton::toggled, this, [this, mode](bool on) {
+            if (on)
+                setGalleryMode(mode);
+        });
+        layoutGroup->addButton(b);
+        ghl->addWidget(b);
+        m_galleryModeBtn[mode] = b;
+    };
+    layoutButton(Icon::LayoutReel, tr("Reel"), tr("Captured images in a row under the live image"), GalleryReel);
+    layoutButton(Icon::LayoutList, tr("List"), tr("Captured images in a list beside the live image, with their names"),
+                 GalleryList);
+    layoutButton(Icon::LayoutCompact, tr("Compact"),
+                 tr("Captured images as a compact list: small thumbnails and names, many at once"), GalleryCompact);
+    gbl->addWidget(gh);
+    m_gallery = new GalleryWidget(galleryBox);
+    gbl->addWidget(m_gallery, 1);
     centre->addWidget(m_view);
-    centre->addWidget(m_gallery);
+    centre->addWidget(galleryBox);
     centre->setStretchFactor(0, 5);
     centre->setStretchFactor(1, 1);
     split->addWidget(centre);
     applyGalleryLayout(AppSettings::instance().galleryVertical);
+    // the split above was made before the window had its size (the list then
+    // took half the image's room); once it is shown, make it again
+    QTimer::singleShot(0, this, [this] { applyGalleryLayout(AppSettings::instance().galleryVertical); });
 
     // right: what the image is (histogram, focus, information), then how it is
     // adjusted, then what is drawn over it
@@ -438,6 +489,7 @@ QWidget *MainWindow::buildAcquirePage()
     });
 
     connect(m_capturePanel, &CapturePanel::captureRequested, this, &MainWindow::capture);
+    updateCaptureState();
     connect(m_capturePanel, &CapturePanel::settingsChanged, this, &MainWindow::updateNextName);
     connect(m_capturePanel, &CapturePanel::timelapseToggled, this, [this](bool start) {
         const auto &c = AppSettings::instance().capture;
@@ -602,9 +654,20 @@ void MainWindow::buildMenus()
         SettingsDialog dlg(this);
         connect(&dlg, &SettingsDialog::appearanceChanged, this,
                 [this](const QString &t, int scale) { applyAppearance(t, scale); });
+        bool reset = false;
+        connect(&dlg, &SettingsDialog::resetAllRequested, this, [&reset] { reset = true; });
         if (dlg.exec() == QDialog::Accepted) {
+            setGalleryMode(dlg.galleryMode());
             m_capturePanel->refreshFromSettings();
             updateNextName();
+        }
+        if (reset) {
+            // quit the normal way, so an unsaved result or a running capture is
+            // asked about first; closeEvent() erases the settings once it is
+            // sure the application is closing
+            m_resetSettingsOnClose = true;
+            if (!close())
+                m_resetSettingsOnClose = false;
         }
     });
     // macOS moves these two into the application menu; the roles tell Qt which.
@@ -667,10 +730,18 @@ void MainWindow::buildMenus()
     view->addAction(icon(Icon::Browse), tr("&Browse"), QKeySequence(tr("Alt+2")), this, [this] { m_tabs->setCurrentIndex(1); });
     view->addAction(icon(Icon::Process), tr("&Process"), QKeySequence(tr("Alt+3")), this, [this] { m_tabs->setCurrentIndex(2); });
     view->addSeparator();
-    view->addAction(icon(Icon::ZoomFit), tr("Zoom to &fit"), QKeySequence(tr("Ctrl+0")), m_view, &ImageView::zoomFit);
-    view->addAction(icon(Icon::ZoomActual), tr("Actual &pixels"), QKeySequence(tr("Ctrl+Alt+0")), m_view, &ImageView::zoomActual);
-    view->addAction(icon(Icon::ZoomIn), tr("Zoom &in"), QKeySequence::ZoomIn, m_view, &ImageView::zoomIn);
-    view->addAction(icon(Icon::ZoomOut), tr("Zoom &out"), QKeySequence::ZoomOut, m_view, &ImageView::zoomOut);
+    // each workspace has its own image; the zoom commands act on the one shown
+    auto zoomAction = [this](void (ImageView::*zoom)()) {
+        return [this, zoom] {
+            if (ImageView *v = currentImageView())
+                (v->*zoom)();
+        };
+    };
+    view->addAction(icon(Icon::ZoomFit), tr("Zoom to &fit"), QKeySequence(tr("Ctrl+0")), this, zoomAction(&ImageView::zoomFit));
+    view->addAction(icon(Icon::ZoomActual), tr("Actual &pixels"), QKeySequence(tr("Ctrl+Alt+0")), this,
+                    zoomAction(&ImageView::zoomActual));
+    view->addAction(icon(Icon::ZoomIn), tr("Zoom &in"), QKeySequence::ZoomIn, this, zoomAction(&ImageView::zoomIn));
+    view->addAction(icon(Icon::ZoomOut), tr("Zoom &out"), QKeySequence::ZoomOut, this, zoomAction(&ImageView::zoomOut));
     view->addSeparator();
     // reference overlay: an earlier capture over the live image, to find the same
     // area on the next serial section
@@ -707,12 +778,21 @@ void MainWindow::buildMenus()
     }
     m_view->setReferenceOpacity(savedOpacity / 100.0);
     view->addSeparator();
-    m_galleryVerticalAct = view->addAction(icon(Icon::Browse), tr("Captured images in a &vertical list"));
-    m_galleryVerticalAct->setCheckable(true);
-    m_galleryVerticalAct->setChecked(AppSettings::instance().galleryVertical);
-    m_galleryVerticalAct->setToolTip(tr("Show the images captured in this session beside the live image with their "
-                                        "names, instead of as a reel underneath it"));
-    connect(m_galleryVerticalAct, &QAction::toggled, this, &MainWindow::setGalleryVertical);
+    {
+        QMenu *strip = view->addMenu(icon(Icon::LayoutReel), tr("&Captured images"));
+        auto *group = new QActionGroup(this);
+        m_galleryModeAct[GalleryReel] = strip->addAction(icon(Icon::LayoutReel), tr("&Reel under the live image"));
+        m_galleryModeAct[GalleryList] = strip->addAction(icon(Icon::LayoutList), tr("&List beside the live image"));
+        m_galleryModeAct[GalleryCompact] =
+            strip->addAction(icon(Icon::LayoutCompact), tr("&Compact list (small thumbnails, many images)"));
+        for (int m = 0; m < 3; ++m) {
+            m_galleryModeAct[m]->setCheckable(true);
+            group->addAction(m_galleryModeAct[m]);
+            connect(m_galleryModeAct[m], &QAction::triggered, this, [this, m] { setGalleryMode(m); });
+        }
+        const auto &S = AppSettings::instance();
+        syncGalleryControls(!S.galleryVertical ? GalleryReel : S.galleryCompact ? GalleryCompact : GalleryList);
+    }
     view->addSeparator();
     QMenu *size = view->addMenu(tr("&Interface size"));
     size->setIcon(icon(Icon::Settings));
@@ -757,10 +837,12 @@ void MainWindow::buildMenus()
                      &MainWindow::startCalibration);
     if (cameraAccessSetupAvailable())
         tools->addAction(icon(Icon::Chip), cameraAccessSetupLabel(), this, [this] {
-            const QString r = setUpCameraAccess(this);
-            if (!r.isEmpty())
-                showMessage(r, 6000);
-            m_cameraPanel->refreshCameras();
+            // returns at once; the installer reports when it is done
+            setUpCameraAccess(this, [this](const QString &r) {
+                if (!r.isEmpty())
+                    showMessage(r, 6000);
+                m_cameraPanel->refreshCameras();
+            });
         });
     tools->addAction(icon(Icon::Refresh), tr("&Search cameras"), m_cameraPanel, &CameraPanel::refreshCameras);
     tools->addSeparator();
@@ -792,35 +874,44 @@ void MainWindow::buildMenus()
     });
     help->addSeparator();
     help->addAction(icon(Icon::Help), tr("&Keyboard shortcuts"), this, [this] {
-        // Qt maps Ctrl to Command on macOS; name the key the user's keyboard has.
-#ifdef Q_OS_MACOS
-        const QString ctrl = QStringLiteral("Cmd");
-#else
-        const QString ctrl = QStringLiteral("Ctrl");
-#endif
+        // Every combination is the one the menus really use, spelled the way
+        // this platform does (Qt maps Ctrl to Command on macOS, and Redo is
+        // Ctrl+Y on Windows but Shift+Ctrl+Z elsewhere).
+        auto key = [](const QKeySequence &k) { return k.toString(QKeySequence::NativeText).toHtmlEscaped(); };
+        // the Ctrl (Command) modifier on its own, for "Ctrl+drag"
+        QString ctrl = QKeySequence(Qt::CTRL | Qt::Key_A).toString(QKeySequence::NativeText);
+        ctrl.chop(1);
         QMessageBox box(QMessageBox::NoIcon, tr("Keyboard shortcuts"),
                         tr("<b>Camera</b><br>"
                            "F5 — live on/off · F6 — freeze<br>"
                            "F7 — auto white balance · F8 — auto exposure once<br>"
                            "F9 or Space — capture image · F1 — user guide<br>"
-                           "%1+R — reference overlay (earlier image over the live image)<br>"
-                           "%1+1, %1+2, … — select objective<br><br>"
+                           "%1 — reference overlay (earlier image over the live image)<br>"
+                           "%2, %3, … — select objective<br><br>"
                            "<b>Workspaces</b><br>"
-                           "Alt+1 / Alt+2 / Alt+3 — Acquire / Browse / Process · F11 — full screen<br><br>"
+                           "%4 / %5 / %6 — Acquire / Browse / Process · F11 — full screen<br><br>"
                            "<b>Image</b><br>"
                            "Mouse wheel over the image — zoom<br>"
-                           "Double click — fit / 100%%  ·  0 / 1 / 2 — fit / 100%% / 200%%<br>"
-                           "%1+drag or middle drag — pan<br>"
-                           "%1+0 — fit · %1++ / %1+- — zoom in / out<br><br>"
+                           "Double click — fit / 100%  ·  0 / 1 / 2 — fit / 100% / 200%<br>"
+                           "%7drag or middle drag — pan<br>"
+                           "%8 — fit · %9 / %10 — zoom in / out<br><br>"
                            "<b>Annotations</b><br>"
-                           "Del — delete selected · %1+Z / %1+Y — undo / redo<br><br>"
+                           "Del — delete selected · %11 / %12 — undo / redo<br><br>"
                            "<b>Side panels</b><br>"
                            "The mouse wheel scrolls the panel. It never changes a setting: "
                            "drag a slider, type in the box, or use the arrow keys.<br><br>"
                            "<b>Interface size</b><br>"
-                           "%1+Shift++ / %1+Shift+- — larger / smaller text<br>"
-                           "%1+Shift+0 — back to the default size")
-                            .arg(ctrl),
+                           "%13 / %14 — larger / smaller text<br>"
+                           "%15 — back to the default size")
+                            .arg(key(referenceOverlayShortcut()), key(QKeySequence(QStringLiteral("Ctrl+1"))),
+                                 key(QKeySequence(QStringLiteral("Ctrl+2"))), key(QKeySequence(tr("Alt+1"))),
+                                 key(QKeySequence(tr("Alt+2"))), key(QKeySequence(tr("Alt+3"))), ctrl.toHtmlEscaped(),
+                                 key(QKeySequence(tr("Ctrl+0"))), key(QKeySequence(QKeySequence::ZoomIn)))
+                            .arg(key(QKeySequence(QKeySequence::ZoomOut)), key(QKeySequence(QKeySequence::Undo)),
+                                 key(QKeySequence(QKeySequence::Redo)),
+                                 key(QKeySequence(QStringLiteral("Ctrl+Shift+="))),
+                                 key(QKeySequence(QStringLiteral("Ctrl+Shift+-"))),
+                                 key(QKeySequence(QStringLiteral("Ctrl+Shift+0")))),
                         QMessageBox::Ok, this);
         box.setTextFormat(Qt::RichText);
         box.exec();
@@ -849,6 +940,34 @@ void MainWindow::startup()
         m_reconnect.start();
     }
     onCameraChanged();
+}
+
+void MainWindow::openPaths(const QStringList &paths)
+{
+    QStringList files;
+    for (const QString &p : paths) {
+        const QFileInfo fi(p);
+        if (!fi.exists()) {
+            showMessage(tr("%1 does not exist").arg(QDir::toNativeSeparators(p)), 8000);
+            continue;
+        }
+        if (fi.isDir()) {
+            m_browse->setFolder(fi.absoluteFilePath());
+            m_tabs->setCurrentIndex(1);
+            continue;
+        }
+        files << fi.absoluteFilePath();
+    }
+    if (files.isEmpty())
+        return;
+    // Process shows one image; the others are a click away in Browse
+    m_browse->setFolder(QFileInfo(files.first()).absolutePath());
+    if (m_process->openFile(files.first()))
+        m_tabs->setCurrentIndex(2);
+    if (files.size() > 1)
+        showMessage(tr("Opened %1; the other %n image(s) are in Browse", nullptr, int(files.size() - 1))
+                        .arg(QFileInfo(files.first()).fileName()),
+                    8000);
 }
 
 void MainWindow::applyLiveDab()
@@ -905,8 +1024,8 @@ void MainWindow::exportSessionToLif()
         QDir(S.capture.folder)
             .filePath(QStringLiteral("%1_%2.lif").arg(sample, QDateTime::currentDateTime().toString(
                                                                   QStringLiteral("yyyyMMdd_HHmmss"))));
-    const QString path = QFileDialog::getSaveFileName(this, tr("Export captured images to a Leica .lif"), suggested,
-                                                      tr("Leica image file (*.lif)"));
+    const QString path = lm::getSaveFileName(this, tr("Export captured images to a Leica .lif"), suggested,
+                                             tr("Leica image file (*.lif)"));
     if (path.isEmpty())
         return;
 
@@ -949,23 +1068,45 @@ void MainWindow::applyGalleryLayout(bool vertical)
 {
     if (!m_centreSplitter || !m_gallery)
         return;
+    m_gallery->setCompact(AppSettings::instance().galleryCompact);
     m_gallery->setVertical(vertical);
     m_centreSplitter->setOrientation(vertical ? Qt::Horizontal : Qt::Vertical);
     // The splitter keeps the sizes it had, which are meaningless once the
     // orientation flips, so give it a sensible split of the space it has.
     const int total = vertical ? m_centreSplitter->width() : m_centreSplitter->height();
-    const int strip = vertical ? px(250) : px(150);
+    const int strip = !vertical ? px(150) : AppSettings::instance().galleryCompact ? px(200) : px(250);
     const int image = std::max(px(200), (total > 0 ? total : px(950)) - strip);
     m_centreSplitter->setSizes({image, strip});
 }
 
-void MainWindow::setGalleryVertical(bool vertical)
+void MainWindow::syncGalleryControls(int mode)
 {
-    AppSettings::instance().galleryVertical = vertical;
-    AppSettings::instance().save();
+    for (int m = 0; m < 3; ++m) {
+        if (m_galleryModeAct[m])
+            m_galleryModeAct[m]->setChecked(m == mode);
+        if (m_galleryModeBtn[m] && m == mode) {
+            // the group unchecks the others; no signal back into setGalleryMode()
+            const QSignalBlocker block(m_galleryModeBtn[m]);
+            m_galleryModeBtn[m]->setChecked(true);
+        }
+    }
+}
+
+void MainWindow::setGalleryMode(int mode)
+{
+    syncGalleryControls(mode);
+    auto &S = AppSettings::instance();
+    const bool vertical = mode != GalleryReel, compact = mode == GalleryCompact;
+    if (vertical == S.galleryVertical && compact == S.galleryCompact && m_gallery
+        && m_gallery->isVertical() == vertical && m_gallery->isCompact() == compact)
+        return;
+    S.galleryVertical = vertical;
+    S.galleryCompact = compact;
+    S.save();
     applyGalleryLayout(vertical);
-    showMessage(vertical ? tr("Captured images: vertical list beside the image")
-                         : tr("Captured images: reel under the image"),
+    showMessage(compact    ? tr("Captured images: compact list beside the image")
+                : vertical ? tr("Captured images: list beside the image")
+                           : tr("Captured images: reel under the image"),
                 2500);
 }
 
@@ -1107,6 +1248,7 @@ void MainWindow::onCursorMoved(const QPoint &p, bool inside)
 
 void MainWindow::onCameraChanged()
 {
+    updateCaptureState();
     Camera *cam = m_engine->camera();
     if (!cam) {
         m_statusCamera->setText(tr("No camera"));
@@ -1167,8 +1309,10 @@ void MainWindow::restoreObjectiveSettings(int index)
     if (o.exposureMs <= 0)
         return; // nothing stored yet for this objective
     if (Camera *cam = m_engine->camera()) {
-        if (!m_engine->autoExposure().enabled)
-            cam->setExposure(o.exposureMs);
+        // With auto exposure on too: what this objective last settled at is the
+        // best place to start, and auto exposure only fine-tunes from there
+        // (starting from the previous objective's exposure made it search).
+        cam->setExposure(o.exposureMs);
         cam->setGain(o.gain);
         m_cameraPanel->setExposureDisplay(cam->exposure(), cam->gain());
     }
@@ -1181,6 +1325,7 @@ void MainWindow::onCalibrationChanged()
 {
     // objective switched: keep per-objective camera settings
     if (m_prevObjective != m_scope.current) {
+        m_toolsPanel->resetFocusPeak(); // another magnification: another sharpness scale
         if (m_prevObjective >= 0 && m_scope.rememberSettings) {
             if (m_objectiveFromCapture) {
                 // the settings just used belong to the objective chosen in the capture dialog
@@ -1227,7 +1372,11 @@ void MainWindow::startCalibration()
     m_view->startPick(ImageView::PickMode::Point, tr("Calibration: click the FIRST mark of a known distance"));
     disconnect(m_view, &ImageView::pointPicked, nullptr, nullptr);
     connect(m_view, &ImageView::pointPicked, this, [this](const QPoint &p) {
-        m_calibPoints.append(p);
+        // Kept in sensor pixels, converted at the moment of the click: the live
+        // preview switches between half and full resolution with the zoom, so
+        // the display scale at the second click need not be the one at the first.
+        const double s = m_lastStats.displayScale > 0 ? m_lastStats.displayScale : 1.0;
+        m_calibPoints.append(QPointF(p) / s);
         if (m_calibPoints.size() == 1) {
             m_view->startPick(ImageView::PickMode::Point, tr("Calibration: click the SECOND mark"));
             return;
@@ -1235,7 +1384,7 @@ void MainWindow::startCalibration()
         disconnect(m_view, &ImageView::pointPicked, nullptr, nullptr);
         const double dx = m_calibPoints[1].x() - m_calibPoints[0].x();
         const double dy = m_calibPoints[1].y() - m_calibPoints[0].y();
-        const double px = std::hypot(dx, dy) / std::max(0.01, m_lastStats.displayScale);
+        const double px = std::hypot(dx, dy);
         if (px < 10) {
             QMessageBox::warning(this, tr("Calibration"),
                                  tr("The points are too close together. Click two marks at least 100 µm apart "
@@ -1274,6 +1423,7 @@ void MainWindow::capture()
     const auto &c = AppSettings::instance().capture;
     m_capturing = true;
     m_cameraPanel->setBusy(true);
+    updateCaptureState();
     if (c.shotMode >= 0 && !m_engine->camera()->shotModes().empty()) {
         m_capturePanel->setBusy(true, tr("Pixel shift capture…"));
         m_engine->captureShots(c.shotMode);
@@ -1305,6 +1455,8 @@ ImageMetadata MainWindow::currentMetadata(const CaptureResult &r) const
     if (Camera *cam = m_engine->camera()) {
         const CameraInfo ci = cam->info();
         m.camera = QString::fromStdString(ci.name);
+        // the serial the camera itself reports (the DMC6200 reads it over its
+        // protocol when opened), not one derived from the USB device path
         m.cameraSerial = QString::fromStdString(ci.serial);
         for (const auto &[k, v] : cam->details())
             if (k == "Sensor")
@@ -1317,6 +1469,8 @@ ImageMetadata MainWindow::currentMetadata(const CaptureResult &r) const
     m.numericalAperture = o.na;
     m.adapterFactor = m_scope.adapterFactor;
     m.umPerPixel = m_scope.umPerPixel() / std::max(1, r.upscale);
+    // the same choice MicroscopeConfig::umPerPixel() makes
+    m.pixelSizeSource = QString::fromLatin1(o.calibratedUmPerPixel > 0 ? kPixelSizeCalibrated : kPixelSizeNominal);
     m.exposureMs = r.exposureMs;
     m.exposureSeriesMs = QVector<double>(r.exposureSeriesMs.begin(), r.exposureSeriesMs.end());
     m.gain = r.gain;
@@ -1352,6 +1506,7 @@ void MainWindow::onCaptureFinished(std::shared_ptr<CaptureResult> r)
     m_capturing = false;
     m_capturePanel->setBusy(false);
     m_cameraPanel->setBusy(false);
+    updateCaptureState();
     if (!r || r->rendered16.empty()) {
         showMessage(tr("Capture produced no image. Try again; if it repeats, stop and restart the live image (F5)."), 8000);
         return;
@@ -1396,7 +1551,8 @@ void MainWindow::onCaptureFinished(std::shared_ptr<CaptureResult> r)
                                  .arg(mode)
                                  .arg(r->exposureMs, 0, 'g', 4);
         CaptureDialog dlg(toQImage8(r->rendered8), m_scope, m_scope.current,
-                          [&](int obj) { return QFileInfo(suggested(obj)).completeBaseName(); }, info, this);
+                          [&](int obj) { return QFileInfo(suggested(obj)).completeBaseName(); }, info,
+                          S.capture.folder, this);
         if (dlg.exec() != QDialog::Accepted) {
             showMessage(tr("Image discarded"), 4000);
             return;
@@ -1410,6 +1566,13 @@ void MainWindow::onCaptureFinished(std::shared_ptr<CaptureResult> r)
             m_objectiveFromCapture = false;
         }
         notes = dlg.notes();
+        if (QDir::cleanPath(dlg.folder()) != QDir::cleanPath(S.capture.folder)) {
+            // a folder chosen here is where the following images go too
+            S.capture.folder = QDir::cleanPath(dlg.folder());
+            QDir().mkpath(S.capture.folder);
+            m_capturePanel->refreshFromSettings();
+            showMessage(tr("Images are now saved in %1").arg(QDir::toNativeSeparators(S.capture.folder)), 6000);
+        }
         const QString ext = QLatin1Char('.') + extensionFor(S.capture.save.format);
         path = QDir(S.capture.folder).filePath(dlg.imageName() + ext);
         for (int n = 2; QFileInfo::exists(path) || m_pendingSaves.contains(path); ++n)
@@ -1429,6 +1592,7 @@ void MainWindow::onCaptureFinished(std::shared_ptr<CaptureResult> r)
     const QImage thumbSrc = toQImage8(r->rendered8);
     showMessage(tr("Saving %1…").arg(QFileInfo(path).fileName()), 0);
     m_pendingSaves.insert(path);
+    updateCaptureState();
     QtConcurrent::run([r, path, meta, opt, burn, ov]() -> QString {
       try {
         QString err;
@@ -1457,6 +1621,7 @@ void MainWindow::onCaptureFinished(std::shared_ptr<CaptureResult> r)
       }
     }).then(this, [this, path, thumbSrc, r, meta](const QString &err) {
         m_pendingSaves.remove(path);
+        updateCaptureState();
         if (!err.isEmpty()) {
             QMessageBox::warning(this, tr("Save image"), tr("Could not save %1:\n%2").arg(path, err));
             return;
@@ -1474,6 +1639,18 @@ void MainWindow::onCaptureFinished(std::shared_ptr<CaptureResult> r)
             }
         }
     });
+}
+
+void MainWindow::updateCaptureState()
+{
+    QString busy;
+    if (m_capturing)
+        busy = tr("Capturing…");
+    else if (m_pendingSaves.size() > 1)
+        busy = tr("Saving %n images…", nullptr, int(m_pendingSaves.size()));
+    else if (!m_pendingSaves.isEmpty())
+        busy = tr("Saving…");
+    m_view->setBusy(busy);
 }
 
 void MainWindow::onTimelapseTick()
@@ -1495,6 +1672,7 @@ void MainWindow::onTimelapseTick()
 void MainWindow::onCameraLost(const QString &reason)
 {
     qWarning("camera error: %s", qPrintable(reason));
+    updateCaptureState();
     if (m_reconnect.isActive())
         return;
     if (Camera *cam = m_engine->camera())
@@ -1616,6 +1794,16 @@ bool MainWindow::eventFilter(QObject *o, QEvent *e)
     return QMainWindow::eventFilter(o, e);
 }
 
+ImageView *MainWindow::currentImageView() const
+{
+    switch (m_stack->currentIndex()) {
+    case 0: return m_view;
+    case 1: return m_browse->imageView();
+    case 2: return m_process->imageView();
+    default: return nullptr;
+    }
+}
+
 void MainWindow::closeEvent(QCloseEvent *e)
 {
     if (!m_process->maybeDiscardUnsaved()) {
@@ -1635,6 +1823,18 @@ void MainWindow::closeEvent(QCloseEvent *e)
     m_engine->stopLive();                     // no more frames queued while waiting below
     QThreadPool::globalInstance()->waitForDone(); // finish image saves
     QApplication::restoreOverrideCursor();
+    m_process->flushAnnotations();
+    if (m_resetSettingsOnClose) {
+        // Settings → Reset all settings: nothing of this session is written
+        // back, or the reset would be undone on the way out
+        m_engine->closeCamera();
+        QSettings qs;
+        qs.clear();
+        qs.sync();
+        e->accept();
+        QTimer::singleShot(0, qApp, &QCoreApplication::quit);
+        return;
+    }
     QSettings qs;
     qs.setValue(QStringLiteral("ui/geometry"), saveGeometry());
     AppSettings::instance().save();

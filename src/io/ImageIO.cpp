@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 namespace lm {
 
@@ -324,11 +325,33 @@ bool readTiff(const QString &path, Image16 &img, int &bits, QString &description
     if (w == 0 || h == 0 || (b != 8 && b != 16) || planar != 1 || (comp != 1 && comp != 8 && comp != 32946)
         || offs.empty() || offs.size() != cnts.size() || (spp != 1 && spp != 3 && spp != 4) || photometric > 2)
         return fail(QObject::tr("Unsupported TIFF layout"));
-    // plausibility limits before allocating (a tiny corrupt file must not request gigabytes)
-    if (w > 65535 || h > 65535 || uint64_t(w) * h * 6 > (uint64_t(3) << 30))
-        return fail(QObject::tr("Image too large (%1 x %2)").arg(w).arg(h));
+    // Size limits. The writer accepts any Image16, and a Deflate-compressed
+    // mosaic can hold far more than 4 GB of pixels, so the reader must not refuse
+    // what the writer produced. What it can refuse is a size the image types
+    // cannot hold, and a size the file cannot possibly contain: a tiny corrupt
+    // file must not request gigabytes.
     if (rps == 0 || rps > h)
         rps = h;
+    const int bps = int(b / 8);
+    constexpr uint32_t kMaxSide = uint32_t(std::numeric_limits<int>::max() / 6); // w * 3 samples * 2 bytes fits an int
+    if (w > kMaxSide || h > kMaxSide)
+        return fail(QObject::tr("Image too large (%1 x %2)").arg(w).arg(h));
+    // all in 64 bit: w, h < 2^29 and spp * bps <= 8, so nothing below can overflow
+    const uint64_t rowBytes = uint64_t(w) * spp * bps;
+    const uint64_t pixels = uint64_t(w) * h;
+    if (pixels > uint64_t(std::numeric_limits<size_t>::max() / 3 / sizeof(uint16_t)))
+        return fail(QObject::tr("Image too large (%1 x %2)").arg(w).arg(h));
+    // the strips must be able to hold the rows: uncompressed exactly, Deflate at
+    // most ~1032:1 (zlib's limit)
+    uint64_t stripTotal = 0;
+    for (uint32_t c : cnts)
+        stripTotal += c;
+    const uint64_t rawTotal = rowBytes * h;
+    if (comp == 1 ? stripTotal < rawTotal : stripTotal * 1100 < rawTotal)
+        return fail(QObject::tr("Truncated TIFF"));
+    // one strip is inflated into one QByteArray, whose expected size is 32 bit
+    if (rowBytes * rps > uint64_t(std::numeric_limits<int>::max()))
+        return fail(QObject::tr("Unsupported TIFF layout (strips of %1 rows are too large)").arg(rps));
     bits = int(b);
     // Only a physical calibration counts: unit "none" is ignored, and so are
     // resolutions below 20000 px/m (> 50 um/px), the same threshold as the PNG
@@ -339,39 +362,43 @@ bool readTiff(const QString &path, Image16 &img, int &bits, QString &description
     if (pxPerMetre > kMinCalibratedPxPerMetre)
         umPerPixel = 1e6 / pxPerMetre;
 
-    img = Image16(int(w), int(h));
-    const int bps = int(b / 8);
-    const size_t rowBytes = size_t(w) * spp * bps;
-    uint32_t y = 0;
-    for (size_t s = 0; s < offs.size() && y < h; ++s) {
-        if (qsizetype(offs[s]) + qsizetype(cnts[s]) > n)
-            return fail(QObject::tr("Truncated TIFF"));
-        QByteArray chunk(reinterpret_cast<const char *>(d + offs[s]), int(cnts[s]));
-        const uint32_t rows = std::min(rps, h - y);
-        if (comp != 1)
-            chunk = inflate(chunk, int(rowBytes * rows));
-        if (size_t(chunk.size()) < rowBytes * rows)
-            return fail(QObject::tr("Corrupt TIFF strip"));
-        const uchar *p = reinterpret_cast<const uchar *>(chunk.constData());
-        for (uint32_t r = 0; r < rows; ++r, ++y) {
-            const uchar *row = p + rowBytes * r;
-            std::vector<uint32_t> samples(size_t(w) * spp);
-            for (size_t i = 0; i < samples.size(); ++i)
-                samples[i] = bps == 2 ? uint32_t(le ? row[2 * i] | row[2 * i + 1] << 8 : row[2 * i] << 8 | row[2 * i + 1])
-                                      : row[i];
-            if (predictor == 2)
-                for (size_t i = spp; i < samples.size(); ++i)
-                    samples[i] = (samples[i] + samples[i - spp]) & (bps == 2 ? 0xFFFF : 0xFF);
-            uint16_t *o = img.row(int(y));
-            for (uint32_t x = 0; x < w; ++x) {
-                for (int c = 0; c < 3; ++c) {
-                    uint32_t v = samples[size_t(x) * spp + (spp >= 3 ? c : 0)];
-                    if (photometric == 0)
-                        v = (bps == 2 ? 0xFFFF : 0xFF) - v;
-                    o[x * 3 + c] = uint16_t(bps == 2 ? v : v * 257);
+    try {
+        img = Image16(int(w), int(h));
+        std::vector<uint32_t> samples(size_t(w) * spp);
+        uint32_t y = 0;
+        for (size_t s = 0; s < offs.size() && y < h; ++s) {
+            if (qsizetype(offs[s]) + qsizetype(cnts[s]) > n)
+                return fail(QObject::tr("Truncated TIFF"));
+            QByteArray chunk(reinterpret_cast<const char *>(d + offs[s]), qsizetype(cnts[s]));
+            const uint32_t rows = std::min(rps, h - y);
+            const size_t stripBytes = size_t(rowBytes) * rows;
+            if (comp != 1)
+                chunk = inflate(chunk, int(stripBytes));
+            if (size_t(chunk.size()) < stripBytes)
+                return fail(QObject::tr("Corrupt TIFF strip"));
+            const uchar *p = reinterpret_cast<const uchar *>(chunk.constData());
+            for (uint32_t r = 0; r < rows; ++r, ++y) {
+                const uchar *row = p + size_t(rowBytes) * r;
+                for (size_t i = 0; i < samples.size(); ++i)
+                    samples[i] = bps == 2 ? uint32_t(le ? row[2 * i] | row[2 * i + 1] << 8 : row[2 * i] << 8 | row[2 * i + 1])
+                                          : row[i];
+                if (predictor == 2)
+                    for (size_t i = spp; i < samples.size(); ++i)
+                        samples[i] = (samples[i] + samples[i - spp]) & (bps == 2 ? 0xFFFF : 0xFF);
+                uint16_t *o = img.row(int(y));
+                for (uint32_t x = 0; x < w; ++x) {
+                    for (int c = 0; c < 3; ++c) {
+                        uint32_t v = samples[size_t(x) * spp + (spp >= 3 ? c : 0)];
+                        if (photometric == 0)
+                            v = (bps == 2 ? 0xFFFF : 0xFF) - v;
+                        o[size_t(x) * 3 + c] = uint16_t(bps == 2 ? v : v * 257);
+                    }
                 }
             }
         }
+    } catch (const std::bad_alloc &) {
+        img = Image16();
+        return fail(QObject::tr("Not enough memory to open a %1 x %2 image").arg(w).arg(h));
     }
     return true;
 }
@@ -440,9 +467,9 @@ Image16 fromQImage(const QImage &src)
     return out;
 }
 
-static QString sidecarPath(const QString &path)
+QString sidecarPath(const QString &imagePath)
 {
-    return path + QStringLiteral(".json");
+    return imagePath + QStringLiteral(".json");
 }
 
 static bool writeSidecar(const QString &path, const ImageMetadata &meta)
@@ -544,17 +571,16 @@ static bool loadImageImpl(const QString &path, LoadedImage &out, QString *error)
 
 bool loadImage(const QString &path, LoadedImage &out, QString *error)
 {
-    // A Leica .lif is a container of many images; this reads the first one.
-    // The user interface offers the whole list (see ui/LifDialog.h).
-    if (QFileInfo(path).suffix().compare(QLatin1String("lif"), Qt::CaseInsensitive) == 0) {
-        QList<LifEntry> entries;
-        if (!readLifIndex(path, entries, error))
-            return false;
-        return readLifImage(path, entries.first(), out, error);
-    }
-
     try {
-        return loadImageImpl(path, out, error);
+        // A Leica .lif is a container of many images; this reads the first one.
+        // The user interface offers the whole list (see ui/LifDialog.h).
+        if (QFileInfo(path).suffix().compare(QLatin1String("lif"), Qt::CaseInsensitive) == 0) {
+            QList<LifEntry> entries;
+            if (readLifIndex(path, entries, error) && readLifImage(path, entries.first(), out, error))
+                return true;
+        } else if (loadImageImpl(path, out, error)) {
+            return true;
+        }
     } catch (const std::bad_alloc &) {
         if (error) *error = QObject::tr("Not enough memory to open the image");
     } catch (const std::exception &e) {
@@ -564,11 +590,35 @@ bool loadImage(const QString &path, LoadedImage &out, QString *error)
     return false;
 }
 
+namespace {
+
+// The sidecar's pixel size replaces the embedded one (see ImageIO.h).
+void takeCalibration(const ImageMetadata &from, ImageMetadata &to)
+{
+    to.umPerPixel = from.umPerPixel;
+    to.adapterFactor = from.adapterFactor;
+    to.pixelSizeSource = from.pixelSizeSource;
+}
+
+} // namespace
+
 static bool loadImageImpl(const QString &path, LoadedImage &out, QString *error)
 {
     out = LoadedImage{};
     out.path = path;
     const FileFormat fmt = formatFromExtension(path);
+    ImageMetadata sidecar;
+    const bool haveSidecar = loadSidecarMetadata(path, sidecar);
+    const auto addSidecar = [&] {
+        if (!haveSidecar)
+            return;
+        if (out.hasMeta) {
+            takeCalibration(sidecar, out.meta);
+        } else {
+            out.meta = sidecar;
+            out.hasMeta = true;
+        }
+    };
     QString desc;
     if (fmt == FileFormat::Tiff) {
         int bits = 8;
@@ -578,10 +628,12 @@ static bool loadImageImpl(const QString &path, LoadedImage &out, QString *error)
             out.sourceBitDepth = bits;
             if (!desc.isEmpty() && ImageMetadata::fromJsonString(desc, out.meta))
                 out.hasMeta = true;
-            // the file's own DM Imaging metadata is authoritative, including 0 =
-            // uncalibrated; the resolution tag is only used for other files
+            addSidecar();
+            // DM Imaging metadata is authoritative, including 0 = uncalibrated;
+            // the resolution tag is only used for other files
             const bool jsonHasPixelSize =
-                out.hasMeta && QJsonDocument::fromJson(desc.toUtf8()).object().contains(QLatin1String("umPerPixel"));
+                haveSidecar
+                || (out.hasMeta && QJsonDocument::fromJson(desc.toUtf8()).object().contains(QLatin1String("umPerPixel")));
             if (!jsonHasPixelSize && um > 0 && out.meta.umPerPixel <= 0)
                 out.meta.umPerPixel = um;
             return true;
@@ -597,50 +649,33 @@ static bool loadImageImpl(const QString &path, LoadedImage &out, QString *error)
     }
     out.sourceBitDepth = img.depth() > 32 ? 16 : 8;
     out.data = fromQImage(img);
-    desc = r.text(QStringLiteral("Description"));
+    // the decoded image carries every text chunk; the reader may only have the
+    // ones before the pixel data
+    desc = img.text(QStringLiteral("Description"));
+    if (desc.isEmpty())
+        desc = r.text(QStringLiteral("Description"));
     if (!desc.isEmpty() && ImageMetadata::fromJsonString(desc, out.meta))
         out.hasMeta = true;
-    if (!out.hasMeta) {
-        QFile sc(sidecarPath(path));
-        if (sc.open(QIODevice::ReadOnly)) {
-            const auto doc = QJsonDocument::fromJson(sc.readAll());
-            if (doc.isObject()) {
-                out.meta = ImageMetadata::fromJson(doc.object());
-                out.hasMeta = true;
-            }
-        }
-    }
+    addSidecar();
     if (out.meta.umPerPixel <= 0 && img.dotsPerMeterX() > kMinCalibratedPxPerMetre) // > 20 px/mm: physical calibration
         out.meta.umPerPixel = 1e6 / img.dotsPerMeterX();
     return true;
 }
 
-bool loadMetadata(const QString &path, ImageMetadata &out)
+bool loadSidecarMetadata(const QString &path, ImageMetadata &out)
 {
-    if (QFileInfo(path).suffix().compare(QLatin1String("lif"), Qt::CaseInsensitive) == 0) {
-        QList<LifEntry> entries;
-        if (!readLifIndex(path, entries, nullptr))
-            return false;
-        const LifEntry &e = entries.first();
-        out = ImageMetadata();
-        out.umPerPixel = e.umPerPixel;
-        out.width = e.width;
-        out.height = e.height;
-        out.bitDepth = e.bitsPerSample;
-        out.sample = e.name;
-        out.software = QStringLiteral("Leica LAS X (.lif)");
-        return true;
-    }
-
-    // sidecar first (cheap), then embedded text
     QFile sc(sidecarPath(path));
-    if (sc.open(QIODevice::ReadOnly)) {
-        const auto doc = QJsonDocument::fromJson(sc.readAll());
-        if (doc.isObject()) {
-            out = ImageMetadata::fromJson(doc.object());
-            return true;
-        }
-    }
+    if (!sc.open(QIODevice::ReadOnly))
+        return false;
+    const auto doc = QJsonDocument::fromJson(sc.readAll());
+    if (!doc.isObject())
+        return false;
+    out = ImageMetadata::fromJson(doc.object());
+    return true;
+}
+
+bool loadEmbeddedMetadata(const QString &path, ImageMetadata &out)
+{
     if (formatFromExtension(path) == FileFormat::Tiff) {
         // parse only the IFD for the description
         QFile f(path);
@@ -674,6 +709,27 @@ bool loadMetadata(const QString &path, ImageMetadata &out)
     QImageReader r(path);
     const QString desc = r.text(QStringLiteral("Description"));
     return !desc.isEmpty() && ImageMetadata::fromJsonString(desc, out);
+}
+
+bool loadMetadata(const QString &path, ImageMetadata &out)
+{
+    if (QFileInfo(path).suffix().compare(QLatin1String("lif"), Qt::CaseInsensitive) == 0) {
+        QList<LifEntry> entries;
+        if (!readLifIndex(path, entries, nullptr))
+            return false;
+        const LifEntry &e = entries.first();
+        out = ImageMetadata();
+        out.umPerPixel = e.umPerPixel;
+        out.width = e.width;
+        out.height = e.height;
+        out.bitDepth = e.bitsPerSample;
+        out.sample = e.name;
+        out.software = QStringLiteral("Leica LAS X (.lif)");
+        return true;
+    }
+
+    // sidecar first (cheap, and its pixel size wins anyway), then embedded text
+    return loadSidecarMetadata(path, out) || loadEmbeddedMetadata(path, out);
 }
 
 } // namespace lm

@@ -142,6 +142,8 @@ bool SimulatedCamera::startStreaming(std::string &error)
     }
     if (m_streaming)
         return true;
+    if (m_thread.joinable())
+        m_thread.join(); // a stream thread that stopped on an error
     m_streaming = true;
     m_thread = std::thread([this] {
         try {

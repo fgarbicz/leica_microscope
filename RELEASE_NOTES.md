@@ -13,6 +13,11 @@
   alone), and *Tools > Correct pixel size of saved images…* rewrites the scale
   recorded in images already saved - the TIFF resolution tags, the pixel density
   and the metadata - for a whole folder at a time. The pixels are not touched.
+  It only changes an image whose scale is provably the nominal one at 0.7x:
+  images from a calibrated objective or with a pixel size set by hand are listed
+  as left alone, with the reason, and running it twice changes nothing more.
+  Images now record where their pixel size came from (nominal, calibrated or set
+  by hand), so this can be told apart in future.
 
 - **Leica .lif files can be read and written.** A .lif is the experiment file LAS X
   saves, holding many images with their names and calibration. *File → Open image*
@@ -28,6 +33,84 @@
   image instead, thumbnail and file name per row; the live image keeps the rest of the
   space. The choice is remembered, and both layouts follow the interface size. An empty
   strip now says what it is for rather than looking like a fault.
+
+- **Windows build verified, and the three platforms checked against each other.**
+  The Windows version was compiled with MSVC, tested, packaged and installed for the
+  first time since the cross-platform change (on Windows 11 on ARM, which runs the
+  x64 build under emulation), and the Linux version was built and tested on Debian 12
+  and 13. The build scripts now take `-Arch arm64` for Windows on ARM, `build.ps1
+  -Test` runs all four test programs as `build.sh --test` does, and Qt 6.4 is enough
+  (Debian 12 and Ubuntu 24.04 ship it).
+
+- **Capturing is easier to find and to follow.** The capture panel is now the first
+  thing in Acquire's left column. The save window has a *Save in* row with *Change…* to pick the
+  folder, and while an image is written a turning wheel with "Saving…" shows in the
+  middle of the live image.
+
+- **Captured images: Reel, List or Compact**, switched with three buttons above them
+  (also on the View menu and in Settings). *Compact* shows small thumbnails and names
+  on one line each, to see many images at once.
+
+- **Focus peak that follows the specimen.** The peak holds through a focus sweep,
+  fades slowly after, and starts again on its own on another field or objective,
+  instead of keeping the sharpest value ever seen.
+
+- **Auto exposure on an objective change** starts from the exposure that objective
+  last used and no longer chases the darkness while the turret turns (it used to
+  run to very long exposures and back). The default brightness target is 80 %.
+
+**Fixes**
+- Browse froze, for many seconds, on a folder in OneDrive or iCloud or with a large
+  .lif: the folder tree read the start of each file to name its type, and the
+  preview and folder listing ran on the interface thread. All three now happen in
+  the background.
+- The frame rate in the status bar read up to 400 fps for a 30 fps camera.
+- The camera details said "WinUSB driver" on macOS and Linux.
+- A new capture was added to the selection of the earlier ones.
+- Setup reported success even when Windows refused the camera driver, which then only
+  showed up as "No Leica camera found". It now says so, and keeps the driver
+  installer's log next to the driver.
+- Correcting the pixel size of a PNG failed on Windows ("Access is denied"), and in
+  a PNG or JPEG this program kept showing the old scale after the repair.
+- 16-bit colour images in a .lif were read with the wrong colours; fluorescence
+  images, which store each channel separately, now open (as their first channel)
+  instead of being reported as damaged. A damaged or truncated .lif is refused
+  instead of crashing, and saving over an existing .lif no longer destroys it if
+  the disk fills up.
+- Very large stitched TIFFs (over 65535 pixels a side) could be saved but not opened.
+- A pixel size typed with a decimal comma (Polish or German Windows) was read as 0,
+  wiping the calibration.
+- Removing an objective from the table could silently switch the current objective.
+- The stage-micrometer calibration was off by 2x if the image was zoomed between the
+  two clicks.
+- Deleting an image that another program held open still sent its metadata and
+  annotations to the Trash. Rename now checks the new name and keeps an image and
+  its companion files together.
+- Pressing Esc in *Settings* kept the previewed theme and interface size.
+- The exposure and gain controls ignored what the camera can do, so they could be
+  enabled for a camera without manual exposure, or stay disabled for one that has it.
+- The zoom shortcuts only worked in *Acquire*; *Help → Keyboard shortcuts* showed
+  "100%%" and the wrong Redo key on macOS and Linux.
+- Annotations were written to disk on every mouse movement while drawing; they are
+  now saved when you finish. Annotations added to an image opened from a .lif were
+  lost without asking.
+- *Reset all settings* skipped the question about an unsaved multifocus or stitched
+  result.
+- Colour presets with a "/" in their name were lost on restart.
+- Windows: *Show in folder* could open Documents instead of the image's folder. The
+  Media Foundation camera could show sheared or upside-down frames, and spun at 100 %
+  CPU after the stream ended.
+- macOS: a race when changing resolution, and a possible crash when closing a UVC
+  camera.
+- Linux: unplugging a UVC camera ended the program; installing the camera access
+  rule failed on Debian and Ubuntu (it needs bash, not sh); the installed program
+  did not find its own udev rule; files passed from the file manager were ignored.
+- macOS and Linux: stopping live view on the DMC6200 froze the window for up to the
+  exposure time plus 1.5 s. Its camera ID no longer includes the USB address, so it
+  is recognised after being plugged into another port.
+- Averaged captures from a camera with padded rows came out sheared.
+- The camera's own serial number is recorded in the images on every platform.
+- The unused *Sensor shift rest X/Y* settings of the DMC6200 were removed.
 
 ## 1.1.1 (2026-09-26)
 

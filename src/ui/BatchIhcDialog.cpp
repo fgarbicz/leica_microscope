@@ -7,6 +7,7 @@
 #include "io/ImageIO.h"
 #include "ui/Annotations.h"
 #include "ui/Overlays.h"
+#include "ui/PlatformUi.h"
 
 #include <QAbstractTextDocumentLayout>
 #include <QApplication>
@@ -32,6 +33,7 @@
 #include <QPushButton>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QSet>
 #include <QTableWidget>
 #include <QThread>
 #include <QToolButton>
@@ -226,9 +228,20 @@ void BatchIhcDialog::run()
     m_runThreshold = opt.dabThreshold;
     m_runUseRegions = useRegions;
     const bool countCells = m_countCells->isChecked();
+    // overlay names already given out in this run: a.tif and a.png would
+    // otherwise both write a_ihc.jpg, the second over the first
+    QSet<QString> overlayNames;
 
     for (int i = 0; i < m_files.size() && !m_cancel; ++i) {
         const QString src = m_files[i];
+        QString overlayName;
+        if (saveOverlays) {
+            const QString base = QFileInfo(src).completeBaseName() + QStringLiteral("_ihc");
+            overlayName = base + QStringLiteral(".jpg");
+            for (int n = 2; overlayNames.contains(overlayName.toLower()); ++n)
+                overlayName = QStringLiteral("%1_%2.jpg").arg(base).arg(n);
+            overlayNames.insert(overlayName.toLower()); // case-insensitive file systems (Windows, macOS)
+        }
         m_status->setText(tr("Analysing %1…").arg(QFileInfo(src).fileName()));
         auto future = QtConcurrent::run([=]() -> Row {
             Row row;
@@ -336,7 +349,7 @@ void BatchIhcDialog::run()
                 so.sixteenBit = false;
                 so.jpegQuality = 90;
                 so.writeSidecar = false;
-                const QString dst = QDir(outDir).filePath(QFileInfo(src).completeBaseName() + QStringLiteral("_ihc.jpg"));
+                const QString dst = QDir(outDir).filePath(overlayName);
                 QString serr;
                 if (!saveImage(dst, ov, li.meta, so, &serr))
                     row.error = tr("overlay not saved: %1").arg(serr);
@@ -531,20 +544,24 @@ void BatchIhcDialog::exportPdf()
     if (m_rows.empty())
         return;
     const QString def = QFileInfo(m_files.value(0)).dir().filePath(QStringLiteral("ihc_report.pdf"));
-    const QString path = QFileDialog::getSaveFileName(this, tr("Save IHC report"), def, tr("PDF (*.pdf)"));
+    const QString path = lm::getSaveFileName(this, tr("Save IHC report"), def, tr("PDF (*.pdf)"));
     if (path.isEmpty())
         return;
     QApplication::setOverrideCursor(Qt::WaitCursor);
     QTextDocument doc;
+    // the interface font: Segoe UI exists on Windows only, and elsewhere the
+    // report would come out in whatever the PDF engine substitutes
+    const QString family = QApplication::font().family();
+    doc.setDefaultFont(QFont(family, 9));
     doc.setDefaultStyleSheet(QStringLiteral(
-        "body { font-family: 'Segoe UI', Arial; font-size: 9pt; color: #202020; }"
+        "body { font-family: '%1', sans-serif; font-size: 9pt; color: #202020; }"
         "h1 { font-size: 16pt; color: #1b4f8a; margin-bottom: 2px; }"
         "h2 { font-size: 12pt; color: #1b4f8a; margin-top: 14px; }"
         "h3 { font-size: 10pt; margin-top: 12px; margin-bottom: 2px; }"
         "td, th { padding: 3px 5px; font-size: 8pt; }"
         "th { background-color: #e4ebf3; text-align: left; }"
         ".num { text-align: right; }"
-        ".muted { color: #707070; }"));
+        ".muted { color: #707070; }").arg(family));
 
     std::vector<double> pos, hs;
     for (const auto &r : m_rows)
@@ -679,7 +696,7 @@ void BatchIhcDialog::exportPdf()
     int pageNo = 1;
     auto drawFooter = [&] {
         p.save();
-        QFont f(QStringLiteral("Segoe UI"), 7);
+        QFont f(family, 7);
         p.setFont(f);
         p.setPen(QColor(120, 120, 120));
         p.drawText(QRectF(0, content.bottom() + 2 * mm, content.width(), footer - 2 * mm), Qt::AlignLeft | Qt::AlignVCenter,
@@ -712,11 +729,11 @@ void BatchIhcDialog::exportPdf()
     y = doc.documentLayout()->documentSize().height() - (textPages - 1) * content.height() + 6 * mm;
 
     // image part: each block (title + image + overlay) is kept on one page
-    QFont titleFont(QStringLiteral("Segoe UI"), 10, QFont::Bold), infoFont(QStringLiteral("Segoe UI"), 8);
+    QFont titleFont(family, 10, QFont::Bold), infoFont(family, 8);
     const double gap = 4 * mm, imgW = (content.width() - gap) / 2;
     const double titleH = 7 * mm;
     auto sectionTitle = [&] {
-        p.setFont(QFont(QStringLiteral("Segoe UI"), 12, QFont::Bold));
+        p.setFont(QFont(family, 12, QFont::Bold));
         p.setPen(QColor(0x1b, 0x4f, 0x8a));
         p.drawText(QRectF(0, y, content.width(), 8 * mm), Qt::AlignLeft | Qt::AlignVCenter, tr("Images"));
         y += 8 * mm;
@@ -780,7 +797,7 @@ void BatchIhcDialog::exportPdf()
 void BatchIhcDialog::exportCsv()
 {
     const QString def = QFileInfo(m_files.value(0)).dir().filePath(QStringLiteral("ihc_quantification.csv"));
-    const QString path = QFileDialog::getSaveFileName(this, tr("Export IHC results"), def, tr("CSV (*.csv)"));
+    const QString path = lm::getSaveFileName(this, tr("Export IHC results"), def, tr("CSV (*.csv)"));
     if (path.isEmpty())
         return;
     QSaveFile f(path);

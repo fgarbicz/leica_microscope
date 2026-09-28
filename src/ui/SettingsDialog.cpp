@@ -1,6 +1,8 @@
 #include "ui/Theme.h"
 #include "SettingsDialog.h"
 
+#include "ui/Icons.h"
+
 #include "app/AppSettings.h"
 #include "ui/PlatformUi.h"
 
@@ -64,6 +66,14 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent)
                               .arg(QKeySequence(QStringLiteral("Ctrl+Shift+=")).toString(QKeySequence::NativeText),
                                    QKeySequence(QStringLiteral("Ctrl+Shift+-")).toString(QKeySequence::NativeText)));
     form->addRow(tr("Interface size"), m_uiScale);
+    m_galleryLayout = new QComboBox(this);
+    m_galleryLayout->addItem(icon(Icon::LayoutReel), tr("Reel under the live image"));
+    m_galleryLayout->addItem(icon(Icon::LayoutList), tr("List beside the live image, with names"));
+    m_galleryLayout->addItem(icon(Icon::LayoutCompact), tr("Compact list: small thumbnails, many images"));
+    m_galleryLayout->setCurrentIndex(!S.galleryVertical ? 0 : S.galleryCompact ? 2 : 1);
+    m_galleryLayout->setToolTip(tr("Where the images captured in this session are shown. Also switched with the "
+                                   "Reel, List and Compact buttons above them, and on the View menu."));
+    form->addRow(tr("Captured images"), m_galleryLayout);
     m_operator = new QLineEdit(S.capture.operatorName, this);
     form->addRow(tr("Operator"), m_operator);
     auto *fr = new QHBoxLayout;
@@ -98,11 +108,8 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent)
     auto *bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
     lay->addWidget(bb);
     connect(bb, &QDialogButtonBox::accepted, this, &SettingsDialog::accept);
-    connect(bb, &QDialogButtonBox::rejected, this, [this] {
-        // put back what the previews changed
-        emit appearanceChanged(m_themeOnEntry, m_scaleOnEntry);
-        reject();
-    });
+    // Cancel, Esc and the title bar's close button all end in reject()
+    connect(bb, &QDialogButtonBox::rejected, this, &SettingsDialog::reject);
     connect(m_theme, &QComboBox::activated, this, [this] {
         emit appearanceChanged(m_theme->currentData().toString(), m_uiScale->currentData().toInt());
     });
@@ -123,20 +130,51 @@ SettingsDialog::SettingsDialog(QWidget *parent) : QDialog(parent)
                                     "This cannot be undone. The application will close."),
                                  QMessageBox::Yes | QMessageBox::No, QMessageBox::No)
             == QMessageBox::Yes) {
-            QSettings().clear();
-            QSettings().sync();
-            qApp->exit(0);
+            // The main window does the erasing, on its way out: it first asks
+            // about an unsaved result and a capture in progress, like any quit,
+            // and must not write its own settings back after they are cleared.
+            reject();
+            emit resetAllRequested();
         }
     });
 }
 
+void SettingsDialog::reject()
+{
+    // put back what the previews changed (the combos show what is applied)
+    if (m_theme->currentData().toString() != m_themeOnEntry || m_uiScale->currentData().toInt() != m_scaleOnEntry)
+        emit appearanceChanged(m_themeOnEntry, m_scaleOnEntry);
+    QDialog::reject();
+}
+
+int SettingsDialog::galleryMode() const
+{
+    return m_galleryLayout->currentIndex(); // in the order of MainWindow::GalleryMode
+}
+
 void SettingsDialog::accept()
 {
+    // An empty folder would make captures land in the working directory, which
+    // is "/" for an application started from the Finder, and a relative path
+    // depends on how the program was started.
+    const QString folder = QDir::cleanPath(m_folder->text().trimmed());
+    if (m_folder->text().trimmed().isEmpty() || QDir::isRelativePath(folder)) {
+        QMessageBox::warning(this, tr("Image folder"),
+                             m_folder->text().trimmed().isEmpty()
+                                 ? tr("Choose a folder for the images. The default is %1.")
+                                       .arg(QDir::toNativeSeparators(AppSettings::defaultFolder()))
+                                 : tr("\"%1\" is not a complete folder path. Choose the folder with the … button.")
+                                       .arg(m_folder->text()));
+        if (m_folder->text().trimmed().isEmpty())
+            m_folder->setText(QDir::toNativeSeparators(AppSettings::defaultFolder()));
+        m_folder->setFocus();
+        return;
+    }
     auto &S = AppSettings::instance();
     S.theme = m_theme->currentData().toString();
     S.uiScale = m_uiScale->currentData().toInt();
     S.capture.operatorName = m_operator->text();
-    S.capture.folder = m_folder->text();
+    S.capture.folder = QDir::fromNativeSeparators(folder);
     S.capture.pattern = m_pattern->text();
     S.capture.counterDigits = m_digits->value();
     S.save();

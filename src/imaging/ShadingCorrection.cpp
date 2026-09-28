@@ -14,18 +14,44 @@
 namespace lm {
 
 namespace {
+#ifdef _WIN32
+std::wstring widen(const std::string &utf8)
+{
+    const int n = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, nullptr, 0);
+    std::wstring w(size_t(n > 0 ? n : 1), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), -1, w.data(), n);
+    return w;
+}
+#endif
+
 // fopen with a UTF-8 path (non-ASCII user names on Windows)
 FILE *openUtf8(const std::string &path, const wchar_t *wmode, const char *mode)
 {
 #ifdef _WIN32
-    const int n = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, nullptr, 0);
-    std::wstring w(size_t(n > 0 ? n : 1), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, path.c_str(), -1, w.data(), n);
     (void)mode;
-    return _wfopen(w.c_str(), wmode);
+    return _wfopen(widen(path).c_str(), wmode);
 #else
     (void)wmode;
     return std::fopen(path.c_str(), mode);
+#endif
+}
+
+// Moves `from` over `to`, replacing it.
+bool replaceFile(const std::string &from, const std::string &to)
+{
+#ifdef _WIN32
+    return MoveFileExW(widen(from).c_str(), widen(to).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+#else
+    return std::rename(from.c_str(), to.c_str()) == 0; // atomic on POSIX
+#endif
+}
+
+void removeFile(const std::string &path)
+{
+#ifdef _WIN32
+    DeleteFileW(widen(path).c_str());
+#else
+    std::remove(path.c_str());
 #endif
 }
 
@@ -171,14 +197,22 @@ std::shared_ptr<const ShadingCorrection::GainMap> ShadingCorrection::gainsFor(in
 
 bool ShadingCorrection::save(const std::string &path) const
 {
-    FILE *f = openUtf8(path, L"wb", "wb");
+    // Written beside the target and moved over it only once complete, so a
+    // failed write (a full disk) leaves the previous reference intact.
+    const std::string tmp = path + ".saving";
+    FILE *f = openUtf8(tmp, L"wb", "wb");
     if (!f)
         return false;
     uint32_t hdr[6] = {kMagic, kVersion, uint32_t(m_gridW), uint32_t(m_gridH), uint32_t(m_srcW), uint32_t(m_srcH)};
     bool ok = std::fwrite(hdr, sizeof(hdr), 1, f) == 1;
     ok = ok && std::fwrite(&m_maxGain, sizeof(double), 1, f) == 1;
     ok = ok && std::fwrite(m_grid.data(), sizeof(float), m_grid.size(), f) == m_grid.size();
-    std::fclose(f);
+    // buffered data only reaches the disk here, so a full disk shows up here
+    ok = std::fclose(f) == 0 && ok;
+    if (ok)
+        ok = replaceFile(tmp, path);
+    if (!ok)
+        removeFile(tmp);
     return ok;
 }
 

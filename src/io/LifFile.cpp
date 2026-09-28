@@ -2,11 +2,13 @@
 
 #include <QFile>
 #include <QFileInfo>
+#include <QSaveFile>
 #include <QUuid>
 #include <QXmlStreamReader>
 #include <QXmlStreamWriter>
 
 #include <cstring>
+#include <limits>
 
 namespace lm {
 
@@ -14,6 +16,11 @@ namespace {
 
 constexpr qint32 kTestCode = 0x70;
 constexpr quint8 kMarker = 0x2A;
+// Sanity limits for what the XML may claim, checked before anything is
+// allocated: an image side must fit Image16's int arithmetic (w * 3 samples *
+// 2 bytes), and no camera image has more channels than this.
+constexpr qint64 kMaxSide = std::numeric_limits<int>::max() / 6;
+constexpr int kMaxChannels = 64;
 
 // --- little endian readers over an open file -------------------------------
 bool readExact(QFile &f, void *dst, qint64 n)
@@ -60,19 +67,19 @@ bool readUtf16(QFile &f, quint32 chars, QString &out)
 }
 
 // --- little endian writers -------------------------------------------------
-void writeU32(QFile &f, quint32 v)
+void writeU32(QIODevice &f, quint32 v)
 {
     const uchar b[4] = {uchar(v), uchar(v >> 8), uchar(v >> 16), uchar(v >> 24)};
     f.write(reinterpret_cast<const char *>(b), 4);
 }
-void writeU64(QFile &f, quint64 v)
+void writeU64(QIODevice &f, quint64 v)
 {
     uchar b[8];
     for (int i = 0; i < 8; ++i)
         b[i] = uchar(v >> (8 * i));
     f.write(reinterpret_cast<const char *>(b), 8);
 }
-void writeUtf16(QFile &f, const QString &s)
+void writeUtf16(QIODevice &f, const QString &s)
 {
     for (const QChar c : s) {
         const ushort u = c.unicode();
@@ -98,7 +105,9 @@ struct XmlEntry {
     int width = 0, height = 0;
     int bits = 8;
     double umPerPixel = 0;
-    int redOffset = 2, greenOffset = 1, blueOffset = 0;
+    qint64 redOffset = 2, greenOffset = 1, blueOffset = 0;
+    qint64 firstOffset = 0;
+    int rgbFound = 0; // bit 0 red, 1 green, 2 blue
     int channels = 0;
     qint64 rowStride = 0;
     qint64 bytesPerPixel = 0;
@@ -128,17 +137,23 @@ void parseElement(QXmlStreamReader &r, const QString &parentPath, QList<XmlEntry
             e.blockId = r.attributes().value(QStringLiteral("MemoryBlockID")).toString();
         } else if (tag == QLatin1String("ChannelDescription")) {
             const auto a = r.attributes();
-            const int inc = a.value(QStringLiteral("BytesInc")).toInt();
+            const qint64 inc = a.value(QStringLiteral("BytesInc")).toLongLong();
             const int tagId = a.value(QStringLiteral("ChannelTag")).toInt();
             e.bits = std::max(e.bits, a.value(QStringLiteral("Resolution")).toInt());
             // ChannelTag 1 red, 2 green, 3 blue (LUTName says the same)
             const QString lut = a.value(QStringLiteral("LUTName")).toString();
-            if (tagId == 1 || lut.compare(QLatin1String("Red"), Qt::CaseInsensitive) == 0)
+            if (tagId == 1 || lut.compare(QLatin1String("Red"), Qt::CaseInsensitive) == 0) {
                 e.redOffset = inc;
-            else if (tagId == 2 || lut.compare(QLatin1String("Green"), Qt::CaseInsensitive) == 0)
+                e.rgbFound |= 1;
+            } else if (tagId == 2 || lut.compare(QLatin1String("Green"), Qt::CaseInsensitive) == 0) {
                 e.greenOffset = inc;
-            else if (tagId == 3 || lut.compare(QLatin1String("Blue"), Qt::CaseInsensitive) == 0)
+                e.rgbFound |= 2;
+            } else if (tagId == 3 || lut.compare(QLatin1String("Blue"), Qt::CaseInsensitive) == 0) {
                 e.blueOffset = inc;
+                e.rgbFound |= 4;
+            }
+            if (e.channels == 0)
+                e.firstOffset = inc;
             ++e.channels;
         } else if (tag == QLatin1String("DimensionDescription")) {
             const auto a = r.attributes();
@@ -223,12 +238,49 @@ bool readBlocks(QFile &f, bool wide, QList<Block> &out)
         Block b;
         b.id = id;
         b.offset = f.pos();
+        // The data must be in the file: a damaged size field must not send a
+        // reader (or an allocation) past its end. A file cut short keeps the
+        // images before the cut.
+        if (memSize > quint64(f.size() - b.offset))
+            return true;
         b.size = qint64(memSize);
         out.push_back(b);
         if (!f.seek(f.pos() + b.size))
             return false;
     }
     return true;
+}
+
+// Why an entry cannot be read safely, or empty when it can. Every offset the
+// pixel loop uses must stay inside the pixel, and every pixel inside its row,
+// and the rows inside the data block.
+QString layoutProblem(const LifEntry &e)
+{
+    if (e.width <= 0 || e.height <= 0)
+        return QObject::tr("The image has no size.");
+    if (e.width > kMaxSide || e.height > kMaxSide)
+        return QObject::tr("The image size (%1 x %2) is not plausible.").arg(e.width).arg(e.height);
+    if (e.channels < 1 || e.channels > kMaxChannels)
+        return QObject::tr("The image has %1 channels.").arg(e.channels);
+    if (e.bitsPerSample != 8 && e.bitsPerSample != 16)
+        return QObject::tr("%1-bit samples are not supported.").arg(e.bitsPerSample);
+    const int sampleBytes = e.bitsPerSample / 8;
+    if (e.bytesPerPixel < sampleBytes)
+        return QObject::tr("The pixel layout is damaged (a pixel is smaller than its sample).");
+    if (e.rowStride < qint64(e.width) * e.bytesPerPixel)
+        return QObject::tr("The row layout is damaged (a row is shorter than its pixels).");
+    if (e.rowStride > e.dataBytes || e.height - 1 > e.dataBytes / e.rowStride)
+        return QObject::tr("The image data is shorter than its size says (%1 bytes for %2 rows of %3).")
+            .arg(e.dataBytes)
+            .arg(e.height)
+            .arg(e.rowStride);
+    // every sample of every channel read lies inside the data block (the
+    // terms are bounded by the checks above, so this cannot overflow)
+    const qint64 extent = qint64(e.height - 1) * e.rowStride + qint64(e.width - 1) * e.bytesPerPixel + sampleBytes;
+    const auto inData = [&](qint64 offset) { return offset >= 0 && offset <= e.dataBytes - extent; };
+    if (e.colour ? !(inData(e.redOffset) && inData(e.greenOffset) && inData(e.blueOffset)) : !inData(e.firstOffset))
+        return QObject::tr("The channel layout is damaged (a channel lies outside the image data).");
+    return QString();
 }
 
 } // namespace
@@ -276,10 +328,18 @@ bool readLifIndex(const QString &path, QList<LifEntry> &out, QString *error)
         return false;
     }
 
+    QString firstProblem;
     for (const XmlEntry &e : entries) {
         const auto it = std::find_if(blocks.begin(), blocks.end(), [&](const Block &b) { return b.id == e.blockId; });
         if (it == blocks.end() || it->size <= 0)
             continue; // the XML names a block the file does not contain
+        // before the int conversions below: values the XML cannot mean
+        if (e.channels > kMaxChannels || e.bytesPerPixel < 0 || e.bytesPerPixel > 2 * kMaxChannels
+            || e.rowStride < 0) {
+            if (firstProblem.isEmpty())
+                firstProblem = QObject::tr("\"%1\": the pixel layout is damaged.").arg(e.name);
+            continue;
+        }
         LifEntry le;
         le.name = e.name;
         le.path = e.path;
@@ -294,21 +354,37 @@ bool readLifIndex(const QString &path, QList<LifEntry> &out, QString *error)
         le.redOffset = e.redOffset;
         le.greenOffset = e.greenOffset;
         le.blueOffset = e.blueOffset;
+        le.firstOffset = e.firstOffset;
         const int sampleBytes = le.bitsPerSample / 8;
         le.bytesPerPixel = int(e.bytesPerPixel > 0 ? e.bytesPerPixel : qint64(le.channels) * sampleBytes);
         le.rowStride = e.rowStride > 0 ? e.rowStride : qint64(le.width) * le.bytesPerPixel;
+        // Older files may list three channels without saying which is which:
+        // interleaved, they are Leica's BGR (the default offsets). Any other
+        // image without all of red, green and blue shows its first channel.
+        le.colour = le.channels >= 3
+                    && (e.rgbFound == 7 || (e.rgbFound == 0 && le.bytesPerPixel >= 3 * sampleBytes));
+        // a damaged entry is left out; the rest of the file stays readable
+        if (const QString p = layoutProblem(le); !p.isEmpty()) {
+            if (firstProblem.isEmpty())
+                firstProblem = QStringLiteral("\"%1\": %2").arg(le.name, p);
+            continue;
+        }
         out.push_back(le);
     }
-    if (out.isEmpty() && error)
+    if (out.isEmpty() && error) {
         *error = QObject::tr("%1 holds no images this program can read.").arg(QFileInfo(path).fileName());
+        if (!firstProblem.isEmpty())
+            *error += QLatin1Char(' ') + firstProblem;
+    }
     return !out.isEmpty();
 }
 
 bool readLifImage(const QString &path, const LifEntry &e, LoadedImage &out, QString *error)
 {
-    if (e.width <= 0 || e.height <= 0) {
+    // the index checked this already; an entry made or changed elsewhere is checked again
+    if (const QString p = layoutProblem(e); !p.isEmpty()) {
         if (error)
-            *error = QObject::tr("The image has no size.");
+            *error = p;
         return false;
     }
     QFile f(path);
@@ -317,55 +393,47 @@ bool readLifImage(const QString &path, const LifEntry &e, LoadedImage &out, QStr
             *error = QObject::tr("Cannot open %1: %2").arg(QFileInfo(path).fileName(), f.errorString());
         return false;
     }
-    const qint64 need = e.rowStride * e.height;
-    if (e.dataBytes < need) {
-        if (error)
-            *error = QObject::tr("The image data is shorter than its size says (%1 of %2 bytes).")
-                         .arg(e.dataBytes)
-                         .arg(need);
-        return false;
-    }
-    if (!f.seek(e.dataOffset)) {
+    if (e.dataOffset < 0 || e.dataOffset + e.dataBytes > f.size() || !f.seek(e.dataOffset)) {
         if (error)
             *error = QObject::tr("Cannot reach the image data.");
         return false;
     }
 
-    Image16 img(e.width, e.height);
-    if (img.px.empty()) {
+    Image16 img;
+    try {
+        img = Image16(e.width, e.height);
+    } catch (const std::bad_alloc &) {
         if (error)
             *error = QObject::tr("Not enough memory for a %1 x %2 image.").arg(e.width).arg(e.height);
         return false;
     }
     const int sampleBytes = e.bitsPerSample / 8;
-    const bool mono = e.channels < 3;
-    QByteArray row;
+    // Each channel's samples of a row are read as one span, which covers both
+    // layouts: interleaved channels share a span a byte or two apart, planar
+    // ones are a plane apart. A mono image shows its first channel (the only
+    // one of a fluorescence image this program reads).
+    const qint64 span = qint64(e.width - 1) * e.bytesPerPixel + sampleBytes;
+    const QList<qint64> offsets = e.colour ? QList<qint64>{e.redOffset, e.greenOffset, e.blueOffset}
+                                           : QList<qint64>{e.firstOffset};
+    QByteArray buf;
     for (int y = 0; y < e.height; ++y) {
-        row = f.read(e.rowStride);
-        if (row.size() != e.rowStride) {
-            if (error)
-                *error = QObject::tr("The image data ends at row %1 of %2.").arg(y).arg(e.height);
-            return false;
-        }
-        const uchar *src = reinterpret_cast<const uchar *>(row.constData());
         uint16_t *dst = img.row(y);
-        for (int x = 0; x < e.width; ++x) {
-            const uchar *p = src + qint64(x) * e.bytesPerPixel;
-            auto sample = [&](int offset) -> uint16_t {
-                if (sampleBytes == 2) {
-                    const uchar *s = p + offset;
-                    return uint16_t(quint16(s[0]) | quint16(s[1]) << 8);
-                }
+        for (int c = 0; c < offsets.size(); ++c) {
+            if (!f.seek(e.dataOffset + offsets[c] + qint64(y) * e.rowStride)
+                || (buf = f.read(span)).size() != span) {
+                if (error)
+                    *error = QObject::tr("The image data ends at row %1 of %2.").arg(y).arg(e.height);
+                return false;
+            }
+            const uchar *src = reinterpret_cast<const uchar *>(buf.constData());
+            for (int x = 0; x < e.width; ++x) {
+                const uchar *s = src + qint64(x) * e.bytesPerPixel;
                 // 8-bit sources are scaled the same way as everywhere else (x257)
-                return uint16_t(p[offset] * 257);
-            };
-            if (mono) {
-                const uint16_t v = sample(0);
-                dst[3 * x] = dst[3 * x + 1] = dst[3 * x + 2] = v;
-            } else {
-                dst[3 * x] = sample(e.redOffset * sampleBytes);
-                dst[3 * x + 1] = sample(e.greenOffset * sampleBytes);
-                dst[3 * x + 2] = sample(e.blueOffset * sampleBytes);
+                const uint16_t v = sampleBytes == 2 ? uint16_t(quint16(s[0]) | quint16(s[1]) << 8) : uint16_t(s[0] * 257);
+                if (offsets.size() == 1)
+                    dst[3 * x] = dst[3 * x + 1] = dst[3 * x + 2] = v;
+                else
+                    dst[3 * x + c] = v;
             }
         }
     }
@@ -501,8 +569,10 @@ bool writeLif(const QString &path, const QList<LifImageOut> &images, const QStri
         w.writeEndElement(); // LMSDataContainerHeader
     }
 
-    QFile f(path);
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    // Written to a temporary file that replaces the target only once complete, so
+    // a failed write (a full disk) never destroys an existing file of that name.
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly)) {
         if (error)
             *error = QObject::tr("Cannot write %1: %2").arg(QFileInfo(path).fileName(), f.errorString());
         return false;
@@ -541,9 +611,10 @@ bool writeLif(const QString &path, const QList<LifImageOut> &images, const QStri
             for (int x = 0; x < im.data.width; ++x) {
                 const uint16_t r = src[3 * x], g = src[3 * x + 1], b = src[3 * x + 2];
                 if (sampleBytes == 1) {
-                    dst[3 * x] = uchar(b >> 8);      // B, G, R as LAS X stores them
-                    dst[3 * x + 1] = uchar(g >> 8);
-                    dst[3 * x + 2] = uchar(r >> 8);
+                    // B, G, R as LAS X stores them, rounded like the TIFF writer
+                    dst[3 * x] = uchar((b + 128) / 257);
+                    dst[3 * x + 1] = uchar((g + 128) / 257);
+                    dst[3 * x + 2] = uchar((r + 128) / 257);
                 } else {
                     const uint16_t v[3] = {b, g, r};
                     for (int c = 0; c < 3; ++c) {
@@ -555,15 +626,16 @@ bool writeLif(const QString &path, const QList<LifImageOut> &images, const QStri
             if (f.write(row) != stride) {
                 if (error)
                     *error = QObject::tr("Writing %1 failed: %2").arg(QFileInfo(path).fileName(), f.errorString());
-                f.remove();
+                f.cancelWriting();
                 return false;
             }
         }
     }
-    if (!f.flush()) {
+    // commit() reports any earlier failed write (headers included) and only
+    // then replaces the target
+    if (!f.commit()) {
         if (error)
             *error = QObject::tr("Writing %1 failed: %2").arg(QFileInfo(path).fileName(), f.errorString());
-        f.remove();
         return false;
     }
     return true;

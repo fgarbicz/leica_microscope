@@ -18,10 +18,12 @@ public:
     };
 
     void reset();
-    void setMode(Mode m) { m_mode = m; }
-    Mode mode() const { return m_mode; }
-    void setAlign(bool on) { m_align = on; }
-    void setWindow(int radius) { m_window = radius; }
+    // The mode of a stack is fixed by its first frame: a change made while a
+    // stack is in progress applies from the next reset().
+    void setMode(Mode m);
+    Mode mode() const;
+    void setAlign(bool on);
+    void setWindow(int radius);
 
     // Adds a linear frame; returns the fraction of pixels it improved.
     double add(const Image16 &frame);
@@ -34,7 +36,8 @@ public:
 
 private:
     mutable std::mutex m_mutex;
-    Mode m_mode = Mode::MaxContrast;
+    Mode m_mode = Mode::MaxContrast;      // requested
+    Mode m_stackMode = Mode::MaxContrast; // of the stack in progress (latched at its first frame)
     bool m_align = true;
     int m_window = 3;
     int m_count = 0;

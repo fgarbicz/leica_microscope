@@ -6,6 +6,9 @@
 // most used controls near the top.
 
 #include "app/AcquisitionEngine.h"
+#include "ui/FocusPeak.h"
+
+#include <QElapsedTimer>
 
 #include <QWidget>
 
@@ -28,8 +31,13 @@ public:
     void setStats(const LiveStats &s, double umPerPixel);
     void setPixelInfo(const QString &text);
     void setLevels(double black, double white);
-    void resetFocusPeak() { m_focusPeak = 0; }
-    double focusPeak() const { return m_focusPeak; }
+    // a new field, objective or focus region: the old sharpness is no reference
+    void resetFocusPeak()
+    {
+        m_focusPeak.reset();
+        m_focusClock.invalidate();
+    }
+    double focusPeak() const { return m_focusPeak.peak(); }
     // The "Overlays" group, to be placed separately in the panel column.
     QWidget *overlaysPanel() const { return m_overlays; }
 
@@ -44,7 +52,8 @@ private:
     QLabel *m_pixel;
     QLabel *m_focus;
     QWidget *m_overlays = nullptr;
-    double m_focusPeak = 0;
+    FocusPeak m_focusPeak;
+    QElapsedTimer m_focusClock; // time between live frames, for the peak to fade
 };
 
 } // namespace lm

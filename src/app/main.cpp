@@ -6,6 +6,7 @@
 #include <QApplication>
 #include <QDir>
 #include <QFile>
+#include <QFileOpenEvent>
 #include <QIcon>
 #include <QImageReader>
 #include <QMessageBox>
@@ -95,6 +96,28 @@ void installCrashHandler()
 }
 #endif
 
+// The Finder does not pass the files to open as arguments: it sends them as
+// QFileOpenEvents to the application, at launch ("Open with") and later.
+class FileOpenFilter : public QObject {
+public:
+    explicit FileOpenFilter(lm::MainWindow *w) : m_window(w) {}
+
+protected:
+    bool eventFilter(QObject *o, QEvent *e) override
+    {
+        if (e->type() == QEvent::FileOpen) {
+            const QString path = static_cast<QFileOpenEvent *>(e)->file();
+            if (!path.isEmpty())
+                m_window->openPaths({path});
+            return true;
+        }
+        return QObject::eventFilter(o, e);
+    }
+
+private:
+    lm::MainWindow *m_window;
+};
+
 } // namespace
 
 int main(int argc, char **argv)
@@ -108,6 +131,8 @@ int main(int argc, char **argv)
     QApplication::setApplicationName(QStringLiteral("DM Imaging"));
     QApplication::setApplicationVersion(QStringLiteral(DMI_VERSION));
     QApplication::setWindowIcon(QIcon(QStringLiteral(":/icons/app.png")));
+    // ties the windows to dmimaging.desktop (icon and name in the Wayland dock)
+    QGuiApplication::setDesktopFileName(QStringLiteral("dmimaging"));
 
     // log file for support
     const QString logDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -132,8 +157,18 @@ int main(int argc, char **argv)
     lm::WheelGuard::install(app);
 
     lm::MainWindow w;
+    FileOpenFilter fileOpen(&w);
+    app.installEventFilter(&fileOpen);
     w.showMaximized();
     QTimer::singleShot(100, &w, &lm::MainWindow::startup);
+    // images passed on the command line: "Open with" on Windows, the %F of
+    // the Linux .desktop entry. Qt has already removed its own options.
+    QStringList files;
+    for (const QString &a : app.arguments().mid(1))
+        if (!a.startsWith(QLatin1Char('-')))
+            files << a;
+    if (!files.isEmpty())
+        QTimer::singleShot(150, &w, [&w, files] { w.openPaths(files); });
     const int rc = app.exec();
     qInfo("exit %d", rc);
     return rc;

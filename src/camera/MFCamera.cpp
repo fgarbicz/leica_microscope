@@ -16,7 +16,10 @@
 #include <ksmedia.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstring>
 #include <map>
 
 #pragma comment(lib, "mfplat.lib")
@@ -72,6 +75,13 @@ void ensureMF()
     static MFInit init;
     // COM must be initialised on each thread that uses MF objects
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+}
+
+std::string hrText(HRESULT hr)
+{
+    char s[16];
+    std::snprintf(s, sizeof s, "0x%08lX", static_cast<unsigned long>(hr));
+    return s;
 }
 
 // IAMCameraControl exposure is log2(seconds): value v => 2^v seconds.
@@ -141,7 +151,7 @@ bool MFCamera::open(std::string &error)
     HRESULT hr = MFCreateDeviceSource(attr, &m_source);
     attr->Release();
     if (FAILED(hr)) {
-        error = "Cannot open video device (MFCreateDeviceSource failed, hr=0x" + std::to_string(uint32_t(hr)) + ")";
+        error = "Cannot open video device (MFCreateDeviceSource failed, hr=" + hrText(hr) + ")";
         return false;
     }
     IMFAttributes *rattr = nullptr;
@@ -195,17 +205,15 @@ bool MFCamera::open(std::string &error)
         m_typeIndex.push_back(c.idx);
     }
     if (m_resolutions.empty()) {
-        safeRelease(m_reader);
-        if (m_source) {
-            m_source->Shutdown();
-            safeRelease(m_source);
-        }
+        releaseReader();
         error = "Device reports no video formats";
         return false;
     }
     m_resIndex = 0;
-    if (!configureType(0, error))
+    if (!configureType(0, error)) {
+        releaseReader(); // not left half open: isOpen() would report a camera that cannot stream
         return false;
+    }
     queryControls();
     return true;
 }
@@ -213,29 +221,73 @@ bool MFCamera::open(std::string &error)
 bool MFCamera::configureType(int index, std::string &error)
 {
     IMFMediaType *native = nullptr;
-    if (FAILED(m_reader->GetNativeMediaType(kVideoStream, DWORD(m_typeIndex[index]), &native))) {
+    if (index < 0 || index >= int(m_typeIndex.size())
+        || FAILED(m_reader->GetNativeMediaType(kVideoStream, DWORD(m_typeIndex[size_t(index)]), &native))) {
         error = "Cannot get media type";
         return false;
     }
-    m_reader->SetCurrentMediaType(kVideoStream, nullptr, native);
+    HRESULT hr = m_reader->SetCurrentMediaType(kVideoStream, nullptr, native);
     UINT32 w = 0, h = 0;
     MFGetAttributeSize(native, MF_MT_FRAME_SIZE, &w, &h);
     native->Release();
+    if (FAILED(hr)) {
+        error = "The camera refused the video format (hr=" + hrText(hr) + ")";
+        return false;
+    }
     // request RGB32 output; the reader inserts decoders/converters as needed
     IMFMediaType *out = nullptr;
-    MFCreateMediaType(&out);
+    if (FAILED(MFCreateMediaType(&out)) || !out) {
+        error = "Cannot create the output media type";
+        return false;
+    }
     out->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
     out->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_RGB32);
     MFSetAttributeSize(out, MF_MT_FRAME_SIZE, w, h);
-    HRESULT hr = m_reader->SetCurrentMediaType(kVideoStream, nullptr, out);
+    hr = m_reader->SetCurrentMediaType(kVideoStream, nullptr, out);
     out->Release();
     if (FAILED(hr)) {
-        error = "Cannot configure RGB32 output";
+        error = "Cannot configure RGB32 output (hr=" + hrText(hr) + ")";
         return false;
     }
+    if (!readOutputFormat()) {
+        error = "Cannot read the configured output format";
+        return false;
+    }
+    return true;
+}
+
+bool MFCamera::readOutputFormat()
+{
+    IMFMediaType *cur = nullptr;
+    if (FAILED(m_reader->GetCurrentMediaType(kVideoStream, &cur)) || !cur)
+        return false;
+    UINT32 w = 0, h = 0;
+    MFGetAttributeSize(cur, MF_MT_FRAME_SIZE, &w, &h);
+    // The row pitch is not necessarily width * 4, and a negative value means the
+    // rows are stored bottom-up. MF_MT_DEFAULT_STRIDE holds a signed value in a
+    // UINT32; without it, the minimum stride of the format applies (top-down).
+    LONG stride = 0;
+    UINT32 attr = 0;
+    if (SUCCEEDED(cur->GetUINT32(MF_MT_DEFAULT_STRIDE, &attr)))
+        stride = LONG(INT32(attr));
+    else if (FAILED(MFGetStrideForBitmapInfoHeader(MFVideoFormat_RGB32.Data1, w, &stride)))
+        stride = LONG(w) * 4;
+    cur->Release();
+    if (w == 0 || h == 0 || stride == 0 || std::abs(stride) < LONG(w) * 4)
+        return false;
     m_outW = int(w);
     m_outH = int(h);
+    m_outStride = int(stride);
     return true;
+}
+
+void MFCamera::releaseReader()
+{
+    safeRelease(m_reader);
+    if (m_source) {
+        m_source->Shutdown();
+        safeRelease(m_source);
+    }
 }
 
 void MFCamera::queryControls()
@@ -272,11 +324,7 @@ void MFCamera::close()
 {
     stopStreaming();
     std::lock_guard<std::mutex> lock(m_mutex);
-    safeRelease(m_reader);
-    if (m_source) {
-        m_source->Shutdown();
-        safeRelease(m_source);
-    }
+    releaseReader();
 }
 
 bool MFCamera::startStreaming(std::string &error)
@@ -321,15 +369,34 @@ bool MFCamera::setResolutionIndex(int index)
     const bool wasStreaming = m_streaming;
     stopStreaming();
     std::string err;
-    bool ok;
+    bool ok = false, usable = false;
     {
         std::lock_guard<std::mutex> lock(m_mutex);
+        if (!m_reader)
+            return false;
         ok = configureType(index, err);
-        if (ok)
+        if (ok) {
             m_resIndex = index;
+            usable = true;
+        } else {
+            // a failed change can leave the native type switched but no RGB32
+            // output behind it: go back to the format that worked
+            std::string restoreErr;
+            usable = configureType(m_resIndex, restoreErr);
+        }
     }
-    if (wasStreaming)
-        startStreaming(err);
+    if (!usable) {
+        // nothing streams in this state; reported so the camera is reopened
+        emitError("Cannot change the image format (" + err + "), and the previous format could not be restored");
+        return false;
+    }
+    if (wasStreaming) {
+        std::string startErr;
+        if (!startStreaming(startErr)) {
+            emitError("The live image did not restart after the format change: " + startErr);
+            return false;
+        }
+    }
     return ok;
 }
 
@@ -429,15 +496,12 @@ void MFCamera::run()
         LONGLONG ts = 0;
         IMFSample *sample = nullptr;
         IMFSourceReader *reader = nullptr;
-        int w, h;
         {
             std::lock_guard<std::mutex> lock(m_mutex);
             if (!m_reader)
                 break;
             reader = m_reader;
             reader->AddRef();
-            w = m_outW;
-            h = m_outH;
         }
         const HRESULT hr = reader->ReadSample(kVideoStream, 0, &streamIndex, &flags, &ts, &sample);
         reader->Release();
@@ -446,6 +510,7 @@ void MFCamera::run()
             break;
         }
         if (FAILED(hr) || (flags & MF_SOURCE_READERF_ERROR)) {
+            safeRelease(sample);
             if (++errors > 20) {
                 emitError("Video stream error (device disconnected?)");
                 m_streaming = false;
@@ -455,33 +520,77 @@ void MFCamera::run()
             continue;
         }
         errors = 0;
+        if (flags & MF_SOURCE_READERF_ENDOFSTREAM) {
+            // no more samples will come: every further ReadSample would return
+            // at once with this flag again
+            safeRelease(sample);
+            emitError("The camera stopped delivering video (end of stream; device disconnected?)");
+            m_streaming = false;
+            break;
+        }
+        int w, h, stride;
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            // the driver may change the output format on its own
+            if ((flags & MF_SOURCE_READERF_CURRENTMEDIATYPECHANGED) && m_reader)
+                readOutputFormat();
+            w = m_outW;
+            h = m_outH;
+            stride = m_outStride;
+        }
         if (!sample)
             continue;
         IMFMediaBuffer *buf = nullptr;
         if (SUCCEEDED(sample->ConvertToContiguousBuffer(&buf))) {
-            BYTE *data = nullptr;
-            DWORD len = 0;
-            if (SUCCEEDED(buf->Lock(&data, nullptr, &len))) {
+            const size_t row = size_t(w) * 4;
+            auto copy = [&](const BYTE *scan0, LONG pitch) {
+                // scan0 is the top row; a negative pitch walks up through memory
                 auto f = std::make_shared<RawFrame>();
                 f->width = w;
                 f->height = h;
                 f->format = PixelFormat::BGRA8;
                 f->bitDepth = 8;
-                f->stride = w * 4;
+                f->stride = int(row);
                 f->sequence = seq++;
                 f->timestamp = std::chrono::steady_clock::now();
                 f->exposureMs = m_exposure;
                 f->gain = m_gain;
-                const size_t need = size_t(f->stride) * h;
-                if (len >= need) {
-                    f->data.resize(need);
-                    // RGB32 from MF is bottom-up when stride is positive for
-                    // uncompressed RGB; the source reader delivers top-down for
-                    // video processing output, so copy directly.
-                    std::memcpy(f->data.data(), data, need);
-                    emitFrame(f);
+                f->data.resize(row * size_t(h));
+                for (int y = 0; y < h; ++y)
+                    std::memcpy(f->data.data() + size_t(y) * row, scan0 + ptrdiff_t(y) * pitch, row);
+                emitFrame(f);
+            };
+            // A 2D buffer knows its real pitch and orientation; prefer it.
+            // Lock2DSize also gives the buffer's extent, so a frame size that
+            // no longer matches the buffer is dropped instead of read past it.
+            IMF2DBuffer2 *buf2d = nullptr;
+            if (SUCCEEDED(buf->QueryInterface(IID_PPV_ARGS(&buf2d)))) {
+                BYTE *scan0 = nullptr, *start = nullptr;
+                LONG pitch = 0;
+                DWORD len = 0;
+                if (SUCCEEDED(buf2d->Lock2DSize(MF2DBuffer_LockFlags_Read, &scan0, &pitch, &start, &len))) {
+                    if (scan0 && start && size_t(std::abs(pitch)) >= row && w > 0 && h > 0) {
+                        // the first and last rows in memory, whichever way up
+                        const BYTE *lo = pitch > 0 ? scan0 : scan0 + ptrdiff_t(pitch) * (h - 1);
+                        const BYTE *hi = (pitch > 0 ? scan0 + ptrdiff_t(pitch) * (h - 1) : scan0) + row;
+                        if (lo >= start && hi <= start + len)
+                            copy(scan0, pitch);
+                    }
+                    buf2d->Unlock2D();
                 }
-                buf->Unlock();
+                buf2d->Release();
+            } else if (stride != 0) {
+                BYTE *data = nullptr;
+                DWORD len = 0;
+                if (SUCCEEDED(buf->Lock(&data, nullptr, &len))) {
+                    const size_t pitch = size_t(std::abs(stride));
+                    if (data && w > 0 && h > 0 && len >= pitch * size_t(h - 1) + row) {
+                        // bottom-up: the top row is the last one in memory
+                        const BYTE *scan0 = stride > 0 ? data : data + pitch * size_t(h - 1);
+                        copy(scan0, LONG(stride));
+                    }
+                    buf->Unlock();
+                }
             }
             buf->Release();
         }

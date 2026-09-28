@@ -8,10 +8,11 @@
   for administrator permission). Keep *Install the camera driver* ticked. Afterwards DM
   Imaging is in the Start menu and on the desktop.
 - *macOS:* run `./install.sh`; the app lands in Applications. No driver is needed.
-- *Linux:* run `./install.sh`, then `sudo sh driver/install_udev_rule.sh` once so the
+- *Linux:* run `./install.sh`, then `sudo bash driver/install_udev_rule.sh` once so the
   camera can be opened without root, and replug the camera.
 
 DM Imaging looks and works the same on all three; only the installation differs.
+Where this guide says **Ctrl**, use **Cmd** on a Mac.
 
 1. Switch on the microscope lamp and connect the camera (USB 3.0 port, blue connector).
 2. Start **DM Imaging** from the desktop or Start menu. The camera connects and
@@ -34,17 +35,44 @@ in the file, and *Tools → Correct pixel size of saved images…* rewrites it f
 whole folder (the images themselves are not changed). Measuring a stage micrometer
 with *Calibrate…* overrides the nominal value for that objective and is unaffected.
 
+The repair lists every image it would change, with the old and new pixel size, and
+changes nothing until you confirm. It only corrects an image whose recorded pixel
+size is the nominal one at 0.7×; images from a calibrated objective, with a pixel
+size set by hand, or whose scale cannot be traced back to the nominal value are
+listed as *left alone*, with the reason. TIFF, PNG and BMP files are rewritten
+losslessly. A JPEG cannot be changed without re-compressing it, so only its `.json`
+sidecar is corrected (or created): DM Imaging then shows the right scale, but other
+programs still read the old one. Running the repair again on the same folder finds
+nothing more to do.
+
 **Leica .lif files** (what LAS X saves) open like any other image: *File → Open
 image* and pick the `.lif`. It usually holds a whole session, so a list appears of
 the images inside with their sizes and pixel sizes; choose one. The calibration
 comes from the file, so the scale bar and every measurement are correct without
-setting anything. Going the other way, *File → Export captured images to a Leica
-.lif* writes this session's captures into one .lif.
+setting anything. A fluorescence image with several channels opens as its first
+channel. Going the other way, *File → Export captured images to a Leica .lif*
+writes this session's captures into one .lif.
 
-**The images you capture** appear as a reel of thumbnails under the live image. On a
-tall screen, *View → Captured images in a vertical list* puts them in a column beside
-the image instead, with the file name next to each one: more images visible at once,
-and the names readable. The choice is remembered.
+An image opened from a .lif has no file of its own, so annotations or a pixel size
+added to it are kept only by saving it (*Save as*); DM Imaging asks before
+discarding them.
+
+**Opening images from elsewhere:** images and folders can also be opened by
+dragging them onto the DM Imaging icon, with *Open with* in Explorer, Finder or the
+Linux file manager, or on the command line (`DMImaging image.tif`). An image opens
+in *Process*, a folder in *Browse*.
+
+**The images you capture** appear beside or under the live image. The three buttons
+above them choose how:
+
+| Button | Shows |
+|---|---|
+| **Reel** | a row of thumbnails under the live image |
+| **List** | a column beside the image, thumbnail and file name per row |
+| **Compact** | a column of small thumbnails, one line each, to see many images at once |
+
+The same choice is in *View → Captured images* and in *File → Settings*, and it is
+remembered.
 
 **If the text is too small** (or too large), change *Interface size* in
 *File → Settings*: it ranges from 75% to 200% and scales the text, the controls and
@@ -66,7 +94,10 @@ The window has three workspaces (tabs at the top):
 1. **Köhler illumination and focus** as usual on the DM2000.
 2. **Exposure:** set the exposure time in the *Exposure* panel, or press
    **Auto once** (F8). *Auto exposure* keeps adjusting continuously. Its
-   brightness target (default 85%) keeps the background just below white. Keep
+   brightness target (default 80%) keeps the background just below white. When you
+   change objective, the exposure that objective last used is restored first and auto
+   exposure only fine-tunes from there; the moment of darkness while the turret turns
+   is not chased. Keep
    the gain at 1× unless the specimen is very dark: higher gain means more noise.
 3. **White balance:** press *Auto white balance* on an empty field (background), or
    use *Pick area…* and drag a rectangle over background.
@@ -85,21 +116,28 @@ The window has three workspaces (tabs at the top):
    corners and uneven illumination. The reference is stored per objective.
 5. **Histogram:** check that the curve does not touch the right edge (saturation).
    *Show over/under exposure* marks saturated pixels red.
-6. **Focus assistant** (*Focus* panel): shows a sharpness bar. Turn the fine focus
-   until it reaches its peak.
+6. **Focus assistant** (*Focus* panel): shows the sharpness and the best value seen
+   ("peak"). Turn the fine focus until the bar is full and green. The peak holds while
+   you turn past the best point and back, fades slowly afterwards, and starts again by
+   itself when you move to another field or change the objective; *Reset peak* starts
+   it by hand.
 
 ## 3. Capturing
 
-Press **Capture image** (F9, or Space while the image has focus). After the
-capture, a window asks for:
+Press **Capture image** (the blue button at the top of the left column, F9, or Space
+while the image has focus). After the capture, a window asks for:
 
 - **Objective magnification:** click 2.5×, 5×, 10×, 20×, 40× or 100×, or press the
   keys 1–6. This sets the µm/pixel calibration stored in the file and the scale bar.
 - **Image name:** a name is suggested (template set in *Save settings*). Just type
   to replace it.
 - **Notes** (optional), stored in the image metadata.
+- **Save in**: the folder. *Change…* picks another one, which is then used for the
+  following images too.
 
-Press **Enter / Save** to save, or **Discard**.
+Press **Enter / Save** to save, or **Discard**. While the image is being written, a
+turning wheel with "Saving…" shows in the middle of the live image; wait for it to
+disappear before unplugging a USB disk or network drive the image goes to.
 
 Capture modes (*Acquire image → Mode*):
 
@@ -142,15 +180,18 @@ image. Its opacity (25 / 50 / 75 %) is under *View → Reference overlay*.
 
 ## 4. Objectives and calibration
 
-The current objective is shown in the title bar. Each objective remembers its
-own exposure, gain and white balance; they are restored when you switch
-(*Remember exposure & white balance per objective* in the Microscope panel).
- Select it in the *Microscope*
-panel or with Ctrl+1 … Ctrl+6. The post-capture window also updates it.
+The current objective is shown in the title bar. Select it in the *Microscope*
+panel or with Ctrl+1 … Ctrl+6; the post-capture window also updates it. Each
+objective remembers its own exposure, gain and white balance, and they are restored
+when you switch (*Remember exposure & white balance per objective* in the
+Microscope panel).
 
-The pixel size is computed from the camera adapter factor (*Camera adapter*,
-default 0.7×). For exact measurements, calibrate each objective once with a stage
-micrometer: *Microscope → Calibrate…*, click two marks, and enter their distance in µm.
+The pixel size is computed from the sensor pitch and the camera adapter factor
+(*Camera adapter*, 1.0× on this microscope; see section 1). For exact measurements,
+calibrate each objective once with a stage micrometer: *Microscope → Calibrate…*,
+click two marks, and enter their distance in µm. You may zoom between the two
+clicks. The calibrated value can also be typed into the objectives table, with a
+decimal point or a decimal comma.
 
 ## 5. Multifocus (extended depth of field)
 
@@ -177,6 +218,11 @@ saved in the image folder and plays in VLC, QuickTime, Windows Media Player and 
 Choose a folder on the left. Thumbnails, a preview and all metadata (objective,
 pixel size, exposure, date, …) are shown. Double-click an image to open it in
 Process, or use **Open in image viewer** to open it in a window of its own.
+
+**Rename** and **Delete** keep an image and its companion files (the `.json`
+metadata and the annotations) together. Delete moves them to the Recycle Bin / Trash;
+if an image cannot be moved (for example because another program has it open), it
+and its companion files stay where they are and a message lists it.
 
 ## 9. Process: measure and annotate
 
@@ -244,6 +290,8 @@ using the marker type, nucleus size and sensitivity set in Process.
 
 ## 10. Keyboard shortcuts
 
+*Help → Keyboard shortcuts* lists every shortcut as it applies on your computer.
+
 | Key | Action |
 |---|---|
 | F1 | user guide |
@@ -255,6 +303,8 @@ using the marker type, nucleus size and sensitivity set in Process.
 | F9 / Space | capture |
 | Ctrl+1…6 | select objective |
 | Alt+1/2/3 | Acquire / Browse / Process |
+| Ctrl+0 / Ctrl+Plus / Ctrl+Minus | fit / zoom in / zoom out (the image on screen) |
+| Ctrl+Z / Ctrl+Shift+Z | undo / redo an annotation (Ctrl+Y also redoes on Windows) |
 | Mouse wheel | zoom |
 | Double-click | fit / 100% |
 | Ctrl+drag / middle-drag | pan |
@@ -267,7 +317,7 @@ using the marker type, nucleus size and sensitivity set in Process.
 | "No Leica camera found" | Check the USB cable (use a USB 3.0 port). On Windows use *Tools → Install / repair camera driver*; on Linux use *Tools → Install camera access rule*; on macOS no driver is needed, so just replug the camera. |
 | Camera disconnected | The application reconnects automatically when the camera is back. |
 | "Sensor is not ready" | Unplug the camera's USB cable for 5 seconds and plug it back in. (Resetting the USB port or restarting the computer is not enough: the camera must lose power.) |
-| Linux: "Cannot open the camera: Access denied" | The udev rule is missing. Run `sudo sh driver/install_udev_rule.sh`, then unplug and replug the camera. |
+| Linux: "Cannot open the camera: Access denied" | The udev rule is missing. Run `sudo bash driver/install_udev_rule.sh`, then unplug and replug the camera. |
 | macOS: a UVC camera's exposure and gain sliders are greyed out | macOS provides no manual exposure control for UVC cameras, so that camera runs on its own automatic exposure. The Leica DMC6200 is not affected. |
 | "Little bare glass in this field" (IHC) | The analysis needs some empty glass to know what "white" is. Include a little background in the image. |
 | Video stopped by itself | Videos are limited to about 1.9 GB (a few minutes at full resolution); start a new recording. |
@@ -275,4 +325,11 @@ using the marker type, nucleus size and sensitivity set in Process.
 | Dark corners | Acquire a shading reference for this objective. |
 | Measurements wrong | Check the selected objective and calibrate with a stage micrometer. |
 
-The log file is `%APPDATA%\DM Imaging\DM Imaging\dmimaging.log`.
+The log file is `dmimaging.log`, with the previous run's in `dmimaging.1.log`. Send
+both when reporting a problem:
+
+| | Folder |
+|---|---|
+| Windows | `%APPDATA%\DM Imaging\DM Imaging` |
+| macOS | `~/Library/Application Support/DM Imaging/DM Imaging` |
+| Linux | `~/.local/share/DM Imaging/DM Imaging` |

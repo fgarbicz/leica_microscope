@@ -30,8 +30,9 @@ public:
     void stopStreaming() override;
     bool isStreaming() const override { return m_streaming; }
 
-    std::vector<Resolution> resolutions() const override { return m_resolutions; }
-    int resolutionIndex() const override { return m_resIndex; }
+    // copies under m_mutex: deliverFrame() corrects the list on the capture queue
+    std::vector<Resolution> resolutions() const override;
+    int resolutionIndex() const override;
     bool setResolutionIndex(int index) override;
 
     Range exposureRange() const override { return m_expRange; }
@@ -57,14 +58,15 @@ private:
     struct Impl; // Objective-C objects, defined in AvfCamera.mm
     CameraInfo m_info;
     Impl *m_impl = nullptr;
-    std::vector<Resolution> m_resolutions;
-    int m_resIndex = 0;
+    std::vector<Resolution> m_resolutions; // guarded by m_mutex
+    int m_resIndex = 0;                    // guarded by m_mutex
     std::atomic<bool> m_streaming{false};
     std::atomic<uint64_t> m_sequence{0};
     Range m_expRange{1, 1000};
     Range m_gainRange{1, 1};
-    double m_exposure = 33;
-    double m_gain = 1;
+    // read on the capture queue for every frame
+    std::atomic<double> m_exposure{33};
+    std::atomic<double> m_gain{1};
     bool m_hasExposure = false, m_hasGain = false;
     std::shared_ptr<FramePool> m_pool;
     mutable std::mutex m_mutex;

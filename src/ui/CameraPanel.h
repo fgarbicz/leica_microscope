@@ -41,6 +41,8 @@ private slots:
     void onLiveToggled(bool on);
 
 private:
+    // the combo index of the last used camera, or -1
+    int savedCameraIndex() const;
     void buildAdvanced();
     void updateEnabled();
 

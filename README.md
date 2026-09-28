@@ -39,6 +39,8 @@ features and the same interface on all three (see [Platforms](#platforms)).
 **Microscope**
 - Objectives 2.5×, 5×, 10×, 20×, 40× and 100×.
 - Calibration is nominal (from the camera adapter) or measured with a stage micrometer.
+- *Tools → Correct pixel size of saved images* repairs the scale recorded in images saved
+  with the old 0.7× adapter assumption, and leaves calibrated images alone.
 - After every capture, a dialog asks for the **magnification and image name**.
 - Exposure, gain and white balance are remembered per objective.
 - Calibrated scale bar, grid and crosshair overlays.
@@ -74,12 +76,13 @@ features and the same interface on all three (see [Platforms](#platforms)).
   metadata as JSON in ImageDescription.
 - PNG (8/16-bit), JPEG and BMP, with a JSON sidecar.
 - Leica **.lif** (LAS X experiment files): read any image out of one, with the name
-  and calibration LAS X stored, and write the images of a session into one .lif.
+  and calibration LAS X stored (a multi-channel fluorescence image opens as its first
+channel), and write the images of a session into one .lif.
   See [docs/LIF_FORMAT.md](docs/LIF_FORMAT.md).
 
 ## Platforms
 
-| | Windows 10/11 | macOS 12+ | Linux |
+| | Windows 10/11 | macOS | Linux |
 |---|---|---|---|
 | Leica DMC6200 (native driver) | yes, via WinUSB | yes, via libusb | yes, via libusb |
 | Camera setup needed | install the WinUSB driver once | none | install a udev rule once |
@@ -94,6 +97,12 @@ so. This does not affect the DMC6200, which is driven directly over USB and has
 full manual control on every platform.
 
 ² Through the UCSI connector manager, which exists only on Windows.
+
+Windows means 64-bit x64; Windows 11 on ARM runs the x64 build under emulation, or
+a native ARM64 build (`-Arch arm64`). On macOS the app runs on the macOS version its
+bundled Homebrew libraries were built for, or newer (see
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#macos)). Linux needs Qt 6.4 or newer
+(Debian 12, Ubuntu 24.04 or later).
 
 ³ Imaging, colour, IHC quantification, measurements, multifocus, stitching, time
 lapse, video, file formats and the whole user interface are shared code and behave
@@ -132,7 +141,7 @@ brew install qt libusb          # build requirements
 
 No driver is needed: macOS lets the application talk to the camera directly. The first
 time a UVC camera is used, macOS asks for camera permission; the DMC6200 does not need
-it. Requirements: macOS 12 or newer, Apple silicon or Intel.
+it. Apple silicon or Intel.
 
 `./install.sh --uninstall` removes the app. Settings (`~/Library/Preferences`) and your
 images are kept.
@@ -142,7 +151,7 @@ images are kept.
 ```bash
 sudo apt install qt6-base-dev qt6-svg-dev libusb-1.0-0-dev cmake ninja-build build-essential
 ./install.sh                            # build and install into /usr/local
-sudo sh driver/install_udev_rule.sh     # camera access without root
+sudo bash driver/install_udev_rule.sh     # camera access without root
 ```
 
 The udev rule (`driver/99-leica-dmc6200.rules`) gives the logged-in desktop user access to
@@ -158,31 +167,65 @@ opened. The same rule can be installed from *Tools → Install camera access rul
 ```
 
 Needs the build requirements below plus Inno Setup 6 (`ISCC.exe`), and Python with the
-`markdown` package for the HTML user guide (optional).
+`markdown` package for the HTML user guide (optional). It builds, runs all four tests and
+refuses to package if any fails. `-Arch arm64` makes a Windows-on-ARM installer
+(`DMImaging-Setup-<version>-arm64.exe`) from an ARM64 Qt.
 
 ## Build from source
 
-Windows (Visual Studio 2022 Build Tools with C++, Windows SDK, Qt 6.5+ MSVC 2022 x64):
+### Windows
+
+Prerequisites (all free):
+
+- Visual Studio 2022 Build Tools with the *Desktop development with C++* workload
+  (MSVC and a Windows SDK). On a Windows-on-ARM PC add the *MSVC ARM64* and *x64* compilers.
+- Qt 6.8 for MSVC 2022, by default in `%USERPROFILE%\devtools\Qt\6.8.3\msvc2022_64`
+  (`msvc2022_arm64` for ARM64), or anywhere with `-QtDir`. The Qt online installer works,
+  or [aqtinstall](https://github.com/miurahr/aqtinstall):
+  `python -m aqt install-qt windows desktop 6.8.3 win64_msvc2022_64 -O %USERPROFILE%\devtools\Qt`
+- CMake 3.24+ and Ninja (Visual Studio's own copies are used if they are not on `PATH`).
+- PowerShell must be allowed to run local scripts, once per user:
+  `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
 
 ```powershell
-.\build.ps1 -Test          # Release build + unit tests
+.\build.ps1 -Test          # Release build + all four tests
 .\build.ps1 -Deploy        # also copies the Qt runtime next to the exe
+.\build.ps1 -Arch arm64    # Windows on ARM (x64 is the default, and builds on ARM too)
+.\build.ps1 -Clean -Test   # from scratch
 ```
 
-macOS and Linux (Qt 6.5+, libusb-1.0, CMake 3.24+):
+The script finds Visual Studio itself and picks the right compiler for the machine,
+including cross-compiling x64 on an ARM64 PC.
+
+### macOS and Linux
+
+Qt 6.4+ (with Qt SVG), libusb-1.0, CMake 3.24+, Ninja and a C++20 compiler:
 
 ```bash
-./build.sh --test           # Release build + unit tests
+# macOS   brew install qt libusb cmake ninja
+# Linux   sudo apt install qt6-base-dev qt6-svg-dev libusb-1.0-0-dev cmake ninja-build build-essential
+./build.sh --test           # Release build + all four tests
 ./build.sh --deploy         # bundle the Qt runtime (.app on macOS, AppImage on Linux)
 ./build.sh --debug --clean
 ```
 
-Either way:
+### Tests
+
+`--test` / `-Test` runs all four through CTest, without a screen (so also over SSH or in
+a container):
+
+| Test | Covers |
+|---|---|
+| `lmtests` | imaging: demosaicing, colour, stacking, stitching, IHC, nucleus detection |
+| `iotest` | file formats: TIFF, PNG, JPEG, `.lif`, metadata, the pixel-size repair |
+| `enginetest` | acquisition engine against the simulated camera: live, capture, HDR, multifocus, stitching |
+| `uitest` | interface behaviour: wheel guard, interface size, icons, gallery, compare alignment, settings |
+
+With a camera connected, two more check the hardware (in `build/release/bin`):
 
 ```
-build/release/bin/lmtests --hw     # hardware test with the camera connected
-build/release/bin/enginetest       # acquisition engine integration test (simulator)
-build/release/bin/dmctest          # command-line test of the native camera driver
+lmtests --hw     # hardware test of the DMC6200
+dmctest          # command-line test of the native camera driver
 ```
 
 ## Project layout
@@ -191,13 +234,13 @@ build/release/bin/dmctest          # command-line test of the native camera driv
 |---|---|
 | `src/camera/` | camera abstraction, DMC6200 driver (`leica/`), USB backends (`usb/`: WinUSB and libusb), UVC backends (Media Foundation / AVFoundation / V4L2), simulator |
 | `src/imaging/` | demosaicing, colour pipeline, shading, analysis, registration, focus stacking, stitching, pixel shift |
-| `src/io/` | TIFF encoder/decoder, image I/O, metadata |
+| `src/io/` | TIFF encoder/decoder, image I/O, metadata, Leica `.lif`, pixel-size repair |
 | `src/app/` | acquisition engine, settings, calibration, `main.cpp` |
 | `src/ui/` | Qt user interface |
 | `driver/` | WinUSB INF and installer (Windows), udev rule and installer (Linux) |
 | `tests/` | unit, hardware and integration tests |
 | `tools/` | build helpers and reverse-engineering tools used to document the camera protocol |
 | `resources/` | icons, Windows version info, macOS `Info.plist`, Linux desktop entry |
-| `docs/` | user guide and protocol documentation |
+| `docs/` | user guide, deployment checklist, camera protocol and `.lif` format |
 
 See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for day-to-day use.

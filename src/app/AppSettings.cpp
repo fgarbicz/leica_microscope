@@ -103,6 +103,10 @@ void AppSettings::load()
     QSettings s;
     s.beginGroup(QStringLiteral("capture"));
     capture.folder = s.value(QStringLiteral("folder"), defaultFolder()).toString();
+    // an empty or relative folder would put captures in the working directory
+    // ("/" for an application started from the Finder)
+    if (capture.folder.trimmed().isEmpty() || QDir::isRelativePath(capture.folder))
+        capture.folder = defaultFolder();
     capture.pattern = s.value(QStringLiteral("pattern"), capture.pattern).toString();
     capture.counter = s.value(QStringLiteral("counter"), 1).toInt();
     capture.counterDigits = s.value(QStringLiteral("digits"), 3).toInt();
@@ -159,7 +163,7 @@ void AppSettings::load()
 
     s.beginGroup(QStringLiteral("camera"));
     autoExposure = s.value(QStringLiteral("autoExposure"), false).toBool();
-    aeTarget = s.value(QStringLiteral("aeTarget"), 0.85).toDouble();
+    aeTarget = s.value(QStringLiteral("aeTarget"), 0.80).toDouble();
     exposureMs = s.value(QStringLiteral("exposure"), 20.0).toDouble();
     gain = s.value(QStringLiteral("gain"), 1.0).toDouble();
     resolutionIndex = s.value(QStringLiteral("resolution"), 0).toInt();
@@ -170,16 +174,31 @@ void AppSettings::load()
     const QVariant c = s.value(QStringLiteral("color"));
     color = c.isValid() ? colorFromVariant(c.toMap()) : builtinPresets().value(QObject::tr("Bright field - IHC (DAB)"));
 
+    // Presets are a list of maps that carry their name as a value: a name used
+    // as a QSettings key is split into sub-groups at every '/' ("H&E / DAB"),
+    // and such a preset never came back.
     colorPresets.clear();
-    s.beginGroup(QStringLiteral("colorPresets"));
-    for (const QString &k : s.childKeys())
-        colorPresets.insert(k, colorFromVariant(s.value(k).toMap()));
-    s.endGroup();
+    const QVariantList presetList = s.value(QStringLiteral("colorPresetList")).toList();
+    for (const QVariant &v : presetList) {
+        const QVariantMap m = v.toMap();
+        const QString name = m.value(QStringLiteral("name")).toString();
+        if (!name.isEmpty())
+            colorPresets.insert(name, colorFromVariant(m.value(QStringLiteral("settings")).toMap()));
+    }
+    if (presetList.isEmpty()) {
+        // settings written before the list: one key per preset. allKeys() puts
+        // back the '/' of names that were split into sub-groups.
+        s.beginGroup(QStringLiteral("colorPresets"));
+        for (const QString &k : s.allKeys())
+            colorPresets.insert(k, colorFromVariant(s.value(k).toMap()));
+        s.endGroup();
+    }
 
     browseFolder = s.value(QStringLiteral("browseFolder"), capture.folder).toString();
     theme = s.value(QStringLiteral("theme"), theme).toString();
     uiScale = std::clamp(s.value(QStringLiteral("uiScale"), uiScale).toInt(), 75, 200);
     galleryVertical = s.value(QStringLiteral("galleryVertical"), galleryVertical).toBool();
+    galleryCompact = s.value(QStringLiteral("galleryCompact"), galleryCompact).toBool();
 }
 
 void AppSettings::save() const
@@ -244,15 +263,17 @@ void AppSettings::save() const
     s.endGroup();
 
     s.setValue(QStringLiteral("color"), colorToVariant(color));
-    s.remove(QStringLiteral("colorPresets"));
-    s.beginGroup(QStringLiteral("colorPresets"));
+    s.remove(QStringLiteral("colorPresets")); // the old one-key-per-preset form, see load()
+    QVariantList presetList;
     for (auto it = colorPresets.begin(); it != colorPresets.end(); ++it)
-        s.setValue(it.key(), colorToVariant(it.value()));
-    s.endGroup();
+        presetList.push_back(QVariantMap{{QStringLiteral("name"), it.key()},
+                                         {QStringLiteral("settings"), colorToVariant(it.value())}});
+    s.setValue(QStringLiteral("colorPresetList"), presetList);
     s.setValue(QStringLiteral("browseFolder"), browseFolder);
     s.setValue(QStringLiteral("theme"), theme);
     s.setValue(QStringLiteral("uiScale"), uiScale);
     s.setValue(QStringLiteral("galleryVertical"), galleryVertical);
+    s.setValue(QStringLiteral("galleryCompact"), galleryCompact);
 }
 
 QString AppSettings::nextFileName(const QString &objective, const QString &mode) const
