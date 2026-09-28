@@ -6,6 +6,7 @@
 #include <devpkey.h>
 #include <setupapi.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -14,6 +15,16 @@
 namespace lm::usbc {
 
 namespace {
+
+// device names come from the registry as UTF-16
+std::string utf8(const std::wstring &w)
+{
+    const int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), int(w.size()), nullptr, 0, nullptr, nullptr);
+    std::string s(size_t(std::max(0, n)), '\0');
+    if (n > 0)
+        WideCharToMultiByte(CP_UTF8, 0, w.c_str(), int(w.size()), s.data(), n, nullptr, nullptr);
+    return s;
+}
 
 // Test interfaces of the UCSI class extension (UcmUcsiCx), as used by
 // Microsoft's UcsiControl.exe (MUTT package).
@@ -239,7 +250,7 @@ bool cameraIsOnlyUsbCDevice(std::string &error)
         return false;
     }
     if (!other.empty()) {
-        error = "another USB device is attached to the USB-C ports (" + std::string(other.begin(), other.end())
+        error = "another USB device is attached to the USB-C ports (" + utf8(other)
                 + "), so the camera's port cannot be identified safely; unplug it or power-cycle the camera by hand";
         return false;
     }

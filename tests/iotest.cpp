@@ -318,23 +318,23 @@ int main(int argc, char **argv)
         auto fixes = findCalibrationFixes(rdir.path(), false, 0.7, 1.0, &leftAlone);
         CHECK(fixes.size() == 6);
         CHECK(leftAlone.size() == 4);
-        for (const CalibrationFix &f : leftAlone) {
-            CHECK(!f.note.isEmpty());
-            CHECK(f.path == microTif || f.path == microOldPng || f.path == manualTif || f.path == resizedOldTif);
-            CHECK(!applyCalibrationFix(f, 1.0, &err)); // never applied
+        for (const CalibrationFix &fix : leftAlone) {
+            CHECK(!fix.note.isEmpty());
+            CHECK(fix.path == microTif || fix.path == microOldPng || fix.path == manualTif || fix.path == resizedOldTif);
+            CHECK(!applyCalibrationFix(fix, 1.0, &err)); // never applied
         }
-        for (const CalibrationFix &f : fixes) {
-            CHECK(f.path != microTif && f.path != microOldPng && f.path != manualTif && f.path != resizedOldTif);
-            const double expect = expectedFor(f.path);
-            CHECK(std::abs(f.newUmPerPixel - expect) < 1e-9);
-            CHECK(f.rewritesFile == !f.path.endsWith(QLatin1String(".jpg")));
-            CHECK(f.createsSidecar == (f.path == jpgNoSc));
-            const bool applied = applyCalibrationFix(f, 1.0, &err);
+        for (const CalibrationFix &fix : fixes) {
+            CHECK(fix.path != microTif && fix.path != microOldPng && fix.path != manualTif && fix.path != resizedOldTif);
+            const double expect = expectedFor(fix.path);
+            CHECK(std::abs(fix.newUmPerPixel - expect) < 1e-9);
+            CHECK(fix.rewritesFile == !fix.path.endsWith(QLatin1String(".jpg")));
+            CHECK(fix.createsSidecar == (fix.path == jpgNoSc));
+            const bool applied = applyCalibrationFix(fix, 1.0, &err);
             if (!applied)
-                std::printf("  %s: %s\n", qPrintable(f.path), qPrintable(err));
+                std::printf("  %s: %s\n", qPrintable(fix.path), qPrintable(err));
             CHECK(applied);
             // applying the same fix twice changes nothing more
-            CHECK(applyCalibrationFix(f, 1.0, &err));
+            CHECK(applyCalibrationFix(fix, 1.0, &err));
         }
 
         for (const QString &p : {png, pngNoSc, jpg, jpgNoSc, shiftTif, resizedTif}) {

@@ -225,15 +225,25 @@ void Dmc6200Camera::stopStreaming()
     stopLiveLocked();
 }
 
-RawFramePtr Dmc6200Camera::readOneFrame(unsigned timeoutMs, dmc::FrameEvent *evOut)
+RawFramePtr Dmc6200Camera::readOneFrame(unsigned timeoutMs, std::string *why, dmc::FrameEvent *evOut)
 {
+    auto fail = [&](std::string reason) {
+        const std::string usb = m_proto.lastError();
+        if (!usb.empty())
+            reason += " (" + usb + ")";
+        if (why)
+            *why = std::move(reason);
+        return RawFramePtr();
+    };
+    m_proto.clearError();
     dmc::FrameEvent ev;
     if (!m_proto.waitFrameEvent(ev, timeoutMs))
-        return nullptr;
+        return fail("no frame announced within " + std::to_string(timeoutMs) + " ms");
     // validate the announcement (a corrupted event must not trigger huge allocations)
     if (ev.width == 0 || ev.height == 0 || ev.width > m_sensorW || ev.height > m_sensorH
         || uint64_t(ev.bytes) != uint64_t(ev.width) * ev.height * 2)
-        return nullptr;
+        return fail("implausible frame announced: " + std::to_string(ev.width) + " x " + std::to_string(ev.height)
+                    + ", " + std::to_string(ev.bytes) + " bytes");
     auto f = m_pool->acquire(ev.bytes);
     f->width = ev.width;
     f->height = ev.height;
@@ -243,7 +253,8 @@ RawFramePtr Dmc6200Camera::readOneFrame(unsigned timeoutMs, dmc::FrameEvent *evO
     f->format = PixelFormat::BayerGB16;
     long long n = m_proto.readFrame(f->data.data(), ev.bytes, timeoutMs);
     if (n != (long long)ev.bytes)
-        return nullptr;
+        return fail("frame " + std::to_string(ev.width) + " x " + std::to_string(ev.height) + ": read "
+                    + std::to_string(std::max(0LL, n)) + " of " + std::to_string(ev.bytes) + " bytes");
     f->sequence = m_seq++;
     f->timestamp = std::chrono::steady_clock::now();
     f->exposureMs = ev.exposureUs / 1000.0;
@@ -258,7 +269,8 @@ void Dmc6200Camera::streamLoop()
     int failures = 0;
     while (!m_stopRequested) {
         const unsigned timeout = unsigned(std::min(m_exposureMs.load(), 60000.0)) + 1500;
-        RawFramePtr f = readOneFrame(timeout);
+        std::string why;
+        RawFramePtr f = readOneFrame(timeout, &why);
         if (m_stopRequested)
             break;
         if (f) {
@@ -269,7 +281,7 @@ void Dmc6200Camera::streamLoop()
         // recovery: restart the acquisition a few times before giving up
         if (++failures > 4) {
             m_streaming = false;
-            emitError("Camera stopped delivering images (" + m_proto.lastError()
+            emitError("Camera stopped delivering images (" + why
                       + "). Check the USB connection and restart live view.");
             return;
         }
@@ -400,9 +412,10 @@ bool Dmc6200Camera::captureShots(int modeIndex, std::vector<RawFramePtr> &shots,
     if (ok) {
         const unsigned timeout = unsigned(std::min(m_exposureMs.load(), 60000.0)) + 3000;
         for (size_t i = 0; i < table->size(); ++i) {
-            RawFramePtr f = readOneFrame(timeout);
+            std::string why;
+            RawFramePtr f = readOneFrame(timeout, &why);
             if (!f) {
-                error = "Shot " + std::to_string(i + 1) + " failed: " + m_proto.lastError();
+                error = "Shot " + std::to_string(i + 1) + " of " + std::to_string(table->size()) + " failed: " + why;
                 ok = false;
                 break;
             }

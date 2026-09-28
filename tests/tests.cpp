@@ -934,8 +934,9 @@ static void testHardware()
     cam->setResolutionIndex(0);
     // 4-shot pixel shift
     std::vector<RawFramePtr> shots;
+    err.clear(); // err is shared by the whole test: only this capture's message
     bool ok = cam->captureShots(0, shots, err);
-    std::printf("  4-shot capture: %s (%zu shots) %s\n", ok ? "ok" : "FAILED", shots.size(), err.c_str());
+    std::printf("  4-shot capture: %s (%zu shots) %s\n", ok ? "ok" : "FAILED", shots.size(), ok ? "" : err.c_str());
     CHECK(ok && shots.size() == 4);
     if (ok && shots.size() == 4) {
         // estimate the direction of the sensor motion from shot 0 -> 1 (1 px in x)
@@ -994,10 +995,11 @@ static void testHardware()
         const auto mode = cam->shotModes()[size_t(mi)];
         std::vector<RawFramePtr> ms;
         const auto tc = std::chrono::steady_clock::now();
+        err.clear();
         const bool okm = cam->captureShots(mi, ms, err);
         const double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - tc).count();
         std::printf("  %s: %s (%zu shots, %.1f s) %s\n", mode.name.c_str(), okm ? "ok" : "FAILED", ms.size(), sec,
-                    err.c_str());
+                    okm ? "" : err.c_str());
         CHECK(okm && int(ms.size()) == mode.shots);
         if (!okm || int(ms.size()) != mode.shots)
             continue;

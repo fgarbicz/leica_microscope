@@ -63,7 +63,9 @@ private:
     bool startLiveLocked(std::string &error);
     void stopLiveLocked();
     void streamLoop();
-    RawFramePtr readOneFrame(unsigned timeoutMs, dmc::FrameEvent *evOut = nullptr);
+    // one frame, or null with the reason in *why (timeout, implausible frame
+    // announcement, short read); the protocol's own error is often empty then
+    RawFramePtr readOneFrame(unsigned timeoutMs, std::string *why = nullptr, dmc::FrameEvent *evOut = nullptr);
     std::vector<dmc::SequenceEntry> sequenceFor(const std::vector<std::pair<int, int>> &positions) const;
 
     CameraInfo m_info;

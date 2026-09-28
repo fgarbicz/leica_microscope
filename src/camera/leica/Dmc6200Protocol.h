@@ -124,6 +124,8 @@ public:
         std::lock_guard<std::mutex> l(m_errMutex);
         return m_error;
     }
+    // forget an earlier error, so lastError() describes only what follows
+    void clearError() { setError(std::string()); }
     usb::Device *device() { return m_dev.get(); }
 
 private:
