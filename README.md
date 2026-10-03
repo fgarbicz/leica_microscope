@@ -117,10 +117,24 @@ rendered through the application's own image and histogram widgets.)*
   resolution tags (ImageJ/Fiji/QuPath read the µm scale) and all acquisition
   metadata as JSON in ImageDescription.
 - PNG (8/16-bit), JPEG and BMP, with a JSON sidecar.
-- Leica **.lif** (LAS X experiment files): read any image out of one, with the name
-  and calibration LAS X stored (a multi-channel fluorescence image opens as its first
-channel), and write the images of a session into one .lif.
-  See [docs/LIF_FORMAT.md](docs/LIF_FORMAT.md).
+- Leica **.lif** (LAS X experiment files) are written from a session's captures, and
+  read by a full **.lif viewer** (below). See [docs/LIF_FORMAT.md](docs/LIF_FORMAT.md).
+
+**Leica .lif viewer**
+- Opens any LAS X `.lif`, from this microscope's camera or from a confocal or
+  widefield system: the file's tree of folders and images with thumbnails and a filter.
+- Every channel in its colour, each switched on or off, recoloured and with its own
+  contrast (automatic or set by hand); 8-, 12-, 16-bit and floating-point data.
+- Z stacks, time series, tile scans and spectral dimensions, a slider each with
+  playback; maximum projection along z; tiles merged at their stage positions.
+- The value of every channel under the cursor; the recording settings (objective, NA,
+  exposure, zoom, pinhole, detectors, date) and the complete LAS X metadata (XML).
+- Export of the image shown, a selection or the whole file: the original data as
+  calibrated ImageJ hyperstack TIFFs (channels, z and t, LUTs and display ranges; for
+  Fiji, QuPath, napari, Python), or pictures as shown (JPEG/PNG/TIFF, scale bar, every
+  plane or a projection), with a CSV summary and the LAS X metadata.
+- *Open in Process* to measure and quantify an image; large files are read in the
+  background, a gigabyte `.lif` opens without the window freezing.
 
 ## Platforms
 
@@ -283,9 +297,9 @@ a container):
 | Test | Covers |
 |---|---|
 | `lmtests` | imaging: demosaicing, colour, stacking, stitching, IHC, nucleus detection |
-| `iotest` | file formats: TIFF, PNG, JPEG, `.lif`, metadata, the pixel-size repair |
+| `iotest` | file formats: TIFF, PNG, JPEG, `.lif` (every dimension, tiles, damaged files), ImageJ export, metadata, the pixel-size repair |
 | `enginetest` | acquisition engine against the simulated camera: live, capture, HDR, multifocus, stitching |
-| `uitest` | interface behaviour: wheel guard, interface size, icons, gallery, compare alignment, settings |
+| `uitest` | interface behaviour: wheel guard, interface size, icons, gallery, compare alignment, settings, the .lif viewer |
 
 With a camera connected, two more check the hardware (in `build/release/bin`):
 
@@ -294,13 +308,17 @@ lmtests --hw     # hardware test of the DMC6200
 dmctest          # command-line test of the native camera driver
 ```
 
+`lifinfo file.lif` lists what a `.lif` holds and exports it from the command line
+(`--export DIR`); `tools/lifcheck/check.py` checks the `.lif` reader and the ImageJ
+export against an independent reader (see [docs/LIF_FORMAT.md](docs/LIF_FORMAT.md#checking-the-reader)).
+
 ## Project layout
 
 | Path | Contents |
 |---|---|
 | `src/camera/` | camera abstraction, DMC6200 driver (`leica/`), USB backends (`usb/`: WinUSB and libusb), UVC backends (Media Foundation / AVFoundation / V4L2), simulator |
 | `src/imaging/` | demosaicing, colour pipeline, shading, analysis, registration, focus stacking, stitching, pixel shift |
-| `src/io/` | TIFF encoder/decoder, image I/O, metadata, Leica `.lif`, pixel-size repair |
+| `src/io/` | TIFF encoder/decoder, image I/O, metadata, Leica `.lif` reading, writing and export, ImageJ hyperstack TIFF, pixel-size repair |
 | `src/app/` | acquisition engine, settings, calibration, `main.cpp` |
 | `src/ui/` | Qt user interface |
 | `driver/` | WinUSB INF and installer (Windows), udev rule and installer (Linux) |

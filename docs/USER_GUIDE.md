@@ -49,16 +49,14 @@ sidecar is corrected (or created): DM Imaging then shows the right scale, but ot
 programs still read the old one. Running the repair again on the same folder finds
 nothing more to do.
 
-**Leica .lif files** (what LAS X saves) open like any other image: *File → Open
-image* and pick the `.lif`. It usually holds a whole session, so a list appears of
-the images inside with their sizes and pixel sizes; choose one. The calibration
-comes from the file, so the scale bar and every measurement are correct without
-setting anything. A fluorescence image with several channels opens as its first
-channel. Going the other way, *File → Export captured images to a Leica .lif*
-writes this session's captures into one .lif.
+**Leica .lif files** (what LAS X saves) open in a viewer of their own: *File → Open
+Leica .lif…* (Ctrl+L), double-click a `.lif` in *Browse*, drag it onto DM Imaging, or
+pick it in *File → Open image*. Several files can be open at once, each in its own
+window. See [Leica .lif viewer](#12-leica-lif-viewer). Going the other way, *File →
+Export captured images to a Leica .lif* writes this session's captures into one .lif.
 
-An image opened from a .lif has no file of its own, so annotations or a pixel size
-added to it are kept only by saving it (*Save as*); DM Imaging asks before
+An image sent from the viewer to *Process* has no file of its own, so annotations or a
+pixel size added to it are kept only by saving it (*Save as*); DM Imaging asks before
 discarding them.
 
 **Opening images from elsewhere:** images and folders can also be opened by
@@ -235,7 +233,9 @@ saved in the image folder and plays in VLC, QuickTime, Windows Media Player and 
 
 Choose a folder on the left. Thumbnails, a preview and all metadata (objective,
 pixel size, exposure, date, …) are shown. Double-click an image to open it in
-Process, or use **Open in image viewer** to open it in a window of its own.
+Process, or use **Open in image viewer** to open it in a window of its own. A Leica
+`.lif` previews its first image and says how many it holds; double-click it to browse
+them all in the [.lif viewer](#12-leica-lif-viewer).
 
 **Rename** and **Delete** keep an image and its companion files (the `.json`
 metadata and the annotations) together. Delete moves them to the Recycle Bin / Trash;
@@ -329,6 +329,10 @@ using the marker type, nucleus size and sensitivity set in Process.
 | Double-click | fit / 100% |
 | Ctrl+drag / middle-drag | pan |
 | F11 | full screen |
+| Ctrl+L | open a Leica .lif |
+| Page Up / Page Down | .lif viewer: previous / next image |
+| , / . | .lif viewer: z slice down / up |
+| [ / ] | .lif viewer: time point back / forward |
 
 ## 11. Troubleshooting
 
@@ -353,3 +357,66 @@ both when reporting a problem:
 | Windows | `%APPDATA%\DM Imaging\DM Imaging` |
 | macOS | `~/Library/Application Support/DM Imaging/DM Imaging` |
 | Linux | `~/.local/share/DM Imaging/DM Imaging` |
+
+## 12. Leica .lif viewer
+
+A `.lif` is the experiment file LAS X saves: every image of a session, from this
+microscope's camera or from a confocal or widefield system, with how it was recorded.
+The viewer shows all of it.
+
+**The file.** On the left is the file's tree as LAS X shows it, folders and images,
+with a thumbnail and the size of each. Type in *Filter by name* to find an image in a
+long session. Page Up / Page Down step through the images.
+
+**The image.** It fills the middle, with the scale bar from the file's calibration;
+zoom and pan as everywhere else. Under it is one slider per dimension the image has:
+**Z** (with the height in µm), **T** (with the time), **Tile** for a tile scan, and any
+other dimension LAS X recorded (λ for a spectral scan). The ▶ button beside a slider
+plays through it. *Maximum projection along z* shows the brightest value of every
+pixel through the stack. *Merge tiles* puts the tiles of a tile scan together where
+the stage was (they are placed, not re-aligned; if LAS X saved its own merged image,
+that is in the file too). The line under the image gives the value of every channel
+under the cursor, in the image's own units (0–4095 for a 12-bit image).
+
+**Channels.** On the right, each channel in its LUT colour, with its detector or dye
+when the file names one. Untick a channel to hide it, click its colour to change it,
+and set what is shown as black and as full intensity, or press the wand for an
+automatic contrast. *Auto* does that for every channel, *Full range* shows them as
+recorded. A colour camera image (this microscope's) opens exactly as recorded;
+fluorescence opens with an automatic contrast, like ImageJ's *Auto*. The settings are
+kept for each image while the file is open.
+
+**Information.** Below the channels: size, pixel size and field of view, z step and
+time interval, and the settings the image was recorded with: objective, numerical
+aperture, zoom, pinhole, exposure, camera, date. *Metadata…* shows everything LAS X
+recorded about the image (XML), searchable, and saves it.
+
+**Using an image.** *Open in Process* sends the picture as shown (the visible channels
+in their colours, at full resolution) to *Process* for measuring and IHC
+quantification, with its calibration. *Copy* (Ctrl+C) puts it on the clipboard.
+
+**Exporting.** *Export…* exports the image shown, the images selected in the list
+(Ctrl/Shift+click, or right-click → *Export selected images*), or every image in the
+file (*Export all…*), in one of two forms:
+
+- *Original data: ImageJ TIFF* writes each image as a hyperstack with every channel,
+  z slice and time point, unscaled (8- or 16-bit), calibrated in µm with the z step and
+  time interval, and with the channel colours and display ranges. Fiji/ImageJ opens it
+  as a hyperstack; QuPath, napari and Python (tifffile) read it too. This is the form
+  to measure in. A tile scan is one merged mosaic or a file per tile; a stack too
+  large for one TIFF (4 GB) is split into a file per time point.
+- *Pictures as shown* writes colour pictures with the channels, colours and contrast
+  set in the viewer, as JPEG, PNG or TIFF, optionally with a scale bar, for slides and
+  reports: of the plane shown, of every plane, or a maximum projection along z.
+
+The files go into a new folder named after the `.lif` (unless unticked) and are named
+after the images and their folders in the file (`Folder - Image_z03_t001.tif`). With
+the summary ticked, `images.csv` lists every image exported (size, channels, z, t,
+pixel size, objective, date, files) and `<file>_metadata.xml` holds everything LAS X
+recorded. The export runs in the background and can be cancelled.
+
+Large files: nothing is read until it is needed, and in the background, so a
+gigabyte `.lif` (or one in OneDrive that has to download first) opens without the
+window freezing. An image too large to show at once (a big merged tile scan) is shown
+at a reduced resolution, which the status line says; exports and *Open in Process*
+always use every pixel.

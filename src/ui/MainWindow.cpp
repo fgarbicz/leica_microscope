@@ -15,6 +15,7 @@
 #include "ui/HistogramWidget.h"
 #include "ui/Icons.h"
 #include "ui/ImageView.h"
+#include "ui/LifViewer.h"
 #include "ui/MicroscopePanel.h"
 #include "ui/Overlays.h"
 #include "ui/PlatformUi.h"
@@ -269,6 +270,7 @@ MainWindow::MainWindow()
         }
     });
     connect(m_process, &ProcessPage::message, this, &MainWindow::showMessage);
+    connect(m_process, &ProcessPage::lifRequested, this, &MainWindow::openLif);
     connect(m_browse, &BrowsePage::openInProcess, this, [this](const QString &p) {
         if (m_process->openFile(p))
             m_tabs->setCurrentIndex(2);
@@ -676,6 +678,12 @@ void MainWindow::buildMenus()
     file->addAction(icon(Icon::Export), tr("&Export with overlays…"), QKeySequence(tr("Ctrl+E")), m_process,
                     &ProcessPage::exportWithOverlays);
     file->addAction(icon(Icon::Print), tr("&Print…"), QKeySequence::Print, m_process, &ProcessPage::print);
+    file->addAction(icon(Icon::Browse), tr("Open &Leica .lif…"), QKeySequence(tr("Ctrl+L")), this, [this] {
+        const QString f = QFileDialog::getOpenFileName(this, tr("Open Leica .lif"), AppSettings::instance().browseFolder,
+                                                       tr("Leica image files (*.lif)"));
+        if (!f.isEmpty())
+            openLif(f);
+    });
     file->addAction(icon(Icon::Save), tr("Export captured images to a Leica &.lif…"), this,
                     &MainWindow::exportSessionToLif);
     file->addSeparator();
@@ -952,6 +960,9 @@ void MainWindow::buildMenus()
                            "<b>Side panels</b><br>"
                            "The mouse wheel scrolls the panel. It never changes a setting: "
                            "drag a slider, type in the box, or use the arrow keys.<br><br>"
+                           "<b>Leica .lif viewer</b><br>"
+                           "%16 — open a .lif · Page Up / Page Down — previous / next image<br>"
+                           ", / . — z slice down / up · [ / ] — time point back / forward<br><br>"
                            "<b>Interface size</b><br>"
                            "%13 / %14 — larger / smaller text<br>"
                            "%15 — back to the default size")
@@ -963,7 +974,7 @@ void MainWindow::buildMenus()
                                  key(QKeySequence(QKeySequence::Redo)),
                                  key(QKeySequence(QStringLiteral("Ctrl+Shift+="))),
                                  key(QKeySequence(QStringLiteral("Ctrl+Shift+-"))),
-                                 key(QKeySequence(QStringLiteral("Ctrl+Shift+0")))),
+                                 key(QKeySequence(QStringLiteral("Ctrl+Shift+0"))), key(QKeySequence(tr("Ctrl+L")))),
                         QMessageBox::Ok, this);
         box.setTextFormat(Qt::RichText);
         box.exec();
@@ -1006,6 +1017,11 @@ void MainWindow::openPaths(const QStringList &paths)
         if (fi.isDir()) {
             m_browse->setFolder(fi.absoluteFilePath());
             m_tabs->setCurrentIndex(1);
+            continue;
+        }
+        // every .lif opens in its own viewer
+        if (fi.suffix().compare(QLatin1String("lif"), Qt::CaseInsensitive) == 0) {
+            openLif(fi.absoluteFilePath());
             continue;
         }
         files << fi.absoluteFilePath();
@@ -1056,6 +1072,30 @@ void MainWindow::setWorkspace(int index)
         applyLiveDab(); // stain settings may have changed in Process
     if (index == 1)
         m_browse->refresh();
+}
+
+void MainWindow::openLif(const QString &path)
+{
+    // the file is already open: bring its window forward
+    for (LifViewer *v : findChildren<LifViewer *>())
+        if (QFileInfo(v->path()) == QFileInfo(path)) {
+            v->showNormal();
+            v->raise();
+            v->activateWindow();
+            return;
+        }
+    auto *v = new LifViewer(this);
+    connect(v, &LifViewer::openInProcess, this, [this](const Image16 &img, const ImageMetadata &meta) {
+        if (!m_process->maybeDiscardUnsaved())
+            return;
+        m_process->openImage(img, meta, QString()); // not a file it can be saved back over
+        m_tabs->setCurrentIndex(2);
+        raise();
+        activateWindow();
+        showMessage(tr("Opened %1 from the .lif").arg(meta.sample), 5000);
+    });
+    v->openFile(path);
+    v->show();
 }
 
 void MainWindow::exportSessionToLif()

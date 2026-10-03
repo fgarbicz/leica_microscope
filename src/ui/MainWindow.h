@@ -74,6 +74,8 @@ private:
     // Writes this session's captures into one Leica .lif, the way LAS X keeps
     // a session.
     void exportSessionToLif();
+    // Opens a Leica .lif in a viewer window of its own (one per file).
+    void openLif(const QString &path);
     void applyGalleryLayout(bool vertical);
     // how the captured images are shown: the reel under the image, the list
     // beside it, or the compact list (small thumbnails, one line each)

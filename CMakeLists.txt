@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(DMImaging VERSION 1.1.3 LANGUAGES C CXX)
+project(DMImaging VERSION 1.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -130,6 +130,8 @@ set(APP_SOURCES
     src/io/ImageIO.cpp
     src/io/CalibrationRepair.cpp
     src/io/LifFile.cpp
+    src/io/LifExport.cpp
+    src/io/ImageJTiff.cpp
     src/io/Metadata.cpp
     src/ui/MainWindow.cpp
     src/ui/ImageView.cpp
@@ -148,7 +150,8 @@ set(APP_SOURCES
     src/ui/Annotations.cpp
     src/ui/Icons.cpp
     src/ui/CalibrationRepairDialog.cpp
-    src/ui/LifDialog.cpp
+    src/ui/LifViewer.cpp
+    src/ui/LifExportDialog.cpp
     src/ui/PanelGroup.cpp
     src/ui/PlatformUi.cpp
     src/ui/Theme.cpp
@@ -239,18 +242,19 @@ add_test(NAME enginetest COMMAND enginetest)
 # user interface behaviour (the wheel guard, the icon set, image view overlays)
 add_executable(uitest tests/uitest.cpp src/ui/WheelGuard.cpp src/ui/Theme.cpp src/ui/Icons.cpp
                src/ui/ImageView.cpp src/ui/Annotations.cpp src/ui/Overlays.cpp src/app/AppSettings.cpp
-               src/io/ImageIO.cpp src/io/LifFile.cpp src/io/Metadata.cpp src/ui/CompareWindow.cpp
-               src/ui/GalleryWidget.cpp src/ui/PlatformUi.cpp)
-target_include_directories(uitest PRIVATE src)
-target_link_libraries(uitest PRIVATE lmcore Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg)
+               src/io/ImageIO.cpp src/io/LifFile.cpp src/io/LifExport.cpp src/io/ImageJTiff.cpp src/io/Metadata.cpp
+               src/ui/CompareWindow.cpp src/ui/GalleryWidget.cpp src/ui/PlatformUi.cpp src/ui/LifViewer.cpp
+               src/ui/LifExportDialog.cpp)
+target_include_directories(uitest PRIVATE src tests)
+target_link_libraries(uitest PRIVATE lmcore Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::Svg)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(uitest PRIVATE Qt6::DBus)  # PlatformUi's "show in file manager"
 endif()
 add_test(NAME uitest COMMAND uitest)
 
 add_executable(iotest tests/iotest.cpp src/io/ImageIO.cpp src/io/CalibrationRepair.cpp src/io/LifFile.cpp
-               src/io/Metadata.cpp)
-target_include_directories(iotest PRIVATE src)
+               src/io/LifExport.cpp src/io/ImageJTiff.cpp src/io/Metadata.cpp)
+target_include_directories(iotest PRIVATE src tests)
 target_link_libraries(iotest PRIVATE lmcore Qt6::Core Qt6::Gui)
 add_test(NAME iotest COMMAND iotest)
 
@@ -258,6 +262,12 @@ add_test(NAME iotest COMMAND iotest)
 add_executable(ihctool tools/ihctool/ihctool.cpp src/io/ImageIO.cpp src/io/LifFile.cpp src/io/Metadata.cpp)
 target_include_directories(ihctool PRIVATE src)
 target_link_libraries(ihctool PRIVATE lmcore Qt6::Core Qt6::Gui)
+
+# command-line look into a Leica .lif, and its export
+add_executable(lifinfo tools/lifinfo/lifinfo.cpp src/io/ImageIO.cpp src/io/LifFile.cpp src/io/LifExport.cpp
+               src/io/ImageJTiff.cpp src/io/Metadata.cpp)
+target_include_directories(lifinfo PRIVATE src)
+target_link_libraries(lifinfo PRIVATE lmcore Qt6::Core Qt6::Gui)
 endif()
 
 # ---------------------------------------------------------------- tools & tests

@@ -1,5 +1,38 @@
 # DM Imaging release notes
 
+## 1.2.0 (2026-10-03)
+
+- **A full viewer for Leica .lif files.** A `.lif` now opens in a window of its own
+  (*File → Open Leica .lif…*, Ctrl+L; double-click in Browse; drag and drop) instead
+  of a list to pick one image from, and reads every kind of image LAS X saves, not
+  only 2D camera images:
+  - the file's tree of folders and images, with thumbnails and a filter;
+  - every channel in its colour (it used to open a fluorescence image as its first
+    channel only), each switched on or off, recoloured, with its own contrast;
+    8-, 12-, 16-bit and floating-point data;
+  - z stacks, time series, tile scans and spectral scans, a slider each with
+    playback, a maximum projection along z, and tiles merged at their stage positions;
+  - the value of every channel under the cursor, the settings the image was recorded
+    with (objective, NA, exposure, zoom, pinhole, detectors, date) and the complete
+    LAS X metadata;
+  - *Open in Process* sends the image as shown, with its calibration, for measuring
+    and IHC quantification.
+- **Export from a .lif**: the image shown, the selected images or the whole file,
+  either as the original data (ImageJ hyperstack TIFF: every channel, z slice and time
+  point, unscaled, calibrated, with the channel colours, for Fiji, QuPath, napari or
+  Python) or as pictures as shown (JPEG, PNG or TIFF, with a scale bar; the plane
+  shown, every plane, or a projection), with a CSV summary and the LAS X metadata.
+  The same export runs on the command line: `lifinfo file.lif --export DIR`.
+- Checked against an independent reader on public confocal files (4-channel z stacks,
+  FRAP time series, FRET, a tile scan with z and time) and on this microscope's files.
+
+**Fixes**
+- The pixel size of a .lif image is `Length / (pixels − 1)`, as LAS X defines it; it
+  was divided by the number of pixels, 0.03 % too small at 3840 pixels (0.29292
+  instead of 0.29300 µm at 10×). Files written by DM Imaging use the same rule now.
+- Planar or z-interleaved channels are read where the file says they are, whatever
+  order LAS X stored them in.
+
 ## 1.1.3 (2026-09-28)
 
 - **Projects.** The captured images are listed in the order they were taken, oldest
