@@ -737,8 +737,9 @@ QString LifFileIndex::elementXml(const LifEntry &e) const
     if (e.xmlStart < 0 || e.xmlLength <= 0 || e.xmlStart + e.xmlLength > xml.size())
         return QString();
     // re-indented, so the attributes can be read
+    const QString element = xml.mid(e.xmlStart, e.xmlLength);
     QString pretty;
-    QXmlStreamReader r(QStringView(xml).mid(e.xmlStart, e.xmlLength));
+    QXmlStreamReader r(element); // (Qt 6.4 has no QStringView constructor)
     QXmlStreamWriter w(&pretty);
     w.setAutoFormatting(true);
     w.setAutoFormattingIndent(2);
@@ -749,7 +750,7 @@ QString LifFileIndex::elementXml(const LifEntry &e) const
         if (!r.isStartDocument() && !r.isEndDocument())
             w.writeCurrentToken(r);
     }
-    return r.hasError() ? QString(QStringView(xml).mid(e.xmlStart, e.xmlLength)) : pretty;
+    return r.hasError() ? element : pretty;
 }
 
 namespace {
