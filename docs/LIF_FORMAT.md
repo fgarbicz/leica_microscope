@@ -1,9 +1,9 @@
 # The Leica .lif container
 
 What LAS X saves an experiment into: one file holding many images with their
-names and calibration. Read back from the files LAS X writes on this
-microscope, and checked against a 442 MB file of 16 pixel-shift captures
-(`BL ST 1 SPEM id.lif`). Implemented in `src/io/LifFile.cpp`.
+names, calibration, channels, z stacks, time series and tile scans. Read back from
+the files LAS X writes on this microscope and from confocal files of other Leica
+systems. Implemented in `src/io/LifFile.cpp`; exporting in `src/io/LifExport.cpp`.
 
 ## Layout
 
@@ -62,26 +62,92 @@ child is an image; its `Memory` element names the block holding the pixels:
   they differ by up to 106.
 - **Dimensions.** `DimID` 1 is x and 2 is y (the sidecar XML next to an exported
   PNG says `X`/`Y` instead). `BytesInc` on x is the bytes per pixel and on y the
-  row stride. `Length` is the physical size of the whole axis **in metres**, so
-  the pixel size is `Length / NumberOfElements`.
-- **Resolution** is bits per sample: 8, or 16 for a deep image.
+  row stride. `Length` is the distance **in metres** from the centre of the first
+  pixel to the centre of the last, so the pixel size is
+  `Length / (NumberOfElements − 1)` (see *Calibration*).
+- **More dimensions.** 3 is z, 4 is time (`Length` in seconds), 5 the emission
+  wavelength of a spectral scan, 9 the excitation wavelength, 10 the tiles of a
+  tile scan (the "mosaic"); 6–8 are rarer. Each has its own `BytesInc`.
+- **Resolution** is significant bits per sample: 8, 12 or 16 (12 is stored in two
+  bytes); `DataType="1"` is 32-bit floating point.
+
+## Where a sample is
+
+Every channel and every dimension has a byte increment, and a sample lies at
+
+```
+channel.BytesInc + x·inc(x) + y·inc(y) + z·inc(z) + t·inc(t) + tile·inc(tile) + …
+```
+
+from the start of the image's block. That one rule covers every layout LAS X uses,
+and the order of the increments differs between files: the camera image above
+interleaves its channels within a pixel; a confocal z stack may store each channel
+as a plane with the channels of one slice together (`Project007.lif`: channel 262144,
+z 1048576 bytes apart) or each channel as a whole stack (`Cell 1`: z 262144, channel
+3145728 apart). A reader that assumes one order reads the other kind in the wrong
+order: Python's `readlif` 0.6.5 does, so `tools/lifcheck/check.py` checks this reader
+against numpy reading straight from the increments instead.
+
+## Tile scans
+
+A tile scan has a dimension 10 and an attachment listing the tiles in that order:
+
+```xml
+<Attachment Name="TileScanInfo" FlipX="0" FlipY="0" SwapXY="0">
+  <Tile FieldX="0" FieldY="0" PosX="0.0758103931" PosY="0.0388879510"/>
+  <Tile FieldX="1" FieldY="0" PosX="0.0760318216" PosY="0.0388879510"/>
+  …
+```
+
+`PosX`/`PosY` are the stage position in metres; divided by the pixel size they place
+each tile, which is how the viewer merges them (falling back to the `FieldX`/`FieldY`
+grid). LAS X's own merge also re-aligns the tiles on their content (by up to about
+20 pixels in `Project007.lif`); that merged image is saved as an image of its own.
+
+## Settings and time
+
+Each image's `HardwareSetting` attachment holds an `ATLCameraSettingDefinition` or
+`ATLConfocalSettingDefinition` with the objective (`ObjectiveName`,
+`NumericalAperture`, `Magnification`, `Immersion`), the microscope, and for a camera
+the exposure (`WideFieldChannelInfo ExposureTime`, seconds) and for a confocal the
+zoom, pinhole (metres, and Airy units), scan speed and the active detectors.
+`TimeStampList` holds the time of each plane as hexadecimal Windows FILETIMEs
+(100 ns since 1601) separated by spaces; older files use `TimeStamp` elements with
+`HighInteger`/`LowInteger`.
 
 ## Calibration
 
 The 16-shot pixel-shift files this microscope produces give, for the objectives
 in use:
 
-| Objective | Pixels | Length | µm/pixel |
+| Objective | Pixels | Length | µm/pixel = Length / (n − 1) |
 |---|---|---|---|
-| 10x | 3840 | 1124.83 µm | 0.29292 |
-| 40x | 3840 | 281.21 µm | 0.07323 |
+| 10x | 3840 | 1124.83 µm | 0.29300 |
+| 40x | 3840 | 281.21 µm | 0.07325 |
 
-Both are `5.86 µm / (objective × 1.0)` halved for the doubled pixel count,
-i.e. the sensor pixel pitch of the IMX174 with a **1.0× camera adapter**.
+Both are `5.86 µm / (objective × 1.0)` halved for the doubled pixel count (0.29300
+and 0.07325), i.e. the sensor pixel pitch of the IMX174 with a **1.0× camera
+adapter**. Dividing by n instead gives 0.29292 and 0.07323, 0.03 % off: `Length`
+spans n − 1 pixel steps. (Before 1.2.0 this program divided by n, and wrote `Length`
+the same way; the difference is far below anything a measurement can see.)
 
-## What this reader does not do
+## Checking the reader
 
-Only 2D images are read: the camera on this microscope produces nothing else.
-Files with z stacks, time series, tiled scans or more than three channels list
-their images correctly but only the first plane of each is read. Writing always
-produces 2D, 8-bit BGR images, which is what LAS X writes for camera images.
+`tools/lifcheck/check.py` (with its conda environment, `environment.yml`) reads every
+image of the files given to it with `lifinfo --raw` and compares each plane with an
+independent numpy reader, then exports each file as ImageJ hyperstacks and reads them
+back with `tifffile`: axes, pixels, calibration and LUTs. It passes on four public
+LAS X files from the OME sample collection (confocal z stacks with 4 channels, FRAP
+time series, FRET, a tile scan with z and time) and on files from this microscope.
+
+```bash
+conda env create -f tools/lifcheck/environment.yml
+conda run -n dmi-lifcheck python tools/lifcheck/check.py build/release/bin/lifinfo file.lif ...
+```
+
+## What is not read
+
+`.xlef`/`.lof` projects (LAS X's newer format with one file per image) are not read,
+nor are the frame-by-frame acquisition attachments beyond the first time stamp.
+Writing always produces 2D, 8- or 16-bit BGR images, which is what LAS X writes for
+camera images.

@@ -6,6 +6,7 @@
 
 #include "app/AppSettings.h"
 #include "io/ImageIO.h"
+#include "io/LifFile.h"
 #include "ui/BatchExportDialog.h"
 #include "ui/BatchIhcDialog.h"
 #include "ui/CompareWindow.h"
@@ -43,7 +44,7 @@
 namespace lm {
 
 namespace {
-const QStringList kImageFilters = {QStringLiteral("*.lif"), // a Leica session, opened image by image
+const QStringList kImageFilters = {QStringLiteral("*.lif"), // a Leica session, browsed in the .lif viewer
                                   QStringLiteral("*.tif"), QStringLiteral("*.tiff"), QStringLiteral("*.png"),
                                    QStringLiteral("*.jpg"), QStringLiteral("*.jpeg"), QStringLiteral("*.bmp")};
 
@@ -456,6 +457,14 @@ void BrowsePage::showPreview(const QString &path)
         const QFileInfo fi(path);
         pv.rows.append({tr("File"), fi.fileName()});
         pv.rows.append({tr("Size on disk"), QStringLiteral("%1 MB").arg(fi.size() / 1048576.0, 0, 'f', 2)});
+        if (fi.suffix().compare(QLatin1String("lif"), Qt::CaseInsensitive) == 0) {
+            // a whole session: the preview is its first image
+            LifFileIndex index;
+            if (readLif(path, index, nullptr) && !index.images.isEmpty()) {
+                pv.rows.append({tr("Leica .lif"), tr("%1 images; double-click to browse them all").arg(index.images.size())});
+                pv.rows.append({tr("Shown"), index.images.first().name + QStringLiteral(" (") + index.images.first().summary() + QLatin1Char(')')});
+            }
+        }
         if (li.hasMeta) {
             pv.rows.append(li.meta.describe());
         } else {

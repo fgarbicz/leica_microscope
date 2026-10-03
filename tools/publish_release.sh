@@ -4,7 +4,7 @@
 # (releases/latest/download/<name>): those links then always give the newest
 # version without editing the README.
 #
-#   tools/publish_release.sh v1.1.3
+#   tools/publish_release.sh v1.2.0
 #
 # Uploads whichever of these exist for the version in CMakeLists.txt (made with
 # tools/make_installer.ps1, tools/make_dmg.sh and tools/make_appimage.sh):
@@ -15,7 +15,7 @@
 # CLI (gh), signed in.
 set -euo pipefail
 
-tag="${1:?usage: tools/publish_release.sh <tag>, e.g. v1.1.3}"
+tag="${1:?usage: tools/publish_release.sh <tag>, e.g. v1.2.0}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 version="$(sed -n 's/^project(DMImaging VERSION \([0-9.]*\).*/\1/p' "$root/CMakeLists.txt")"
 [[ "$tag" == "v$version" ]] || { echo "tag $tag does not match version $version in CMakeLists.txt" >&2; exit 1; }

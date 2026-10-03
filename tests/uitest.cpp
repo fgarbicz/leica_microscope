@@ -10,9 +10,12 @@
 #include "ui/GalleryWidget.h"
 #include "ui/Icons.h"
 #include "ui/ImageView.h"
+#include "ui/LifExportDialog.h"
+#include "ui/LifViewer.h"
 #include "ui/PlatformUi.h"
 #include "ui/Theme.h"
 #include "ui/WheelGuard.h"
+#include "liftestdata.h"
 
 #include <QApplication>
 #include <QComboBox>
@@ -27,6 +30,8 @@
 #include <QWheelEvent>
 
 #include <QDir>
+#include <QElapsedTimer>
+#include <QThread>
 #include <QSettings>
 #include <QFile>
 #include <QFileInfo>
@@ -34,6 +39,7 @@
 
 #include <algorithm>
 #include <array>
+#include <functional>
 #include <cmath>
 #include <cstdio>
 #include <random>
@@ -406,6 +412,96 @@ int main(int argc, char **argv)
         const QStringList names = QDir(dir.path()).entryList(QDir::Files);
         CHECK(names.contains(QStringLiteral("LIVER 40x DAB.tif")) && names.contains(QStringLiteral("LIVER 40x DAB.tif.json"))
               && !names.contains(QStringLiteral("Liver 40x DAB.tif")));
+    }
+
+    std::printf("lif viewer: the tree, planes, channels, projection, merged tiles, what an export takes\n");
+    {
+        QTemporaryDir dir;
+        QByteArray stack, camera;
+        const QString xml = liftest::syntheticXml(stack, camera);
+        const QString path = dir.filePath(QStringLiteral("synthetic.lif"));
+        {
+            QFile f(path);
+            CHECK(f.open(QIODevice::WriteOnly) && f.write(liftest::syntheticLif(xml, stack, camera)) > 0);
+        }
+        // the viewer reads in the background: wait for what it signals
+        const auto waitFor = [](const std::function<bool()> &done) {
+            QElapsedTimer t;
+            t.start();
+            while (!done() && t.elapsed() < 15000) {
+                QApplication::processEvents(QEventLoop::AllEvents, 20);
+                QThread::msleep(2);
+            }
+            return done();
+        };
+        auto *v = new LifViewer;
+        v->resize(1200, 800);
+        v->show();
+        bool shown = false;
+        QObject::connect(v, &LifViewer::planeShown, v, [&shown] { shown = true; });
+        v->openFile(path);
+        CHECK(waitFor([&] { return v->isLoaded() && shown; }));
+        CHECK(v->fileIndex().images.size() == 2 && v->currentImage() == 0);
+        // tiles merged where the stage was, by default
+        CHECK(v->displayedImage().size() == QSize(10 + liftest::W, 1 + liftest::H));
+        // 12-bit fluorescence is stretched to what it holds, not shown dark
+        QList<LifChannelDisplay> d = v->display();
+        CHECK(d.size() == 2 && d[0].high < 4095 && d[0].high > d[0].low);
+
+        shown = false;
+        v->setMergeTiles(false);
+        CHECK(waitFor([&] { return shown; }) && v->displayedImage().size() == QSize(liftest::W, liftest::H));
+        shown = false;
+        v->setCoordinate(LifDimZ, 2);
+        CHECK(waitFor([&] { return shown; }) && v->coordinate().value(0) == 2);
+        const QImage atTop = v->displayedImage();
+        // a channel switched off leaves its colour out
+        v->setChannelVisible(1, false);
+        bool noGreen = true;
+        const QImage redOnly = v->displayedImage().convertToFormat(QImage::Format_RGB32);
+        for (int y = 0; y < redOnly.height(); ++y)
+            for (int x = 0; x < redOnly.width(); ++x)
+                noGreen = noGreen && qGreen(redOnly.pixel(x, y)) == 0;
+        CHECK(noGreen);
+        v->setChannelVisible(1, true);
+        CHECK(v->displayedImage() == atTop);
+        // the projection of a stack that brightens upwards is its top slice
+        shown = false;
+        v->setCoordinate(LifDimZ, 0);
+        CHECK(waitFor([&] { return shown; }) && v->displayedImage() != atTop);
+        shown = false;
+        v->setProjection(true);
+        CHECK(waitFor([&] { return shown; }) && v->displayedImage() == atTop);
+        // an export takes what is shown
+        const LifExportItem it = v->currentExportItem();
+        CHECK(it.image == 0 && it.request.projectDim == 0 && !it.request.mergeTiles && it.request.subsample == 1
+              && it.display.size() == 2 && it.display[0].high == v->display()[0].high);
+        {
+            LifExportDialog dlg(v->fileIndex(), it, {1}, {}, v);
+            CHECK(dlg.items().size() == 1 && dlg.items()[0].image == 0);
+            dlg.setScope(LifExportDialog::SelectedImages);
+            CHECK(dlg.items().size() == 1 && dlg.items()[0].image == 1 && dlg.items()[0].display.isEmpty());
+            dlg.setScope(LifExportDialog::AllImages);
+            CHECK(dlg.items().size() == 2 && dlg.items()[0].request.projectDim == 0);
+        }
+        // the camera image, exactly as recorded
+        shown = false;
+        v->selectImage(1);
+        CHECK(waitFor([&] { return shown; }) && v->displayedImage().size() == QSize(4, 3));
+        CHECK(v->displayedImage().pixel(0, 0) == qRgb(200, 100, 10));
+        // back to the stack: its channels as they were left
+        shown = false;
+        v->selectImage(0);
+        CHECK(waitFor([&] { return shown; }) && v->display()[0].high == d[0].high);
+        // a file that is not a .lif
+        QFile bad(dir.filePath(QStringLiteral("bad.lif")));
+        CHECK(bad.open(QIODevice::WriteOnly) && bad.write(QByteArray(100, 'x')) == 100);
+        bad.close();
+        bool failed = false;
+        QObject::connect(v, &LifViewer::fileLoaded, v, [&failed](bool ok) { failed = !ok; });
+        v->openFile(bad.fileName());
+        CHECK(waitFor([&] { return failed; }) && !v->isLoaded() && !v->lastError().isEmpty());
+        delete v;
     }
 
     std::printf(g_failed ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", g_failed);

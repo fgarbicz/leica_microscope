@@ -1,0 +1,13 @@
+# Independent check of the .lif reader and the ImageJ export (tools/lifcheck/check.py).
+#   conda env create -f tools/lifcheck/environment.yml
+name: dmi-lifcheck
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - numpy
+  - tifffile
+  - pillow
+  - pip
+  - pip:
+      - readlif==0.6.5

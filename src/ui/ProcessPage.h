@@ -63,6 +63,8 @@ public slots:
 signals:
     void message(const QString &text, int timeoutMs);
     void fileSaved(const QString &path);
+    // a Leica .lif was asked for: it opens in the .lif viewer, not here
+    void lifRequested(const QString &path);
 
 protected:
     void resizeEvent(QResizeEvent *e) override;

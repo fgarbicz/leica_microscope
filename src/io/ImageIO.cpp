@@ -573,7 +573,7 @@ bool loadImage(const QString &path, LoadedImage &out, QString *error)
 {
     try {
         // A Leica .lif is a container of many images; this reads the first one.
-        // The user interface offers the whole list (see ui/LifDialog.h).
+        // The user interface browses all of them (see ui/LifViewer.h).
         if (QFileInfo(path).suffix().compare(QLatin1String("lif"), Qt::CaseInsensitive) == 0) {
             QList<LifEntry> entries;
             if (readLifIndex(path, entries, error) && readLifImage(path, entries.first(), out, error))
@@ -717,14 +717,7 @@ bool loadMetadata(const QString &path, ImageMetadata &out)
         QList<LifEntry> entries;
         if (!readLifIndex(path, entries, nullptr))
             return false;
-        const LifEntry &e = entries.first();
-        out = ImageMetadata();
-        out.umPerPixel = e.umPerPixel;
-        out.width = e.width;
-        out.height = e.height;
-        out.bitDepth = e.bitsPerSample;
-        out.sample = e.name;
-        out.software = QStringLiteral("Leica LAS X (.lif)");
+        out = lifMetadata(entries.first());
         return true;
     }
 
