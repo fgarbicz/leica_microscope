@@ -33,3 +33,4 @@ dist/
 
 # a tool log from setting up Qt on Windows
 aqtinstall.log
+.DS_Store
